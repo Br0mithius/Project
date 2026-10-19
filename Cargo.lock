@@ -81,6 +81,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "windows-sys",
 ]
 
 [[package]]

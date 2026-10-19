@@ -3,7 +3,12 @@
 An interactive terminal deck builder, written in Rust, for building a **60-card, non-singleton commander deck** out of a
 **Marvel Super Heroes (MSH)** booster pool.
 
-## Quick start
+## Windows
+
+Download `dist/MSH-Deckbuilder-windows.zip`, unzip it, and double-click `msh-deckbuilder.exe`.
+See `dist/README-windows.txt` for details. To rebuild the zip from Linux: `tools/build-windows.sh`.
+
+## Quick start (from source)
 
 ```bash
 cargo run --release
