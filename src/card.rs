@@ -212,7 +212,7 @@ impl Card {
         let mut set = ColorSet(0);
         for sym in symbols_in(&self.mana_cost)
             .into_iter()
-            .chain(symbols_in(&self.oracle_text))
+            .chain(symbols_in(&strip_reminder(&self.oracle_text)))
         {
             for part in sym.split('/') {
                 if part.len() == 1 {
@@ -323,7 +323,7 @@ impl Card {
     }
 
     pub fn roles(&self) -> Vec<Role> {
-        let t = self.oracle_text.to_lowercase();
+        let t = strip_reminder(&self.oracle_text).to_lowercase();
         let has = |s: &str| t.contains(s);
         let mut roles = Vec::new();
         if has("destroy target")
@@ -412,6 +412,21 @@ impl Card {
     }
 }
 
+/// Removes reminder text, e.g. "Menace (This creature can't be blocked...)" -> "Menace ".
+pub fn strip_reminder(text: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for ch in text.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            c if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Extracts brace-delimited symbols: "{2}{U}: Draw" -> ["2", "U"].
 pub fn symbols_in(s: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -481,6 +496,12 @@ mod tests {
             "Repulsor Blast deals 5 damage to target creature.",
         );
         assert!(c.has_role(Role::Removal));
+        let cycler = card(
+            "{4}{R}",
+            "Artifact Creature — Kree Robot Villain",
+            "Reach\nBasic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
+        );
+        assert!(!cycler.has_role(Role::Ramp));
         let land = card("", "Land", "{T}: Add {R} or {G}.");
         assert_eq!(land.produces().to_string(), "RG");
         assert!(!land.has_role(Role::Ramp));

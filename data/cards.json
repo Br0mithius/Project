@@ -14,7 +14,7 @@
     "set": "MSH",
     "collector_number": "44",
     "confidence": "verified",
-    "note": "The ability text matched an exact-phrase search on mtg.wtf, Cardsrealm and other listings. The reminder text in parentheses is the standard connive and landcycling wording, which I filled in; I did not see it quoted from an MSH source. Artist: Bartek Fedyczak."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Absorbing Man",
@@ -26,13 +26,13 @@
     "toughness": "4",
     "rarity": "rare",
     "color_identity": [
-      "G",
-      "U"
+      "U",
+      "G"
     ],
     "set": "MSH",
     "collector_number": "199",
-    "confidence": "partial",
-    "note": "End of the text (from 'except') was read from the user's photo of the physical card. The text stops at 'except' because I could not get the exact wording of the exception clause; the search tool would not reproduce it. The sources agree on what it means: the copy keeps the name Absorbing Man, is a legendary 4/4 Human Villain creature, and has vigilance. An exact-phrase search on 'except his name is Absorbing Man' matched Scryfall, Gatherer and Deckbox, but so did 'except its name is', so neither wording is confirmed. Check scryfall.com/card/msh/199 for the full clause. Extended-art printing is #416. Artist: Nathaniel Himawan."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Aerial Doombot",
@@ -49,7 +49,7 @@
     "set": "MSH",
     "collector_number": "43",
     "confidence": "verified",
-    "note": "Confirmed by mtg.wtf, EchoMTG and retailers. Search results matched the phrase 'Put three +1/+1 counters on this creature' and the power-up reminder text exactly. The 'Power-up — cost:' layout follows the wording quoted for Stature, Size Shifter."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Agents of HYDRA",
@@ -65,8 +65,8 @@
     ],
     "set": "MSH",
     "collector_number": "85",
-    "confidence": "partial",
-    "note": "Rules text and type line were quoted by search results, and Miniature Market gives 1/1. The cost {1}{B} comes only from mtg.wtf's HYDRA Jumpstart deck page plus EchoMTG's mana value of 2, not from a card page. EchoMTG's power/toughness fields looked wrong (power 0, no toughness), so I used 1/1. The search budget ran out before I could confirm further."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Alien Invasion",
@@ -84,14 +84,14 @@
     "set": "MSH",
     "collector_number": "200",
     "confidence": "verified",
-    "note": "Assembled from quoted fragments on mtg.wtf. Exact-phrase searches matched 'This token attacks each combat if able' and did not match 'This creature attacks each combat if able'. Extended-art printing is #417."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ant-Man's Army",
     "mana_cost": "{2}{G}",
     "cmc": 3,
     "type_line": "Creature — Insect",
-    "oracle_text": "When this creature enters, create a Food token or a Treasure token.",
+    "oracle_text": "When this creature enters, create a Food token or a Treasure token. (A Food token is an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\" A Treasure token is an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")",
     "power": "3",
     "toughness": "2",
     "rarity": "common",
@@ -100,8 +100,8 @@
     ],
     "set": "MSH",
     "collector_number": "161",
-    "confidence": "partial",
-    "note": "Sources say it is a green creature with mana value 3, a 3/2 common, number 161, with an enters trigger that creates a Food or a Treasure. Three things are my inference and unverified: that the mana cost is {2}{G}, that the type line is exactly 'Creature — Insect' (it might have more subtypes), and the exact trigger wording."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Atlantean Cavalry",
@@ -118,14 +118,14 @@
     "set": "MSH",
     "collector_number": "45",
     "confidence": "verified",
-    "note": "The mana cost {2}{U} comes from Scryfall/Gatherer via search, and the 3/2 is confirmed by several retailers. EchoMTG shows 0/2, which looks like a data error."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Atlantis Attacks",
     "mana_cost": "{5}{U}{U}",
     "cmc": 7,
     "type_line": "Sorcery",
-    "oracle_text": "Teamwork 4\nChoose one. If this spell was cast using teamwork, choose both instead.\n• Target player creates a 6/5 blue Leviathan creature token with hexproof.\n• Return one or two target nonland permanents to their owners' hands.",
+    "oracle_text": "Teamwork 4 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.)\nChoose one. If this spell was cast using teamwork, choose both instead.\n• Target player creates a 6/5 blue Leviathan creature token with hexproof.\n• Return one or two target nonland permanents to their owners' hands.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -135,7 +135,7 @@
     "set": "MSH",
     "collector_number": "46",
     "confidence": "verified",
-    "note": "Teamwork reminder text: '(As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.)'. The phrase 'If this spell was cast using teamwork, choose both instead' was quoted in a result. The wording of the two modes comes from summaries, so 'one or two target' vs. 'up to two target' is not character-checked."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Baxter Building",
@@ -150,7 +150,7 @@
     "set": "MSH",
     "collector_number": "261",
     "confidence": "verified",
-    "note": "Text confirmed by MTG Nexus and TCGSync. Also exists as a Surge Foil and in a Secret Lair printing."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Black Panther, Vanguard",
@@ -162,20 +162,20 @@
     "toughness": "4",
     "rarity": "uncommon",
     "color_identity": [
-      "G",
-      "W"
+      "W",
+      "G"
     ],
     "set": "MSH",
     "collector_number": "207",
     "confidence": "verified",
-    "note": "Trigger text and modes were quoted from Gatherer and Scryfall summaries. The subtypes 'Human Warrior Hero' came from one search summary, so check them if they matter."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Blazing Crescendo",
     "mana_cost": "{1}{R}",
     "cmc": 2,
     "type_line": "Instant",
-    "oracle_text": "Target creature gets +3/+1 until end of turn. Exile the top card of your library. Until the end of your next turn, you may play that card.",
+    "oracle_text": "Target creature gets +3/+1 until end of turn.\nExile the top card of your library. Until the end of your next turn, you may play that card.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -185,14 +185,14 @@
     "set": "MSH",
     "collector_number": "125",
     "confidence": "verified",
-    "note": "125 is the main printing (art by Pauline Voss). 340 is a borderless scene version (art by Johan Grenier)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Borough Backup",
     "mana_cost": "{4}{W}",
     "cmc": 5,
     "type_line": "Sorcery",
-    "oracle_text": "Create two 3/2 white Hero creature tokens with vigilance.\nBasic landcycling {2}",
+    "oracle_text": "Create two 3/2 white Hero creature tokens with vigilance.\nBasic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -202,7 +202,7 @@
     "set": "MSH",
     "collector_number": "7",
     "confidence": "verified",
-    "note": "Several sources (mtg.wtf, Face to Face, EchoMTG) agree on cost, type and both abilities. The search tool returned summaries, not raw pages, so small wording details are not character-checked. Landcycling reminder text is left out."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Brave Brawler",
@@ -218,8 +218,8 @@
     ],
     "set": "MSH",
     "collector_number": "8",
-    "confidence": "partial",
-    "note": "Confirmed: lifelink, the power-up cost {4}{W} that puts two +1/+1 counters, the 2/1 stats, rarity, number and type. The reminder text follows the set's standard power-up wording. Whether the card says 'this creature' or 'Brave Brawler' is unverified. EchoMTG lists it as 0/1, which looks like a data error."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Bullseye, Death Dealer",
@@ -237,14 +237,14 @@
     "set": "MSH",
     "collector_number": "209",
     "confidence": "verified",
-    "note": "There is also a borderless printing, #325. One eBay listing calls the card white, which looks like a mistake."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Call Damage Control",
     "mana_cost": "{1}{G}",
     "cmc": 2,
     "type_line": "Sorcery",
-    "oracle_text": "Choose up to two. Return those cards from your graveyard to your hand.\n• Target artifact card\n• Target creature card\n• Target enchantment card\n• Target land card",
+    "oracle_text": "Choose up to two. Return those cards from your graveyard to your hand.\n• Target artifact card.\n• Target creature card.\n• Target enchantment card.\n• Target land card.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -253,15 +253,15 @@
     ],
     "set": "MSH",
     "collector_number": "162",
-    "confidence": "partial",
-    "note": "The cost, type, rarity and number are confirmed, and so is what the card does: choose up to two of four targets (artifact, creature, enchantment or land card) and return them from your graveyard to your hand. I saw two fragments: 'Choose up to two.' and 'Return those cards from your graveyard to your hand.' I could not see how the full text and the bullets are laid out, so that layout is my reconstruction. Check it against Scryfall msh/162 before relying on it."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Construct a Cosmic Cube",
     "mana_cost": "{2}{B}",
     "cmc": 3,
     "type_line": "Enchantment — Plan",
-    "oracle_text": "Whenever you draw your second card each turn, create a 2/1 black Villain creature token with menace and put a plan counter on this enchantment.\nWhen the seventh plan counter is put on this enchantment, sacrifice it. When you do, you control target opponent during their next turn.",
+    "oracle_text": "Whenever you draw your second card each turn, create a 2/1 black Villain creature token with menace and put a plan counter on this enchantment.\nWhen the seventh plan counter is put on this enchantment, sacrifice it. When you do, you control target opponent during their next turn. (You see all cards that player could see and make all decisions for them.)",
     "power": null,
     "toughness": null,
     "rarity": "rare",
@@ -271,7 +271,7 @@
     "set": "MSH",
     "collector_number": "90",
     "confidence": "verified",
-    "note": "Text quoted from mtg.wtf / aetherhub summaries. Several sources describe it as a 'Plan' enchantment, but none showed the literal 'Enchantment — Plan' string. Reminder text, if any, is left out. The extended-art version is #406."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Crimson Operative",
@@ -288,7 +288,7 @@
     "set": "MSH",
     "collector_number": "126",
     "confidence": "verified",
-    "note": "The {3}{R} cost and 3/2 body come from a search summary of Gatherer and Scryfall. The enters trigger matched exact-phrase searches on AetherHub, TappedOut and Untapped.gg. Prowess reminder text is the standard wording, which I filled in. Also printed as #848 in Marvel Super Heroes Commander (MSC)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Crowd of True Believers",
@@ -304,8 +304,8 @@
     ],
     "set": "MSH",
     "collector_number": "14",
-    "confidence": "partial",
-    "note": "A Scryfall snippet confirms the {W} cost. Face to Face and other listings show a {T} cost on the ability, but Miniature Market shows it without {T}. Treat the activation cost and exact wording as slightly uncertain. EchoMTG's 'power 0' is a data error; it is a 1/2."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Cruel Alliance",
@@ -322,7 +322,7 @@
     "set": "MSH",
     "collector_number": "92",
     "confidence": "verified",
-    "note": "mtg.wtf and mtgassist quoted the full text."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Decoy Ploy",
@@ -339,22 +339,22 @@
     "set": "MSH",
     "collector_number": "94",
     "confidence": "verified",
-    "note": "Cost {1}{B}, 'Choose one or both' and both modes were quoted by search results (mtg.wtf, Face to Face, Miniature Market). The em dash after 'Choose one or both' is standard formatting."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Dependable Quinjet",
     "mana_cost": "{3}",
     "cmc": 3,
     "type_line": "Artifact — Vehicle",
-    "oracle_text": "Flying\n{T}: Add one mana of any color.\nCrew 4",
+    "oracle_text": "Flying\n{T}: Add one mana of any color.\nCrew 4 (Tap any number of creatures you control with total power 4 or more: This Vehicle becomes an artifact creature until end of turn.)",
     "power": "3",
     "toughness": "3",
     "rarity": "common",
     "color_identity": [],
     "set": "MSH",
     "collector_number": "246",
-    "confidence": "partial",
-    "note": "Sources agree on the abilities (flying, tap for one mana of any color, Crew 4), the 3/3 stats and the {3} cost. The printed card may have Crew reminder text, which I did not see quoted, so it is left out."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Depower",
@@ -371,7 +371,7 @@
     "set": "MSH",
     "collector_number": "50",
     "confidence": "verified",
-    "note": "Scryfall shows the cost-reduction line word for word. The -4/-0 line and 'Draw a card' were quoted by sources. Whether the draw is a separate line or follows the -4/-0 sentence was not fully confirmed."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Doc Samson, Super Psychiatrist",
@@ -388,7 +388,7 @@
     "set": "MSH",
     "collector_number": "164",
     "confidence": "verified",
-    "note": "Text and the {4}{G} cost were confirmed through a summary of the Scryfall page. Artist: Ryan Pancoast."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ghost, Spectral Saboteur",
@@ -406,7 +406,7 @@
     "set": "MSH",
     "collector_number": "214",
     "confidence": "verified",
-    "note": "Hybrid blue/black. Scryfall, Gatherer and retailer pages agree on Flash, Intangibility and 'can't be blocked'. Pages from mtg.wtf, Miniature Market and Face to Face came up when searching the exact phrase 'Intangibility — Ghost can't be blocked'. I did not see the punctuation (em-dash) displayed on its own."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Giant Growth",
@@ -423,7 +423,7 @@
     "set": "MSH",
     "collector_number": "167",
     "confidence": "verified",
-    "note": "This is the MSH reprint, art by Andreia Ugrai. mtg.wtf, Face to Face, EchoMTG and Table Commander all give collector number 167."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Giant-Sized Flying Ant",
@@ -439,8 +439,8 @@
     ],
     "set": "MSH",
     "collector_number": "56",
-    "confidence": "partial",
-    "note": "Flash, flying, 3/2, {3}{U}, Insect and the two modes (tap or untap target nonland permanent) are confirmed by several sources. The exact wording of the trigger line was not seen word for word. Artist Zoltan Boros."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Gleaming Bastion",
@@ -458,7 +458,7 @@
     "set": "MSH",
     "collector_number": "267",
     "confidence": "verified",
-    "note": "The name read from the photo is correct; it is a real MSH land. Card text was quoted in a search summary, and it uses the same template as Training Compound. Borderless printing is #382. Artist: Arthur Yuan."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Go Nuts!",
@@ -474,8 +474,8 @@
     ],
     "set": "MSH",
     "collector_number": "168",
-    "confidence": "partial",
-    "note": "Cost {G}, rarity and number are from mtg.wtf. The fight mode and the line 'If this spell was cast using teamwork, choose both instead' matched search results. I took the Teamwork reminder text from the comprehensive rules definition and the summaries. The exact wording of the +1/+1 counter mode ('target creature' or 'target creature you control') and the mode order were not seen verbatim."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "HULK SMASH!",
@@ -492,14 +492,14 @@
     "set": "MSH",
     "collector_number": "135",
     "confidence": "verified",
-    "note": "Exact-phrase searches confirmed each clause on Aetherhub, Card Kingdom and mtg.wtf. There is also a borderless version, number 332. One Card Kingdom listing said 'with power 4 or more' in the reminder, but most sources say 'total power'."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "HYDRA Troopers",
     "mana_cost": "{2}{B}",
     "cmc": 3,
     "type_line": "Creature — Human Soldier Villain",
-    "oracle_text": "When this creature enters, create a tapped 2/1 black Villain creature token with menace if there are two or more creature cards in your graveyard. Otherwise, mill two cards.",
+    "oracle_text": "When this creature enters, create a tapped 2/1 black Villain creature token with menace if there are two or more creature cards in your graveyard. Otherwise, mill two cards. (Put the top two cards of your library into your graveyard.)",
     "power": "3",
     "toughness": "2",
     "rarity": "common",
@@ -508,15 +508,15 @@
     ],
     "set": "MSH",
     "collector_number": "101",
-    "confidence": "partial",
-    "note": "The ability text comes from Scryfall and Gatherer. The printed card has mill reminder text, but I did not see its exact wording, so it is left out."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hawkeye's Bow",
     "mana_cost": "{R}",
     "cmc": 1,
     "type_line": "Artifact — Equipment",
-    "oracle_text": "Equipped creature gets +1/+0 and has reach.\nWhenever equipped creature becomes tapped, it deals 1 damage to each opponent.\nEquip {1}",
+    "oracle_text": "Equipped creature gets +1/+0 and has reach.\nWhenever equipped creature becomes tapped, it deals 1 damage to each opponent.\nEquip {1} ({1}: Attach to target creature you control. Equip only as a sorcery.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -526,24 +526,24 @@
     "set": "MSH",
     "collector_number": "132",
     "confidence": "verified",
-    "note": "All three lines matched search results exactly (Face to Face, cardsrealm, mtg.wtf). Cost {R} is given by mtg.wtf and tcgsync, though one listing left the cost blank. The type line is inferred as a plain 'Artifact — Equipment' (not legendary). This is the card in the Pauper combo with Seeker of Skybreak."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hawkeye, Master Marksman",
     "mana_cost": "{1}{R}",
     "cmc": 2,
     "type_line": "Legendary Creature — Human Archer Hero",
-    "oracle_text": "First strike, reach\nTrick Arrows — Whenever Hawkeye becomes tapped, you may pay {1} up to three times. When you do, choose up to that many —\n• Net — Target creature can't block this turn.\n• Explosive — Hawkeye deals 2 damage to target player.\n• Boomerang — Discard a card, then draw a card.",
+    "oracle_text": "First strike, reach\nTrick Arrows — Whenever Hawkeye becomes tapped, you may pay {1} up to three times. When you do, choose up to that many.\n• Net — Target creature can't block this turn.\n• Explosive — Hawkeye deals 2 damage to target player.\n• Boomerang — Discard a card, then draw a card.",
     "power": "2",
     "toughness": "2",
-    "rarity": "uncommon",
+    "rarity": "rare",
     "color_identity": [
       "R"
     ],
     "set": "MSH",
     "collector_number": "130",
-    "confidence": "partial",
-    "note": "Cost, type, P/T, keywords, the Trick Arrows trigger and all three modes are confirmed by Scryfall/Gatherer/mtg.wtf. Three things are not confirmed. (1) Sources disagree on the exact reflexive clause: one quote says 'When you do, choose up to that many', another says 'choose that many'. (2) The exact wording of the mode effects is paraphrased; for example Explosive may read 'deals 2 damage to target player' with a different subject. (3) Rarity was not stated in any source, so 'uncommon' is a guess. The borderless version is #367."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hawkeye, Young Avenger",
@@ -560,7 +560,7 @@
     "set": "MSH",
     "collector_number": "131",
     "confidence": "verified",
-    "note": "Replacement text was quoted from the release notes and Scryfall. The search summaries gave the phrase as 'instead it deals that much damage plus X'. Artist Darius Zablockis."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Helicarrier Strike",
@@ -576,8 +576,8 @@
     ],
     "set": "MSH",
     "collector_number": "15",
-    "confidence": "partial",
-    "note": "Cost {W} is from mtg.wtf (Deckbox shows none). Deckbox and tcgsync confirm 2 damage to target attacking or blocking creature, the phrase 'If this spell was cast using teamwork', and 4 damage instead. The self-reference 'Helicarrier Strike deals' follows the Repulsor Blast template, and the Teamwork reminder text comes from the rules definition. Neither was seen verbatim for this card."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hex Magic",
@@ -594,14 +594,14 @@
     "set": "MSH",
     "collector_number": "133",
     "confidence": "verified",
-    "note": "Text from mtg.wtf (msh/133). Several sources list the Arcane subtype. It was also printed in a Secret Lair (SLD #2624, rare), but the main-set MSH printing is uncommon."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hire a Crew",
     "mana_cost": "{2}{R}",
     "cmc": 3,
     "type_line": "Instant",
-    "oracle_text": "Create a 2/1 black Villain creature token with menace, then creatures you control get +1/+0 until end of turn.",
+    "oracle_text": "Create a 2/1 black Villain creature token with menace, then creatures you control get +1/+0 until end of turn. (A creature with menace can't be blocked except by two or more creatures.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -611,14 +611,14 @@
     "set": "MSH",
     "collector_number": "134",
     "confidence": "verified",
-    "note": "Text and cost from mtg.wtf (msh/134). The card may also print menace reminder text, which is left out here. The token is black, but that does not affect color identity."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hour of Defeat",
     "mana_cost": "{3}{B}",
     "cmc": 4,
     "type_line": "Instant",
-    "oracle_text": "Destroy target creature. Surveil 1.",
+    "oracle_text": "Destroy target creature. Surveil 1. (Look at the top card of your library. You may put it into your graveyard.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -627,8 +627,8 @@
     ],
     "set": "MSH",
     "collector_number": "99",
-    "confidence": "partial",
-    "note": "'Destroy target creature. Surveil 1.' was quoted from Gatherer and Scryfall. I could not confirm whether the printed card has surveil reminder text after it, so none is included. Flavor: \"Tomorrow's sun will rise on a new king of Wakanda!\" —Erik Killmonger. Artist Jake Murray."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Hydraulic Helper",
@@ -645,7 +645,7 @@
     "set": "MSH",
     "collector_number": "57",
     "confidence": "verified",
-    "note": "Several shop listings leave the mana cost blank. A Scryfall snippet and tcgsync both give {1}{U}, and the AetherHub draft review calls it a two-mana 2/3."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "I Am Iron Man",
@@ -662,7 +662,7 @@
     "set": "MSH",
     "collector_number": "58",
     "confidence": "verified",
-    "note": "Text from Scryfall and Gatherer."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Iron Man, Master of Machines",
@@ -680,7 +680,7 @@
     "set": "MSH",
     "collector_number": "216",
     "confidence": "verified",
-    "note": "The attack-trigger wording, with the 'if' clause first, was quoted from Miniature Market and matches Scryfall and Gatherer. Artist: John Tyler Christopher."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "K'un-Lun Warrior",
@@ -696,13 +696,13 @@
     ],
     "set": "MSH",
     "collector_number": "140",
-    "confidence": "partial",
-    "note": "An exact-phrase search matched the first sentence. Sources describe the second part as 'if you do, you draw a card', but I did not see the exact words 'If you do, draw a card.' quoted. The cost, type, 2/2 stats, rarity and number are confirmed."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ka-Zar of the Savage Land",
-    "mana_cost": "{3}{G}",
-    "cmc": 4,
+    "mana_cost": "{4}{G}",
+    "cmc": 5,
     "type_line": "Legendary Creature — Human Barbarian Hero",
     "oracle_text": "You may look at the top card of your library any time.\nYou may play lands from the top of your library.\nWhen Ka-Zar enters, create Zabu, a legendary 2/2 green Cat creature token with \"Landfall — Whenever a land you control enters, put a +1/+1 counter on Zabu.\"",
     "power": "3",
@@ -713,8 +713,8 @@
     ],
     "set": "MSH",
     "collector_number": "174",
-    "confidence": "partial",
-    "note": "The {3}{G} cost comes from Card Kingdom ('4 G') and an EchoMTG type listing ('4g'). EchoMTG's own card page says CMC 5, which conflicts. The abilities are confirmed, but the self-reference wording ('When Ka-Zar enters' vs. the full name) and whether the token says 'legendary' are not confirmed word for word."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Knight of Wundagore",
@@ -731,7 +731,7 @@
     "set": "MSH",
     "collector_number": "175",
     "confidence": "verified",
-    "note": "Text and cost from mtg.wtf (msh/175). Retailer listings give the same text."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Kree Commandos",
@@ -747,15 +747,15 @@
     ],
     "set": "MSH",
     "collector_number": "19",
-    "confidence": "partial",
-    "note": "All sources agree on the cost, type, 2/1 stats and the keywords flying, vigilance and prowess. Card Kingdom shows prowess reminder text. The exact line layout (whether flying and vigilance share a line) and the reminder's exact wording are inferred."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Kree Sentinel",
     "mana_cost": "{4}{R}",
     "cmc": 5,
     "type_line": "Artifact Creature — Kree Robot Villain",
-    "oracle_text": "Reach\nBasic landcycling {2}",
+    "oracle_text": "Reach\nBasic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
     "power": "5",
     "toughness": "5",
     "rarity": "common",
@@ -765,7 +765,7 @@
     "set": "MSH",
     "collector_number": "141",
     "confidence": "verified",
-    "note": "It is a red artifact creature (cost {4}{R}). Type line confirmed by Miniature Market, cost and P/T by mtg.wtf and Card Kingdom. Also printed in the Scarlet and Thor Jumpstart decks and the Red Welcome Deck."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Machinesmith Automaton",
@@ -782,7 +782,7 @@
     "set": "MSH",
     "collector_number": "144",
     "confidence": "verified",
-    "note": "Several sources (mtg.wtf, Scryfall, Card Kingdom) agree on the text. One retailer page showed no mana cost, but the others list {2}{R}."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Madame Hydra",
@@ -800,14 +800,14 @@
     "set": "MSH",
     "collector_number": "221",
     "confidence": "verified",
-    "note": "Prints exist at MSH #221, #318 and #451 (surgefoil). #221 fits the main-set multicolor uncommon range, so the others are likely alternate treatments. This is not the Commander card 'Madame Hydra, Reanimated' (MSC #538)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Madame Masque",
     "mana_cost": "{4}{B}",
     "cmc": 5,
     "type_line": "Legendary Creature — Human Villain",
-    "oracle_text": "When Madame Masque enters, she connives.\nWhenever you draw your second card each turn, create a 2/1 black Villain creature token with menace.",
+    "oracle_text": "When Madame Masque enters, she connives. (Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1 counter on this creature.)\nWhenever you draw your second card each turn, create a 2/1 black Villain creature token with menace. (It can't be blocked except by two or more creatures.)",
     "power": "3",
     "toughness": "2",
     "rarity": "uncommon",
@@ -816,8 +816,8 @@
     ],
     "set": "MSH",
     "collector_number": "104",
-    "confidence": "partial",
-    "note": "Cost {4}{B}, 3/2, uncommon and both abilities confirmed by mtg.wtf, MTG Nexus and Card Kingdom summaries. The exact wording was paraphrased by the search tool, so 'she connives' and the token wording are reconstructed. The connive reminder text is left out."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Mister Hyde, Monster Within",
@@ -834,7 +834,7 @@
     "set": "MSH",
     "collector_number": "176",
     "confidence": "verified",
-    "note": "Scryfall and Gatherer confirmed the 'choose one' upkeep trigger and the wording of both modes. The bullet and dash formatting follows the standard modal layout."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Misty Knight, Hero for Hire",
@@ -851,14 +851,14 @@
     "set": "MSH",
     "collector_number": "145",
     "confidence": "verified",
-    "note": "Text and cost from mtg.wtf (msh/145) as summarized in search results. Untapped.gg and Archidekt decklists also show it as MSH 145."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Moonstone, Harsh Mistress",
     "mana_cost": "{3}{B}",
     "cmc": 4,
     "type_line": "Legendary Creature — Human Doctor Villain",
-    "oracle_text": "Flying\nWhenever you discard a card, you may exile that card from your graveyard. If you do, you may play that card until the end of your next turn.",
+    "oracle_text": "Flying\nWhenever you discard a card, you may exile that card from your graveyard. If you do, until the end of your next turn, you may play that card.",
     "power": "2",
     "toughness": "4",
     "rarity": "uncommon",
@@ -868,14 +868,14 @@
     "set": "MSH",
     "collector_number": "107",
     "confidence": "verified",
-    "note": "An exact-phrase search on the full trigger text matched Deckbox, mtg.wtf and Archidekt listings. A surge foil printing is #447."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Murdock's Crusade",
     "mana_cost": "{1}{W}",
     "cmc": 2,
     "type_line": "Sorcery",
-    "oracle_text": "Teamwork 4\nChoose one. If this spell was cast using teamwork, choose both instead.\n• Street Justice — Exile target creature with toughness 4 or greater.\n• Legal Justice — Exile target enchantment with mana value 4 or greater.",
+    "oracle_text": "Teamwork 4 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.)\nChoose one. If this spell was cast using teamwork, choose both instead.\n• Street Justice — Exile target creature with toughness 4 or greater.\n• Legal Justice — Exile target enchantment with mana value 4 or greater.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -884,15 +884,15 @@
     ],
     "set": "MSH",
     "collector_number": "24",
-    "confidence": "partial",
-    "note": "The modes and the 'choose both' line were seen across several sources. I left out the Teamwork reminder text because I never saw it word for word. Sources describe it as tapping creatures you control with total power 4 or more as an additional cost. One Card Kingdom listing drops the word 'total'."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Nick Fury, Agent of S.H.I.E.L.D.",
     "mana_cost": "{W}",
     "cmc": 1,
     "type_line": "Legendary Creature — Human Spy Hero",
-    "oracle_text": "Power-up — {W}{U}{B}{R}{G}: Put two +1/+1 counters on Nick Fury. Then look at the top seven cards of your library. You may put a Hero, Equipment, or Vehicle card from among them onto the battlefield. If it's a double-faced card, you may transform it. Put the rest on the bottom of your library in a random order. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)",
+    "oracle_text": "Power-up — {W}{U}{B}{R}{G}: Put two +1/+1 counters on Nick Fury, then look at the top seven cards of your library. You may put a Hero, Equipment, or Vehicle card from among them onto the battlefield. If it's a double-faced card, you may transform it. Put the rest on the bottom of your library in a random order. (Activate each power-up ability only once. Reduce the cost by his mana cost if he entered this turn.)",
     "power": "2",
     "toughness": "1",
     "rarity": "rare",
@@ -905,8 +905,8 @@
     ],
     "set": "MSH",
     "collector_number": "25",
-    "confidence": "partial",
-    "note": "Cost, type, stats, rarity, collector number and Power-up cost are confirmed (Scryfall, Card Kingdom, TCGplayer). Search results only paraphrased the ability, so the wording above is rebuilt from fragments. These parts may differ slightly from real oracle text: the 'from among them' clause, the transform sentence, and the reminder text. 'Put the rest on the bottom of your library in a random order' and 'Activate each power-up ability only once' were quoted directly. Colour identity is WUBRG because of the Power-up cost. Borderless versions are 314, 357 and 389."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ninja of the Hand",
@@ -922,15 +922,15 @@
     ],
     "set": "MSH",
     "collector_number": "108",
-    "confidence": "partial",
-    "note": "Deathtouch, the power-up cost of {4}{B}, the effects (each opponent discards, +1/+1 counter) and the power-up reminder text all come from sources. The exact wording and order of the two effects in the power-up line is rebuilt from paraphrased summaries, not seen word for word. Artist InHyuk Lee."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Panther Pounce",
     "mana_cost": "{W}",
     "cmc": 1,
     "type_line": "Instant",
-    "oracle_text": "Target player investigates. (To investigate, create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")\nTarget creature gets +1/+0 and gains flying until end of turn. Untap it.",
+    "oracle_text": "Target player investigates. Target creature gets +1/+0 and gains flying until end of turn. Untap it. (To investigate, create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -939,8 +939,8 @@
     ],
     "set": "MSH",
     "collector_number": "29",
-    "confidence": "partial",
-    "note": "Mana cost, type, rarity and number are confirmed by mtg.wtf, untapped.gg and mtgassist. Search results confirmed the phrases 'Target player investigates', '+1/+0 and gains flying until end of turn' and 'Untap it'. I put the full text together from those pieces, so the line break between the two sentences and the exact Clue reminder text ({2} cost) are my reconstruction, not a verbatim copy."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Pet Avengers",
@@ -957,14 +957,14 @@
     "set": "MSH",
     "collector_number": "178",
     "confidence": "verified",
-    "note": "Text and type line quoted from search summaries of Scryfall and Gatherer. Some retailers list the creature types in a different order. Artist Leesha Hannigan."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Photon Blast Barrage",
     "mana_cost": "{X}{R}{R}",
     "cmc": 2,
     "type_line": "Sorcery",
-    "oracle_text": "When you cast this spell, copy it X times. You may choose new targets for the copies.\nThis spell deals 1 damage to target creature.",
+    "oracle_text": "When you cast this spell, copy it X times. You may choose new targets for the copies.\nPhoton Blast Barrage deals 1 damage to target creature.",
     "power": null,
     "toughness": null,
     "rarity": "uncommon",
@@ -973,8 +973,8 @@
     ],
     "set": "MSH",
     "collector_number": "147",
-    "confidence": "partial",
-    "note": "The cost, type, uncommon rarity and number 147 are confirmed. The effect is confirmed from summaries: on cast, copy it X times with new targets allowed, and each copy deals 1 damage to target creature. The exact wording and the order of the two sentences are unverified."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Political Triumph",
@@ -991,7 +991,7 @@
     "set": "MSH",
     "collector_number": "31",
     "confidence": "verified",
-    "note": "Both abilities were quoted from mtg.wtf and confirmed on Scryfall. Art by Monztre. If the Plan subtype has reminder text on the card, I did not see it."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Powerful Broker",
@@ -1008,7 +1008,7 @@
     "set": "MSH",
     "collector_number": "179",
     "confidence": "verified",
-    "note": "Text from Scryfall and Gatherer as summarized by the search results."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Project Deathlok Soldier",
@@ -1025,7 +1025,7 @@
     "set": "MSH",
     "collector_number": "109",
     "confidence": "verified",
-    "note": "Cost {B}, the 1/2 stats, the 'Artifact Creature — Zombie Soldier' type and the graveyard ability are confirmed by mtg.wtf and retailers. No Villain or Hero subtype was reported."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Pym Particles",
@@ -1042,7 +1042,7 @@
     "set": "MSH",
     "collector_number": "70",
     "confidence": "verified",
-    "note": "mtg.wtf, Deckbox and Miniature Market all give the same text."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Pym Technologies",
@@ -1054,13 +1054,13 @@
     "toughness": null,
     "rarity": "common",
     "color_identity": [
-      "G",
-      "U"
+      "U",
+      "G"
     ],
     "set": "MSH",
     "collector_number": "271",
     "confidence": "verified",
-    "note": "Exact text matched on mtg.wtf, Face to Face and Cardsrealm."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Quake, Agent of S.H.I.E.L.D.",
@@ -1077,7 +1077,7 @@
     "set": "MSH",
     "collector_number": "32",
     "confidence": "verified",
-    "note": "Scryfall, Gatherer and Card Kingdom give only the Seismic Takedown ability. Two Archidekt pages showed extra keywords, but those pages were unreliable and the claims were not confirmed, so they are left out."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Raft Security Officer",
@@ -1094,14 +1094,14 @@
     "set": "MSH",
     "collector_number": "33",
     "confidence": "verified",
-    "note": "The name in the photo is correct: it is 'Raft' (the Marvel prison), not 'Rafi'. mtg.wtf, mtgassist and Face to Face all give the same text. EchoMTG shows power 0, but that is a data error; every other source says 1/3."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Rapid Rescue",
     "mana_cost": "{G}",
     "cmc": 1,
     "type_line": "Instant",
-    "oracle_text": "Mill two cards. You may put a permanent card from among the milled cards into your hand. You gain 2 life.",
+    "oracle_text": "Mill two cards. You may put a permanent card from among the milled cards into your hand. You gain 2 life. (To mill two cards, put the top two cards of your library into your graveyard.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -1110,15 +1110,15 @@
     ],
     "set": "MSH",
     "collector_number": "181",
-    "confidence": "partial",
-    "note": "The rules text was quoted the same way by several retailers. No source showed the cost as a symbol: I inferred {G} because sources call it a one-mana green instant. One result said a mill reminder text is printed, but I never saw it, so it is left out. The search budget ran out before I could confirm the cost."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Red Hulk",
     "mana_cost": "{4}{R}{R}",
     "cmc": 6,
     "type_line": "Legendary Creature — Gamma Berserker Villain",
-    "oracle_text": "Reach, trample\nEnrage — Whenever Red Hulk is dealt damage, put a +1/+1 counter on him. Then he deals damage equal to the number of +1/+1 counters on him to any other target.",
+    "oracle_text": "Reach, trample\nEnrage — Whenever Red Hulk is dealt damage, put a +1/+1 counter on him. When you do, he deals damage equal to the number of +1/+1 counters on him to any other target.",
     "power": "6",
     "toughness": "7",
     "rarity": "uncommon",
@@ -1128,7 +1128,7 @@
     "set": "MSH",
     "collector_number": "149",
     "confidence": "verified",
-    "note": "Confirmed by MTG Nexus and mtg.wtf. There is also a borderless/inverted-frame printing, #329 (art by Adi Granov)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Repulsor Blast",
@@ -1145,7 +1145,7 @@
     "set": "MSH",
     "collector_number": "150",
     "confidence": "verified",
-    "note": "Teamwork reminder text and the damage text were both quoted by sources (Gatherer, Scryfall, mtg.wtf). Flavor: \"Mind if I cut in?\""
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Rewrite History",
@@ -1162,7 +1162,7 @@
     "set": "MSH",
     "collector_number": "71",
     "confidence": "verified",
-    "note": "Text quoted from mtg.wtf (msh/71) and retailer summaries. Sources describe it as a 'Plan' enchantment."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Robot Domination",
@@ -1178,8 +1178,8 @@
     ],
     "set": "MSH",
     "collector_number": "111",
-    "confidence": "partial",
-    "note": "The first ability was quoted word for word. For the second ability, the effect ('sacrifice it and create three 2/2 colorless Robot Villain artifact creature tokens') was quoted. Its trigger wording ('When the third plan counter is put on this enchantment,') is rebuilt from summaries and not seen word for word."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ronin, Shadow Stalker",
@@ -1196,14 +1196,14 @@
     "set": "MSH",
     "collector_number": "112",
     "confidence": "verified",
-    "note": "One reported difference: a summary of Gatherer left out {T} on the second ability. Scryfall, Card Kingdom and Deckbox include it."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Roxxon Brutes",
     "mana_cost": "{4}{B}",
     "cmc": 5,
     "type_line": "Creature — Human Berserker Villain",
-    "oracle_text": "Menace\nWhenever you draw your second card each turn, put a +1/+1 counter on target creature.\nBasic landcycling {2}",
+    "oracle_text": "Menace (This creature can't be blocked except by two or more creatures.)\nWhenever you draw your second card each turn, put a +1/+1 counter on target creature.\nBasic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
     "power": "4",
     "toughness": "4",
     "rarity": "common",
@@ -1213,14 +1213,14 @@
     "set": "MSH",
     "collector_number": "113",
     "confidence": "verified",
-    "note": "Cost, type, P/T and all three abilities confirmed by mtg.wtf, outof.games and several retailers. My exact phrase 'put a +1/+1 counter on target creature' matched the mtg.wtf result."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Scientist Supreme of A.I.M.",
     "mana_cost": "{U}{B}",
     "cmc": 2,
     "type_line": "Legendary Creature — Human Scientist Villain",
-    "oracle_text": "Pay 2 life: Copy target activated or triggered ability you control from an artifact source. You may choose new targets for the copy. Activate only during your turn and only once each turn.",
+    "oracle_text": "Pay 2 life: Copy target activated or triggered ability you control from an artifact source. You may choose new targets for the copy. Activate only during your turn and only once each turn. (Mana abilities can't be targeted.)",
     "power": "2",
     "toughness": "2",
     "rarity": "rare",
@@ -1231,7 +1231,7 @@
     "set": "MSH",
     "collector_number": "225",
     "confidence": "verified",
-    "note": "Text from retailer listings (Miniature Market, TCGSync). Collector #225 comes from TCGSync listings. The extended-art version is #423. No mtg.wtf page turned up in the search results."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Serpent Specialist",
@@ -1247,8 +1247,8 @@
     ],
     "set": "MSH",
     "collector_number": "186",
-    "confidence": "partial",
-    "note": "Many shop listings leave the mana cost blank. Scryfall and Zulu's Games both show {G}. Deathtouch, the {3}{G} Power-up cost and the two-counter effect were confirmed. The reminder text was put together from quoted fragments, so its exact punctuation may differ."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "She-Hulk, Jade Defender",
@@ -1265,7 +1265,7 @@
     "set": "MSH",
     "collector_number": "188",
     "confidence": "verified",
-    "note": "The effect sentence matched an exact-phrase search. The 'Power-up — cost:' layout comes from the release notes, and the reminder text wording and order come from MTG Wiki (as printed on Quicksilver, Brash Blur), with 'her/she' swapped in. Artist: Tyler Walpole."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Stark Industries Executive",
@@ -1282,7 +1282,7 @@
     "set": "MSH",
     "collector_number": "153",
     "confidence": "verified",
-    "note": "Ability text, 1/2 and the type line are confirmed by mtg.wtf, untapped.gg and retailers. Cost {R} comes from tcgsync ('Cost: R') and EchoMTG (mana value 1). Two other listings left the cost field blank."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Stature, Size Shifter",
@@ -1299,7 +1299,7 @@
     "set": "MSH",
     "collector_number": "76",
     "confidence": "verified",
-    "note": "Text quoted by search results (Face to Face Games, coolstuffinc). mtg.wtf gives cost {U} and 1/1, and EchoMTG gives mana value 1. Rarity conflicts: mtg.wtf and most sources say uncommon, EchoMTG says rare. One retailer (poke-collect) lists it as #078, but mtg.wtf and Face to Face list #76."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Storm, Windrider",
@@ -1311,13 +1311,13 @@
     "toughness": "4",
     "rarity": "rare",
     "color_identity": [
-      "G",
-      "W"
+      "W",
+      "G"
     ],
     "set": "MSH",
     "collector_number": "230",
     "confidence": "verified",
-    "note": "The text was quoted in a search summary citing Gatherer, and both abilities matched exact-phrase searches. Scryfall and MTGPicker give a 4/4. It really is green-white ({1}{G}{W}{W}). One Gatherer link uses #375, which is probably the borderless printing (art by Terry Dodson)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Super Intelligence",
@@ -1334,7 +1334,7 @@
     "set": "MSH",
     "collector_number": "77",
     "confidence": "verified",
-    "note": "Cost {U}, Aura and uncommon are from mtg.wtf. The upkeep trigger wording matched search results exactly (cardsrealm, tcgsync). Flavor text is attributed to the Leader (Samuel Sterns)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Super Speed",
@@ -1350,15 +1350,15 @@
     ],
     "set": "MSH",
     "collector_number": "154",
-    "confidence": "partial",
-    "note": "Cost, type, Flash, Enchant creature and the static line ('Enchanted creature gets +1/+0 and has haste.') were confirmed by Scryfall and mtg.wtf. The enters trigger (first strike until end of turn) was only paraphrased, so its exact wording is assumed in standard modern templating."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Super Suit",
     "mana_cost": "{1}{U}",
     "cmc": 2,
     "type_line": "Artifact — Equipment",
-    "oracle_text": "Flash\nWhen this Equipment enters, attach it to target creature you control. Untap that creature.\nEquipped creature gets +1/+2.\nEquip {2}",
+    "oracle_text": "Flash\nWhen this Equipment enters, attach it to target creature you control. Untap that creature.\nEquipped creature gets +1/+2.\nEquip {2} ({2}: Attach to target creature you control. Equip only as a sorcery.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -1367,15 +1367,15 @@
     ],
     "set": "MSH",
     "collector_number": "78",
-    "confidence": "partial",
-    "note": "Confirmed from summaries: flash, attaching to a creature you control and untapping it when it enters, +1/+2, Equip {2}, plus the cost, rarity and number. The exact wording of the enters trigger, including whether it says 'target', is unverified."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Surveillance Room",
     "mana_cost": "",
     "cmc": 0,
     "type_line": "Land",
-    "oracle_text": "When this land enters, surveil 1.\n{T}: Add {C}.\n{1}, {T}: Add one mana of any color.",
+    "oracle_text": "When this land enters, surveil 1. (Look at the top card of your library. You may put it into your graveyard.)\n{T}: Add {C}.\n{1}, {T}: Add one mana of any color.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -1383,14 +1383,14 @@
     "set": "MSH",
     "collector_number": "274",
     "confidence": "verified",
-    "note": "Exact text matched on mtg.wtf and Miniature Market."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Take Up the Shield",
     "mana_cost": "{1}{W}",
     "cmc": 2,
     "type_line": "Instant",
-    "oracle_text": "Put a +1/+1 counter on target creature. It gains lifelink and indestructible until end of turn.",
+    "oracle_text": "Put a +1/+1 counter on target creature. It gains lifelink and indestructible until end of turn. (Damage and effects that say \"destroy\" don't destroy it.)",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -1400,14 +1400,14 @@
     "set": "MSH",
     "collector_number": "39",
     "confidence": "verified",
-    "note": "This is a reprint (it was also in OTJ, DMU and J25). Search results quoted the full text. There is also a borderless version, number 348."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Thanos, the Mad Titan",
     "mana_cost": "{R}{W}{B}",
     "cmc": 3,
     "type_line": "Legendary Creature — Eternal Villain",
-    "oracle_text": "Deathtouch, lifelink\nPower-up — {C}{W}{U}{B}{R}{G}: Put two +1/+1 counters on Thanos. Then choose odd or even. Destroy each other creature with mana value of the chosen quality. (0 is even.)",
+    "oracle_text": "Deathtouch, lifelink\nPower-up — {C}{W}{U}{B}{R}{G}: Put two +1/+1 counters on Thanos. Choose odd or even. Destroy each other creature with mana value of the chosen quality. (Activate each power-up ability only once. Reduce the cost by his mana cost if he entered this turn. Zero is even.)",
     "power": "4",
     "toughness": "4",
     "rarity": "mythic",
@@ -1420,8 +1420,8 @@
     ],
     "set": "MSH",
     "collector_number": "233",
-    "confidence": "partial",
-    "note": "This is a main-set card (MSH #233), not a Commander precon card. Borderless variants are #376 and #400. Retailers show the Power-up cost as 'CWUBRG', which I read as {C}{W}{U}{B}{R}{G}. That {C} could instead be generic {1}, which would make color identity still WUBRG but changes the cost. Power-up reminder (rule 702.193): activate only once, and the cost is reduced by Thanos's mana cost if he entered this turn. The wording of the destroy clause is reconstructed from summaries. Card Kingdom writes the cost as R W B; Scryfall's symbol order may differ."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "The Masters of Evil",
@@ -1437,15 +1437,15 @@
     ],
     "set": "MSH",
     "collector_number": "105",
-    "confidence": "partial",
-    "note": "Ability text and 5/6 confirmed by Miniature Market and Untapped. The {5}{B} cost comes from only one source (Playgroup.gg's spoiler list), though EchoMTG's CMC 6 agrees. The discard ability's exact name or keyword styling is not confirmed."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "The Mind Stone",
     "mana_cost": "{1}{W}",
     "cmc": 2,
     "type_line": "Legendary Artifact — Infinity Stone",
-    "oracle_text": "Indestructible\n{T}: Add {W}.\n{5}{W}, {T}: Harness The Mind Stone.\n∞ — At the beginning of your end step, exile up to one other target nonland permanent you control, then return it to the battlefield under its owner's control.",
+    "oracle_text": "Indestructible\n{T}: Add {W}.\n{5}{W}, {T}: Harness The Mind Stone. (Once harnessed, its ∞ ability is active.)\n∞ — At the beginning of your end step, exile up to one other target nonland permanent you control, then return that card to the battlefield under its owner's control.",
     "power": null,
     "toughness": null,
     "rarity": "mythic",
@@ -1454,26 +1454,26 @@
     ],
     "set": "MSH",
     "collector_number": "21",
-    "confidence": "partial",
-    "note": "Text reconstructed from search summaries (not seen word-for-word) - check the physical card. I left the oracle text empty because I could not see it verbatim, and the search budget ran out before I could check further. Summaries say it has indestructible, '{T}: Add {W}', and a harness ability costing {5}{W} plus {T}. Once harnessed, its ∞ ability exiles one other nonland permanent you control at the beginning of your end step and returns it to the battlefield. The {1}{W} cost comes from one mtg.wtf summary and should be checked. Rarity, the type line and number 21 are confirmed. Special versions are numbered 385 and 386."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Thor Odinson",
     "mana_cost": "{3}{R}{W}",
     "cmc": 5,
     "type_line": "Legendary Creature — God Warrior Hero",
-    "oracle_text": "Flying, vigilance\nProwess",
+    "oracle_text": "Flying, vigilance, prowess, prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn twice.)",
     "power": "4",
     "toughness": "4",
     "rarity": "uncommon",
     "color_identity": [
-      "R",
-      "W"
+      "W",
+      "R"
     ],
     "set": "MSH",
     "collector_number": "234",
-    "confidence": "partial",
-    "note": "Cost, type, 4/4 and the keywords flying, vigilance and prowess are confirmed (EchoMTG, mtg.wtf, Miniature Market). One search summary said prowess appears twice on the card. I couldn't confirm whether there is a second prowess or another ability, so the text may be incomplete."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Training Compound",
@@ -1491,7 +1491,7 @@
     "set": "MSH",
     "collector_number": "275",
     "confidence": "verified",
-    "note": "Two retailer listings (Face to Face Games, Card Kingdom) quote this wording, with 'or if'. Borderless printing is #384. Colour identity is R/G because of the {R}/{G} symbols in the rules text."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Trickster's Stratagem",
@@ -1507,8 +1507,8 @@
     ],
     "set": "MSH",
     "collector_number": "81",
-    "confidence": "partial",
-    "note": "The first sentence and 'Then up to one target creature you control connives' were quoted by a search summary. The connive reminder text uses the standard wording and was only paraphrased in sources. Flavor: \"Let's take you off the board, shall we?\" Artist David Palumbo."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Truck Toss",
@@ -1525,7 +1525,7 @@
     "set": "MSH",
     "collector_number": "157",
     "confidence": "verified",
-    "note": "Scryfall and Card Kingdom agree. Flavor text is a Hulk quote (not captured)."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ultron Drone",
@@ -1539,23 +1539,23 @@
     "color_identity": [],
     "set": "MSH",
     "collector_number": "253",
-    "confidence": "partial",
-    "note": "Gatherer confirms the power-up cost {6} and its effects. The reminder text follows the set's standard wording ('Activate each power-up ability only once. Reduce the cost by [his/her/its] mana cost if [he/she/it] entered this turn.'), but I did not see it quoted for this exact card, so the pronoun 'its' and the exact phrase 'on this creature' are inferred. Deckbox does not list a mana cost; mtg.wtf and TCGplayer give {3}."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Ultron, Artificial Malevolence",
     "mana_cost": "{3}",
     "cmc": 3,
     "type_line": "Legendary Artifact Creature — Robot Villain",
-    "oracle_text": "Whenever another nontoken artifact you control enters, you may pay {2}. If you do, create a token that's a copy of that artifact. If the token isn't a creature, it becomes a 2/2 Robot Villain creature in addition to its other types.",
+    "oracle_text": "Whenever another nontoken artifact you control enters, you may pay {2}. If you do, create a token that's a copy of it. If the token isn't a creature, it becomes a 2/2 Robot Villain creature in addition to its other types.",
     "power": "2",
     "toughness": "4",
     "rarity": "mythic",
     "color_identity": [],
     "set": "MSH",
     "collector_number": "252",
-    "confidence": "partial",
-    "note": "Cost {3}, 2/4, mythic and the trigger are confirmed. The last sentence was quoted in a result. The middle wording ('If you do, create a token that's a copy of that artifact') is reconstructed from summaries. Other printings: #344 and #401 (borderless)."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Undercover Skrull",
@@ -1572,14 +1572,14 @@
     "set": "MSH",
     "collector_number": "194",
     "confidence": "verified",
-    "note": "Text from Scryfall/Gatherer as summarized in search results. Cost {1}{G} is confirmed by retailers (1G, mana value 2). The order of the two abilities on the printed card was not confirmed; it may be the reverse of what is shown here."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Vision Quest",
     "mana_cost": "{X}{U}{R}",
     "cmc": 2,
     "type_line": "Sorcery",
-    "oracle_text": "Search your library and/or graveyard for an artifact creature card with mana value X or less and put it onto the battlefield with X +1/+1 counters on it. If X is 4 or greater, that creature gains haste until end of turn. If you search your library this way, shuffle.",
+    "oracle_text": "Search your library and/or graveyard for an artifact creature card with mana value X or less and put it onto the battlefield with X additional +1/+1 counters. If X is 4 or greater, it gains haste until end of turn. If you search your library this way, shuffle.",
     "power": null,
     "toughness": null,
     "rarity": "rare",
@@ -1590,7 +1590,7 @@
     "set": "MSH",
     "collector_number": "237",
     "confidence": "verified",
-    "note": "Each clause was confirmed in search results from Scryfall, mtg.wtf and Card Kingdom. The full sentence is pieced together from those quoted parts, so small wording differences (for example 'that creature') are possible. The borderless version is #309."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Vision of Love",
@@ -1607,14 +1607,14 @@
     "set": "MSH",
     "collector_number": "158",
     "confidence": "verified",
-    "note": "Text quoted exactly by coolstuffinc and other retailers. Cost '1R' is from the tcgosaurus (tcgsync) listing, though Miniature Market left the cost blank."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Visions of Villainy",
     "mana_cost": "{2}{B}",
     "cmc": 3,
     "type_line": "Instant",
-    "oracle_text": "This spell costs {1} less to cast if you control a Villain.\nYou draw two cards and you lose 2 life.",
+    "oracle_text": "This spell costs {1} less to cast if you control a Villain.\nYou draw two cards and lose 2 life.",
     "power": null,
     "toughness": null,
     "rarity": "common",
@@ -1623,8 +1623,8 @@
     ],
     "set": "MSH",
     "collector_number": "120",
-    "confidence": "partial",
-    "note": "Confirmed: the cost, the instant type, rarity, number, the {1} reduction if you control a Villain, and the effect (draw two cards, lose 2 life). The exact wording of both sentences is unverified."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "War Machine, Legacy of Iron",
@@ -1636,13 +1636,13 @@
     "toughness": "3",
     "rarity": "uncommon",
     "color_identity": [
-      "R",
-      "W"
+      "W",
+      "R"
     ],
     "set": "MSH",
     "collector_number": "238",
     "confidence": "verified",
-    "note": "Scryfall, Card Kingdom and TCGplayer agree on the text."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "We Say Thee Nay!",
@@ -1658,8 +1658,8 @@
     ],
     "set": "MSH",
     "collector_number": "82",
-    "confidence": "partial",
-    "note": "These are confirmed: the cost, the Instant — Arcane type (listed on mtg.wtf and in Scryfall's t:arcane results), Teamwork 2 with its reminder text, the first counter sentence, number 82 and common rarity. Only the wording of the sentence about the {4} teamwork tax is uncertain. Search summaries quoted it twice in the form shown, which is an odd template. The meaning is certain: the tax is {4} instead of {2} if the spell was cast using teamwork."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Web Up",
@@ -1676,7 +1676,7 @@
     "set": "MSH",
     "collector_number": "41",
     "confidence": "verified",
-    "note": "The search results quoted the text directly. The card also has a Marvel's Spider-Man printing."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "Whiplash, Vengeful Engineer",
@@ -1693,14 +1693,14 @@
     "set": "MSH",
     "collector_number": "121",
     "confidence": "verified",
-    "note": "Scryfall, mtg.wtf, MTGGoldfish and Cardsrealm give the same wording. The card text uses 'he's' and 'him'."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "White Tiger, Ava Ayala",
     "mana_cost": "{1}{G}",
     "cmc": 2,
     "type_line": "Legendary Creature — Human Hero",
-    "oracle_text": "Power-up — {5}{G}: Put a +1/+1 counter on White Tiger and create The Tiger God, a legendary 4/4 green Cat God creature token with \"This creature can't be blocked by more than one creature.\" (Activate each power-up ability only once. Reduce the cost by her mana cost if she entered this turn.)",
+    "oracle_text": "Power-up — {5}{G}: Put a +1/+1 counter on White Tiger and create The Tiger God, a legendary 4/4 green Cat God creature token with \"The Tiger God can't be blocked by more than one creature.\" (Activate each power-up ability only once. Reduce the cost by her mana cost if she entered this turn.)",
     "power": "2",
     "toughness": "2",
     "rarity": "uncommon",
@@ -1709,8 +1709,8 @@
     ],
     "set": "MSH",
     "collector_number": "196",
-    "confidence": "partial",
-    "note": "Confirmed: the cost, the 2/2 stats, the type line, uncommon rarity, number 196, the power-up cost and effect up to 'a legendary 4/4 green Cat God creature token', and the reminder text with she/her pronouns. The token's evasion is confirmed (it can't be blocked by more than one creature), but the exact quoted wording of that ability is my guess. No other abilities showed up in any source."
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   },
   {
     "name": "White Widow, Free Agent",
@@ -1727,6 +1727,6 @@
     "set": "MSH",
     "collector_number": "42",
     "confidence": "verified",
-    "note": "Text quoted from search summaries of Gatherer, Scryfall and Card Kingdom. Artist Julia Vasilyeva."
+    "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
   }
 ]

@@ -58,9 +58,17 @@ printf 'auto thanos\nsim\n' | cargo run
 
 ## Card data accuracy
 
-Card text was gathered from web sources. Cards whose text could not be confirmed word for word show a `?` after their name
-and a warning in `check`. Read the physical card if something looks off, then fix the entry in `data/cards.json`.
-Use `newcard` to type in a card that isn't in the database yet.
+Every card's rules text, cost, type and power/toughness is checked against the
+[Forge](https://github.com/Card-Forge/forge) card database, with collector numbers and rarities from its MSH set list.
+After adding new cards to `data/cards.json`, re-check them with:
+
+```bash
+python3 tools/verify_with_forge.py           # show differences
+python3 tools/verify_with_forge.py --write   # apply them
+```
+
+A `?` after a card name in the app means its text hasn't been verified (for example, a card typed in by hand with
+`newcard`).
 
 ## How the advice works
 
