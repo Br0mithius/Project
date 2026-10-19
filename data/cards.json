@@ -1,5 +1,40 @@
 [
   {
+    "name": "A.I.M. Scientists",
+    "mana_cost": "{3}{U}",
+    "cmc": 4,
+    "type_line": "Creature — Human Scientist Villain",
+    "oracle_text": "When this creature enters, it connives. (Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1 counter on this creature.)\nBasic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
+    "power": "3",
+    "toughness": "3",
+    "rarity": "common",
+    "color_identity": [
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "44",
+    "confidence": "verified",
+    "note": "The ability text matched an exact-phrase search on mtg.wtf, Cardsrealm and other listings. The reminder text in parentheses is the standard connive and landcycling wording, which I filled in; I did not see it quoted from an MSH source. Artist: Bartek Fedyczak."
+  },
+  {
+    "name": "Absorbing Man",
+    "mana_cost": "{1}{G}{U}",
+    "cmc": 3,
+    "type_line": "Legendary Creature — Human Villain",
+    "oracle_text": "Vigilance\nAt the beginning of your first main phase, until your next turn, Absorbing Man becomes a copy of up to one target artifact, non-Aura enchantment, or land, except his name is Absorbing Man, he's a legendary 4/4 Human Villain creature in addition to his other types, and he has vigilance.",
+    "power": "4",
+    "toughness": "4",
+    "rarity": "rare",
+    "color_identity": [
+      "G",
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "199",
+    "confidence": "partial",
+    "note": "End of the text (from 'except') was read from the user's photo of the physical card. The text stops at 'except' because I could not get the exact wording of the exception clause; the search tool would not reproduce it. The sources agree on what it means: the copy keeps the name Absorbing Man, is a legendary 4/4 Human Villain creature, and has vigilance. An exact-phrase search on 'except his name is Absorbing Man' matched Scryfall, Gatherer and Deckbox, but so did 'except its name is', so neither wording is confirmed. Check scryfall.com/card/msh/199 for the full clause. Extended-art printing is #416. Artist: Nathaniel Himawan."
+  },
+  {
     "name": "Aerial Doombot",
     "mana_cost": "{U}",
     "cmc": 1,
@@ -34,6 +69,24 @@
     "note": "Rules text and type line were quoted by search results, and Miniature Market gives 1/1. The cost {1}{B} comes only from mtg.wtf's HYDRA Jumpstart deck page plus EchoMTG's mana value of 2, not from a card page. EchoMTG's power/toughness fields looked wrong (power 0, no toughness), so I used 1/1. The search budget ran out before I could confirm further."
   },
   {
+    "name": "Alien Invasion",
+    "mana_cost": "{1}{R}{R}{G}",
+    "cmc": 4,
+    "type_line": "Enchantment",
+    "oracle_text": "At the beginning of combat on your turn, create a 1/1 red Alien creature token with haste and \"This token attacks each combat if able.\" Put a +1/+1 counter on it for each invasion counter on this enchantment, then put an invasion counter on this enchantment.",
+    "power": null,
+    "toughness": null,
+    "rarity": "rare",
+    "color_identity": [
+      "R",
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "200",
+    "confidence": "verified",
+    "note": "Assembled from quoted fragments on mtg.wtf. Exact-phrase searches matched 'This token attacks each combat if able' and did not match 'This creature attacks each combat if able'. Extended-art printing is #417."
+  },
+  {
     "name": "Ant-Man's Army",
     "mana_cost": "{2}{G}",
     "cmc": 3,
@@ -49,6 +102,23 @@
     "collector_number": "161",
     "confidence": "partial",
     "note": "Sources say it is a green creature with mana value 3, a 3/2 common, number 161, with an enters trigger that creates a Food or a Treasure. Three things are my inference and unverified: that the mana cost is {2}{G}, that the type line is exactly 'Creature — Insect' (it might have more subtypes), and the exact trigger wording."
+  },
+  {
+    "name": "Atlantean Cavalry",
+    "mana_cost": "{2}{U}",
+    "cmc": 3,
+    "type_line": "Creature — Merfolk Soldier",
+    "oracle_text": "Vigilance\nWhenever you draw your second card each turn, put a +1/+1 counter on this creature.",
+    "power": "3",
+    "toughness": "2",
+    "rarity": "common",
+    "color_identity": [
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "45",
+    "confidence": "verified",
+    "note": "The mana cost {2}{U} comes from Scryfall/Gatherer via search, and the 3/2 is confirmed by several retailers. EchoMTG shows 0/2, which looks like a data error."
   },
   {
     "name": "Atlantis Attacks",
@@ -99,6 +169,23 @@
     "collector_number": "207",
     "confidence": "verified",
     "note": "Trigger text and modes were quoted from Gatherer and Scryfall summaries. The subtypes 'Human Warrior Hero' came from one search summary, so check them if they matter."
+  },
+  {
+    "name": "Blazing Crescendo",
+    "mana_cost": "{1}{R}",
+    "cmc": 2,
+    "type_line": "Instant",
+    "oracle_text": "Target creature gets +3/+1 until end of turn. Exile the top card of your library. Until the end of your next turn, you may play that card.",
+    "power": null,
+    "toughness": null,
+    "rarity": "common",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "125",
+    "confidence": "verified",
+    "note": "125 is the main printing (art by Pauline Voss). 340 is a borderless scene version (art by Johan Grenier)."
   },
   {
     "name": "Borough Backup",
@@ -170,6 +257,57 @@
     "note": "The cost, type, rarity and number are confirmed, and so is what the card does: choose up to two of four targets (artifact, creature, enchantment or land card) and return them from your graveyard to your hand. I saw two fragments: 'Choose up to two.' and 'Return those cards from your graveyard to your hand.' I could not see how the full text and the bullets are laid out, so that layout is my reconstruction. Check it against Scryfall msh/162 before relying on it."
   },
   {
+    "name": "Construct a Cosmic Cube",
+    "mana_cost": "{2}{B}",
+    "cmc": 3,
+    "type_line": "Enchantment — Plan",
+    "oracle_text": "Whenever you draw your second card each turn, create a 2/1 black Villain creature token with menace and put a plan counter on this enchantment.\nWhen the seventh plan counter is put on this enchantment, sacrifice it. When you do, you control target opponent during their next turn.",
+    "power": null,
+    "toughness": null,
+    "rarity": "rare",
+    "color_identity": [
+      "B"
+    ],
+    "set": "MSH",
+    "collector_number": "90",
+    "confidence": "verified",
+    "note": "Text quoted from mtg.wtf / aetherhub summaries. Several sources describe it as a 'Plan' enchantment, but none showed the literal 'Enchantment — Plan' string. Reminder text, if any, is left out. The extended-art version is #406."
+  },
+  {
+    "name": "Crimson Operative",
+    "mana_cost": "{3}{R}",
+    "cmc": 4,
+    "type_line": "Artifact Creature — Human Villain",
+    "oracle_text": "Prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn.)\nWhen this creature enters, exile the top card of your library. Until the end of your next turn, you may play that card.",
+    "power": "3",
+    "toughness": "2",
+    "rarity": "common",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "126",
+    "confidence": "verified",
+    "note": "The {3}{R} cost and 3/2 body come from a search summary of Gatherer and Scryfall. The enters trigger matched exact-phrase searches on AetherHub, TappedOut and Untapped.gg. Prowess reminder text is the standard wording, which I filled in. Also printed as #848 in Marvel Super Heroes Commander (MSC)."
+  },
+  {
+    "name": "Crowd of True Believers",
+    "mana_cost": "{W}",
+    "cmc": 1,
+    "type_line": "Creature — Human Citizen",
+    "oracle_text": "{T}: Target creature you control that's attacking alone gets +1/+0 until end of turn. You gain 1 life.",
+    "power": "1",
+    "toughness": "2",
+    "rarity": "common",
+    "color_identity": [
+      "W"
+    ],
+    "set": "MSH",
+    "collector_number": "14",
+    "confidence": "partial",
+    "note": "A Scryfall snippet confirms the {W} cost. Face to Face and other listings show a {T} cost on the ability, but Miniature Market shows it without {T}. Treat the activation cost and exact wording as slightly uncertain. EchoMTG's 'power 0' is a data error; it is a 1/2."
+  },
+  {
     "name": "Cruel Alliance",
     "mana_cost": "{2}{B}",
     "cmc": 3,
@@ -236,6 +374,23 @@
     "note": "Scryfall shows the cost-reduction line word for word. The -4/-0 line and 'Draw a card' were quoted by sources. Whether the draw is a separate line or follows the -4/-0 sentence was not fully confirmed."
   },
   {
+    "name": "Doc Samson, Super Psychiatrist",
+    "mana_cost": "{4}{G}",
+    "cmc": 5,
+    "type_line": "Legendary Creature — Gamma Doctor Hero",
+    "oracle_text": "If you would put one or more counters on a permanent you control, put that many plus one of each of those kinds of counters on that permanent instead.\n{T}: Add X mana of any one color, where X is Doc Samson's power.",
+    "power": "3",
+    "toughness": "6",
+    "rarity": "uncommon",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "164",
+    "confidence": "verified",
+    "note": "Text and the {4}{G} cost were confirmed through a summary of the Scryfall page. Artist: Ryan Pancoast."
+  },
+  {
     "name": "Ghost, Spectral Saboteur",
     "mana_cost": "{2}{U/B}",
     "cmc": 3,
@@ -254,6 +409,23 @@
     "note": "Hybrid blue/black. Scryfall, Gatherer and retailer pages agree on Flash, Intangibility and 'can't be blocked'. Pages from mtg.wtf, Miniature Market and Face to Face came up when searching the exact phrase 'Intangibility — Ghost can't be blocked'. I did not see the punctuation (em-dash) displayed on its own."
   },
   {
+    "name": "Giant Growth",
+    "mana_cost": "{G}",
+    "cmc": 1,
+    "type_line": "Instant",
+    "oracle_text": "Target creature gets +3/+3 until end of turn.",
+    "power": null,
+    "toughness": null,
+    "rarity": "common",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "167",
+    "confidence": "verified",
+    "note": "This is the MSH reprint, art by Andreia Ugrai. mtg.wtf, Face to Face, EchoMTG and Table Commander all give collector number 167."
+  },
+  {
     "name": "Giant-Sized Flying Ant",
     "mana_cost": "{3}{U}",
     "cmc": 4,
@@ -269,6 +441,24 @@
     "collector_number": "56",
     "confidence": "partial",
     "note": "Flash, flying, 3/2, {3}{U}, Insect and the two modes (tap or untap target nonland permanent) are confirmed by several sources. The exact wording of the trigger line was not seen word for word. Artist Zoltan Boros."
+  },
+  {
+    "name": "Gleaming Bastion",
+    "mana_cost": "",
+    "cmc": 0,
+    "type_line": "Land",
+    "oracle_text": "{T}: Add {C}.\n{T}: Add {W} or {U}. Activate only if this land entered this turn or if you control a basic land.",
+    "power": null,
+    "toughness": null,
+    "rarity": "rare",
+    "color_identity": [
+      "W",
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "267",
+    "confidence": "verified",
+    "note": "The name read from the photo is correct; it is a real MSH land. Card text was quoted in a search summary, and it uses the same template as Training Compound. Borderless printing is #382. Artist: Arthur Yuan."
   },
   {
     "name": "Go Nuts!",
@@ -339,6 +529,23 @@
     "note": "All three lines matched search results exactly (Face to Face, cardsrealm, mtg.wtf). Cost {R} is given by mtg.wtf and tcgsync, though one listing left the cost blank. The type line is inferred as a plain 'Artifact — Equipment' (not legendary). This is the card in the Pauper combo with Seeker of Skybreak."
   },
   {
+    "name": "Hawkeye, Master Marksman",
+    "mana_cost": "{1}{R}",
+    "cmc": 2,
+    "type_line": "Legendary Creature — Human Archer Hero",
+    "oracle_text": "First strike, reach\nTrick Arrows — Whenever Hawkeye becomes tapped, you may pay {1} up to three times. When you do, choose up to that many —\n• Net — Target creature can't block this turn.\n• Explosive — Hawkeye deals 2 damage to target player.\n• Boomerang — Discard a card, then draw a card.",
+    "power": "2",
+    "toughness": "2",
+    "rarity": "uncommon",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "130",
+    "confidence": "partial",
+    "note": "Cost, type, P/T, keywords, the Trick Arrows trigger and all three modes are confirmed by Scryfall/Gatherer/mtg.wtf. Three things are not confirmed. (1) Sources disagree on the exact reflexive clause: one quote says 'When you do, choose up to that many', another says 'choose that many'. (2) The exact wording of the mode effects is paraphrased; for example Explosive may read 'deals 2 damage to target player' with a different subject. (3) Rarity was not stated in any source, so 'uncommon' is a guess. The borderless version is #367."
+  },
+  {
     "name": "Hawkeye, Young Avenger",
     "mana_cost": "{3}{R}",
     "cmc": 4,
@@ -373,6 +580,40 @@
     "note": "Cost {W} is from mtg.wtf (Deckbox shows none). Deckbox and tcgsync confirm 2 damage to target attacking or blocking creature, the phrase 'If this spell was cast using teamwork', and 4 damage instead. The self-reference 'Helicarrier Strike deals' follows the Repulsor Blast template, and the Teamwork reminder text comes from the rules definition. Neither was seen verbatim for this card."
   },
   {
+    "name": "Hex Magic",
+    "mana_cost": "{2}{R}",
+    "cmc": 3,
+    "type_line": "Sorcery — Arcane",
+    "oracle_text": "Exile all the cards from your hand, then draw that many cards. Until the end of your next turn, you may play cards exiled this way.",
+    "power": null,
+    "toughness": null,
+    "rarity": "uncommon",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "133",
+    "confidence": "verified",
+    "note": "Text from mtg.wtf (msh/133). Several sources list the Arcane subtype. It was also printed in a Secret Lair (SLD #2624, rare), but the main-set MSH printing is uncommon."
+  },
+  {
+    "name": "Hire a Crew",
+    "mana_cost": "{2}{R}",
+    "cmc": 3,
+    "type_line": "Instant",
+    "oracle_text": "Create a 2/1 black Villain creature token with menace, then creatures you control get +1/+0 until end of turn.",
+    "power": null,
+    "toughness": null,
+    "rarity": "common",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "134",
+    "confidence": "verified",
+    "note": "Text and cost from mtg.wtf (msh/134). The card may also print menace reminder text, which is left out here. The token is black, but that does not affect color identity."
+  },
+  {
     "name": "Hour of Defeat",
     "mana_cost": "{3}{B}",
     "cmc": 4,
@@ -390,6 +631,23 @@
     "note": "'Destroy target creature. Surveil 1.' was quoted from Gatherer and Scryfall. I could not confirm whether the printed card has surveil reminder text after it, so none is included. Flavor: \"Tomorrow's sun will rise on a new king of Wakanda!\" —Erik Killmonger. Artist Jake Murray."
   },
   {
+    "name": "Hydraulic Helper",
+    "mana_cost": "{1}{U}",
+    "cmc": 2,
+    "type_line": "Artifact Creature — Robot",
+    "oracle_text": "Defender\n{T}: Add {U}. This mana can't be spent to cast a nonartifact spell.",
+    "power": "2",
+    "toughness": "3",
+    "rarity": "common",
+    "color_identity": [
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "57",
+    "confidence": "verified",
+    "note": "Several shop listings leave the mana cost blank. A Scryfall snippet and tcgsync both give {1}{U}, and the AetherHub draft review calls it a two-mana 2/3."
+  },
+  {
     "name": "I Am Iron Man",
     "mana_cost": "{2}{U}",
     "cmc": 3,
@@ -405,6 +663,24 @@
     "collector_number": "58",
     "confidence": "verified",
     "note": "Text from Scryfall and Gatherer."
+  },
+  {
+    "name": "Iron Man, Master of Machines",
+    "mana_cost": "{2}{U}{R}",
+    "cmc": 4,
+    "type_line": "Legendary Artifact Creature — Human Hero",
+    "oracle_text": "Flying, vigilance\nIron Man gets +1/+0 for each other artifact you control.\nWhenever Iron Man attacks, if an artifact entered the battlefield under your control this turn, draw a card.",
+    "power": "1",
+    "toughness": "4",
+    "rarity": "uncommon",
+    "color_identity": [
+      "U",
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "216",
+    "confidence": "verified",
+    "note": "The attack-trigger wording, with the 'if' clause first, was quoted from Miniature Market and matches Scryfall and Gatherer. Artist: John Tyler Christopher."
   },
   {
     "name": "K'un-Lun Warrior",
@@ -439,6 +715,23 @@
     "collector_number": "174",
     "confidence": "partial",
     "note": "The {3}{G} cost comes from Card Kingdom ('4 G') and an EchoMTG type listing ('4g'). EchoMTG's own card page says CMC 5, which conflicts. The abilities are confirmed, but the self-reference wording ('When Ka-Zar enters' vs. the full name) and whether the token says 'legendary' are not confirmed word for word."
+  },
+  {
+    "name": "Knight of Wundagore",
+    "mana_cost": "{1}{G}",
+    "cmc": 2,
+    "type_line": "Creature — Cat Knight Villain",
+    "oracle_text": "Trample\nWhenever you put a +1/+1 counter on another creature, put a +1/+1 counter on this creature. This ability triggers only once each turn.",
+    "power": "2",
+    "toughness": "1",
+    "rarity": "common",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "175",
+    "confidence": "verified",
+    "note": "Text and cost from mtg.wtf (msh/175). Retailer listings give the same text."
   },
   {
     "name": "Kree Commandos",
@@ -544,6 +837,78 @@
     "note": "Scryfall and Gatherer confirmed the 'choose one' upkeep trigger and the wording of both modes. The bullet and dash formatting follows the standard modal layout."
   },
   {
+    "name": "Misty Knight, Hero for Hire",
+    "mana_cost": "{1}{R}",
+    "cmc": 2,
+    "type_line": "Legendary Creature — Human Detective Hero",
+    "oracle_text": "{2}, {T}, Discard a card: Draw a card for each card you've discarded this turn.",
+    "power": "3",
+    "toughness": "1",
+    "rarity": "uncommon",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "145",
+    "confidence": "verified",
+    "note": "Text and cost from mtg.wtf (msh/145) as summarized in search results. Untapped.gg and Archidekt decklists also show it as MSH 145."
+  },
+  {
+    "name": "Moonstone, Harsh Mistress",
+    "mana_cost": "{3}{B}",
+    "cmc": 4,
+    "type_line": "Legendary Creature — Human Doctor Villain",
+    "oracle_text": "Flying\nWhenever you discard a card, you may exile that card from your graveyard. If you do, you may play that card until the end of your next turn.",
+    "power": "2",
+    "toughness": "4",
+    "rarity": "uncommon",
+    "color_identity": [
+      "B"
+    ],
+    "set": "MSH",
+    "collector_number": "107",
+    "confidence": "verified",
+    "note": "An exact-phrase search on the full trigger text matched Deckbox, mtg.wtf and Archidekt listings. A surge foil printing is #447."
+  },
+  {
+    "name": "Murdock's Crusade",
+    "mana_cost": "{1}{W}",
+    "cmc": 2,
+    "type_line": "Sorcery",
+    "oracle_text": "Teamwork 4\nChoose one. If this spell was cast using teamwork, choose both instead.\n• Street Justice — Exile target creature with toughness 4 or greater.\n• Legal Justice — Exile target enchantment with mana value 4 or greater.",
+    "power": null,
+    "toughness": null,
+    "rarity": "common",
+    "color_identity": [
+      "W"
+    ],
+    "set": "MSH",
+    "collector_number": "24",
+    "confidence": "partial",
+    "note": "The modes and the 'choose both' line were seen across several sources. I left out the Teamwork reminder text because I never saw it word for word. Sources describe it as tapping creatures you control with total power 4 or more as an additional cost. One Card Kingdom listing drops the word 'total'."
+  },
+  {
+    "name": "Nick Fury, Agent of S.H.I.E.L.D.",
+    "mana_cost": "{W}",
+    "cmc": 1,
+    "type_line": "Legendary Creature — Human Spy Hero",
+    "oracle_text": "Power-up — {W}{U}{B}{R}{G}: Put two +1/+1 counters on Nick Fury. Then look at the top seven cards of your library. You may put a Hero, Equipment, or Vehicle card from among them onto the battlefield. If it's a double-faced card, you may transform it. Put the rest on the bottom of your library in a random order. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)",
+    "power": "2",
+    "toughness": "1",
+    "rarity": "rare",
+    "color_identity": [
+      "W",
+      "U",
+      "B",
+      "R",
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "25",
+    "confidence": "partial",
+    "note": "Cost, type, stats, rarity, collector number and Power-up cost are confirmed (Scryfall, Card Kingdom, TCGplayer). Search results only paraphrased the ability, so the wording above is rebuilt from fragments. These parts may differ slightly from real oracle text: the 'from among them' clause, the transform sentence, and the reminder text. 'Put the rest on the bottom of your library in a random order' and 'Activate each power-up ability only once' were quoted directly. Colour identity is WUBRG because of the Power-up cost. Borderless versions are 314, 357 and 389."
+  },
+  {
     "name": "Ninja of the Hand",
     "mana_cost": "{2}{B}",
     "cmc": 3,
@@ -612,6 +977,23 @@
     "note": "The cost, type, uncommon rarity and number 147 are confirmed. The effect is confirmed from summaries: on cast, copy it X times with new targets allowed, and each copy deals 1 damage to target creature. The exact wording and the order of the two sentences are unverified."
   },
   {
+    "name": "Political Triumph",
+    "mana_cost": "{W}",
+    "cmc": 1,
+    "type_line": "Enchantment — Plan",
+    "oracle_text": "Whenever a creature you control enters, scry 1 and put a plan counter on this enchantment.\nWhen the fourth plan counter is put on this enchantment, sacrifice it, draw a card, and put a +1/+1 counter on each creature you control.",
+    "power": null,
+    "toughness": null,
+    "rarity": "uncommon",
+    "color_identity": [
+      "W"
+    ],
+    "set": "MSH",
+    "collector_number": "31",
+    "confidence": "verified",
+    "note": "Both abilities were quoted from mtg.wtf and confirmed on Scryfall. Art by Monztre. If the Plan subtype has reminder text on the card, I did not see it."
+  },
+  {
     "name": "Powerful Broker",
     "mana_cost": "{2}{G}",
     "cmc": 3,
@@ -644,6 +1026,23 @@
     "collector_number": "109",
     "confidence": "verified",
     "note": "Cost {B}, the 1/2 stats, the 'Artifact Creature — Zombie Soldier' type and the graveyard ability are confirmed by mtg.wtf and retailers. No Villain or Hero subtype was reported."
+  },
+  {
+    "name": "Pym Particles",
+    "mana_cost": "{U}",
+    "cmc": 1,
+    "type_line": "Sorcery",
+    "oracle_text": "Target creature gains vigilance until end of turn and can't be blocked this turn.\nDraw a card.",
+    "power": null,
+    "toughness": null,
+    "rarity": "uncommon",
+    "color_identity": [
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "70",
+    "confidence": "verified",
+    "note": "mtg.wtf, Deckbox and Miniature Market all give the same text."
   },
   {
     "name": "Pym Technologies",
@@ -679,6 +1078,23 @@
     "collector_number": "32",
     "confidence": "verified",
     "note": "Scryfall, Gatherer and Card Kingdom give only the Seismic Takedown ability. Two Archidekt pages showed extra keywords, but those pages were unreliable and the claims were not confirmed, so they are left out."
+  },
+  {
+    "name": "Raft Security Officer",
+    "mana_cost": "{1}{W}",
+    "cmc": 2,
+    "type_line": "Creature — Human Soldier",
+    "oracle_text": "{2}, {T}: Tap target creature. This ability costs {1} less to activate if it targets a creature with power 3 or less.",
+    "power": "1",
+    "toughness": "3",
+    "rarity": "common",
+    "color_identity": [
+      "W"
+    ],
+    "set": "MSH",
+    "collector_number": "33",
+    "confidence": "verified",
+    "note": "The name in the photo is correct: it is 'Raft' (the Marvel prison), not 'Rafi'. mtg.wtf, mtgassist and Face to Face all give the same text. EchoMTG shows power 0, but that is a data error; every other source says 1/3."
   },
   {
     "name": "Rapid Rescue",
@@ -732,6 +1148,23 @@
     "note": "Teamwork reminder text and the damage text were both quoted by sources (Gatherer, Scryfall, mtg.wtf). Flavor: \"Mind if I cut in?\""
   },
   {
+    "name": "Rewrite History",
+    "mana_cost": "{2}{U}",
+    "cmc": 3,
+    "type_line": "Enchantment — Plan",
+    "oracle_text": "Whenever one or more creatures you control become tapped, draw a card, then discard a card and put a plan counter on this enchantment.\nWhen the fourth plan counter is put on this enchantment, sacrifice it. When you do, return up to two target instant and/or sorcery cards from your graveyard to your hand.",
+    "power": null,
+    "toughness": null,
+    "rarity": "uncommon",
+    "color_identity": [
+      "U"
+    ],
+    "set": "MSH",
+    "collector_number": "71",
+    "confidence": "verified",
+    "note": "Text quoted from mtg.wtf (msh/71) and retailer summaries. Sources describe it as a 'Plan' enchantment."
+  },
+  {
     "name": "Robot Domination",
     "mana_cost": "{3}{B}",
     "cmc": 4,
@@ -783,6 +1216,58 @@
     "note": "Cost, type, P/T and all three abilities confirmed by mtg.wtf, outof.games and several retailers. My exact phrase 'put a +1/+1 counter on target creature' matched the mtg.wtf result."
   },
   {
+    "name": "Scientist Supreme of A.I.M.",
+    "mana_cost": "{U}{B}",
+    "cmc": 2,
+    "type_line": "Legendary Creature — Human Scientist Villain",
+    "oracle_text": "Pay 2 life: Copy target activated or triggered ability you control from an artifact source. You may choose new targets for the copy. Activate only during your turn and only once each turn.",
+    "power": "2",
+    "toughness": "2",
+    "rarity": "rare",
+    "color_identity": [
+      "U",
+      "B"
+    ],
+    "set": "MSH",
+    "collector_number": "225",
+    "confidence": "verified",
+    "note": "Text from retailer listings (Miniature Market, TCGSync). Collector #225 comes from TCGSync listings. The extended-art version is #423. No mtg.wtf page turned up in the search results."
+  },
+  {
+    "name": "Serpent Specialist",
+    "mana_cost": "{G}",
+    "cmc": 1,
+    "type_line": "Creature — Human Snake Villain",
+    "oracle_text": "Deathtouch\nPower-up — {3}{G}: Put two +1/+1 counters on this creature. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)",
+    "power": "1",
+    "toughness": "1",
+    "rarity": "common",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "186",
+    "confidence": "partial",
+    "note": "Many shop listings leave the mana cost blank. Scryfall and Zulu's Games both show {G}. Deathtouch, the {3}{G} Power-up cost and the two-counter effect were confirmed. The reminder text was put together from quoted fragments, so its exact punctuation may differ."
+  },
+  {
+    "name": "She-Hulk, Jade Defender",
+    "mana_cost": "{3}{G}",
+    "cmc": 4,
+    "type_line": "Legendary Creature — Gamma Hero",
+    "oracle_text": "Reach, trample\nPower-up — {4}{G}{G}: Destroy up to one target artifact or enchantment. Put a +1/+1 counter on She-Hulk. (Activate each power-up ability only once. Reduce the cost by her mana cost if she entered this turn.)",
+    "power": "4",
+    "toughness": "4",
+    "rarity": "uncommon",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "188",
+    "confidence": "verified",
+    "note": "The effect sentence matched an exact-phrase search. The 'Power-up — cost:' layout comes from the release notes, and the reminder text wording and order come from MTG Wiki (as printed on Quicksilver, Brash Blur), with 'her/she' swapped in. Artist: Tyler Walpole."
+  },
+  {
     "name": "Stark Industries Executive",
     "mana_cost": "{R}",
     "cmc": 1,
@@ -817,6 +1302,24 @@
     "note": "Text quoted by search results (Face to Face Games, coolstuffinc). mtg.wtf gives cost {U} and 1/1, and EchoMTG gives mana value 1. Rarity conflicts: mtg.wtf and most sources say uncommon, EchoMTG says rare. One retailer (poke-collect) lists it as #078, but mtg.wtf and Face to Face list #76."
   },
   {
+    "name": "Storm, Windrider",
+    "mana_cost": "{1}{G}{W}{W}",
+    "cmc": 4,
+    "type_line": "Legendary Creature — Mutant Hero",
+    "oracle_text": "Flying\nCreatures with flying can't attack you or block creatures you control.\nWhenever you cast a spell that targets one or more creatures, those creatures gain flying until end of turn.",
+    "power": "4",
+    "toughness": "4",
+    "rarity": "rare",
+    "color_identity": [
+      "G",
+      "W"
+    ],
+    "set": "MSH",
+    "collector_number": "230",
+    "confidence": "verified",
+    "note": "The text was quoted in a search summary citing Gatherer, and both abilities matched exact-phrase searches. Scryfall and MTGPicker give a 4/4. It really is green-white ({1}{G}{W}{W}). One Gatherer link uses #375, which is probably the borderless printing (art by Terry Dodson)."
+  },
+  {
     "name": "Super Intelligence",
     "mana_cost": "{U}",
     "cmc": 1,
@@ -832,6 +1335,23 @@
     "collector_number": "77",
     "confidence": "verified",
     "note": "Cost {U}, Aura and uncommon are from mtg.wtf. The upkeep trigger wording matched search results exactly (cardsrealm, tcgsync). Flavor text is attributed to the Leader (Samuel Sterns)."
+  },
+  {
+    "name": "Super Speed",
+    "mana_cost": "{R}",
+    "cmc": 1,
+    "type_line": "Enchantment — Aura",
+    "oracle_text": "Flash\nEnchant creature\nWhen this Aura enters, enchanted creature gains first strike until end of turn.\nEnchanted creature gets +1/+0 and has haste.",
+    "power": null,
+    "toughness": null,
+    "rarity": "common",
+    "color_identity": [
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "154",
+    "confidence": "partial",
+    "note": "Cost, type, Flash, Enchant creature and the static line ('Enchanted creature gets +1/+0 and has haste.') were confirmed by Scryfall and mtg.wtf. The enters trigger (first strike until end of turn) was only paraphrased, so its exact wording is assumed in standard modern templating."
   },
   {
     "name": "Super Suit",
@@ -956,6 +1476,24 @@
     "note": "Cost, type, 4/4 and the keywords flying, vigilance and prowess are confirmed (EchoMTG, mtg.wtf, Miniature Market). One search summary said prowess appears twice on the card. I couldn't confirm whether there is a second prowess or another ability, so the text may be incomplete."
   },
   {
+    "name": "Training Compound",
+    "mana_cost": "",
+    "cmc": 0,
+    "type_line": "Land",
+    "oracle_text": "{T}: Add {C}.\n{T}: Add {R} or {G}. Activate only if this land entered this turn or if you control a basic land.",
+    "power": null,
+    "toughness": null,
+    "rarity": "rare",
+    "color_identity": [
+      "R",
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "275",
+    "confidence": "verified",
+    "note": "Two retailer listings (Face to Face Games, Card Kingdom) quote this wording, with 'or if'. Borderless printing is #384. Colour identity is R/G because of the {R}/{G} symbols in the rules text."
+  },
+  {
     "name": "Trickster's Stratagem",
     "mana_cost": "{3}{U}",
     "cmc": 4,
@@ -1018,6 +1556,41 @@
     "collector_number": "252",
     "confidence": "partial",
     "note": "Cost {3}, 2/4, mythic and the trigger are confirmed. The last sentence was quoted in a result. The middle wording ('If you do, create a token that's a copy of that artifact') is reconstructed from summaries. Other printings: #344 and #401 (borderless)."
+  },
+  {
+    "name": "Undercover Skrull",
+    "mana_cost": "{1}{G}",
+    "cmc": 2,
+    "type_line": "Creature — Skrull Shapeshifter Villain",
+    "oracle_text": "As long as there are two or more creature cards in your graveyard, this creature gets +2/+2 and is all creature types.\n{T}: Add one mana of any color.",
+    "power": "1",
+    "toughness": "1",
+    "rarity": "common",
+    "color_identity": [
+      "G"
+    ],
+    "set": "MSH",
+    "collector_number": "194",
+    "confidence": "verified",
+    "note": "Text from Scryfall/Gatherer as summarized in search results. Cost {1}{G} is confirmed by retailers (1G, mana value 2). The order of the two abilities on the printed card was not confirmed; it may be the reverse of what is shown here."
+  },
+  {
+    "name": "Vision Quest",
+    "mana_cost": "{X}{U}{R}",
+    "cmc": 2,
+    "type_line": "Sorcery",
+    "oracle_text": "Search your library and/or graveyard for an artifact creature card with mana value X or less and put it onto the battlefield with X +1/+1 counters on it. If X is 4 or greater, that creature gains haste until end of turn. If you search your library this way, shuffle.",
+    "power": null,
+    "toughness": null,
+    "rarity": "rare",
+    "color_identity": [
+      "U",
+      "R"
+    ],
+    "set": "MSH",
+    "collector_number": "237",
+    "confidence": "verified",
+    "note": "Each clause was confirmed in search results from Scryfall, mtg.wtf and Card Kingdom. The full sentence is pieced together from those quoted parts, so small wording differences (for example 'that creature') are possible. The borderless version is #309."
   },
   {
     "name": "Vision of Love",
@@ -1104,6 +1677,23 @@
     "collector_number": "41",
     "confidence": "verified",
     "note": "The search results quoted the text directly. The card also has a Marvel's Spider-Man printing."
+  },
+  {
+    "name": "Whiplash, Vengeful Engineer",
+    "mana_cost": "{B}",
+    "cmc": 1,
+    "type_line": "Legendary Creature — Human Artificer Villain",
+    "oracle_text": "Whiplash enters tapped.\nWhenever Whiplash attacks, if he's equipped, each opponent loses X life and you gain X life, where X is the number of Equipment attached to him.",
+    "power": "2",
+    "toughness": "2",
+    "rarity": "uncommon",
+    "color_identity": [
+      "B"
+    ],
+    "set": "MSH",
+    "collector_number": "121",
+    "confidence": "verified",
+    "note": "Scryfall, mtg.wtf, MTGGoldfish and Cardsrealm give the same wording. The card text uses 'he's' and 'him'."
   },
   {
     "name": "White Tiger, Ava Ayala",

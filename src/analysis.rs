@@ -134,8 +134,17 @@ pub fn basic_split(deck: &Deck, db: &CardDb, count: u32) -> [u32; 5] {
         .and_then(|c| db.get(c))
         .map(|c| c.pips())
         .unwrap_or([0; 5]);
+    // Only colours the deck actually casts get basics (a 5-colour commander playing
+    // three colours shouldn't get Islands); fall back to the whole identity.
+    let used = ColorSet(
+        identity
+            .indices()
+            .filter(|&i| st.pips[i] > 0 || cmd_pips[i] > 0)
+            .fold(0, |acc, i| acc | (1 << i)),
+    );
+    let identity = if used.is_empty() { identity } else { used };
     for i in identity.indices() {
-        // Every colour in identity gets a small floor so splashes still get a land.
+        // Every used colour gets a small floor so splashes still get a land.
         let nonbasic_sources = st.sources[i].saturating_sub(deck.count_of(BASIC_FOR_COLOR[i]));
         weight[i] =
             st.pips[i] as f32 + 2.0 * cmd_pips[i] as f32 + 1.0 - 0.5 * nonbasic_sources as f32;
@@ -228,6 +237,21 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         let (syn, mut reasons) = synergy(cmd, card);
         score += syn;
         why.append(&mut reasons);
+    }
+    // With a 3+ colour commander, adding a colour the deck doesn't cast yet hurts consistency.
+    if let Some(cmd) = deck.commander.as_ref().and_then(|c| db.get(c)) {
+        if cmd.identity().count() > 2 && st.nonlands >= 8 {
+            let cast = ColorSet(
+                (0..5)
+                    .filter(|&i| st.pips[i] > 0)
+                    .fold(0, |acc, i| acc | (1 << i)),
+            )
+            .union(cmd.cost_colors());
+            if !card.cost_colors().is_subset_of(cast) {
+                score -= 1.0;
+                why.push("adds a new colour".into());
+            }
+        }
     }
     // Tribal pull: cards that care about Heroes/Villains get better with more of them.
     let text = card.oracle_text.to_lowercase();
@@ -341,6 +365,17 @@ pub fn suggestions<'a>(
     coll: &Collection,
     rules: &Rules,
 ) -> Vec<Scored<'a>> {
+    suggestions_within(deck, db, coll, rules, None)
+}
+
+/// Like `suggestions`, optionally limited to cards inside `colors`.
+pub fn suggestions_within<'a>(
+    deck: &Deck,
+    db: &'a CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    colors: Option<ColorSet>,
+) -> Vec<Scored<'a>> {
     let identity = deck.identity(db);
     let mut out: Vec<Scored> = db
         .cards
@@ -351,6 +386,7 @@ pub fn suggestions<'a>(
             Some(id) if rules.enforce_color_identity => c.identity().is_subset_of(id),
             _ => true,
         })
+        .filter(|c| colors.is_none_or(|lim| c.identity().is_subset_of(lim)))
         .map(|c| {
             let (score, reasons) = score_card(c, deck, db, rules);
             Scored {
@@ -386,16 +422,24 @@ pub fn weakest<'a>(deck: &Deck, db: &'a CardDb, rules: &Rules) -> Vec<Scored<'a>
 
 /// Builds a full legal deck around `commander` from what you own. Also returns how many
 /// spell slots couldn't be filled because the pool ran out (those become extra basics).
-pub fn autobuild(commander: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> (Deck, u32) {
+/// `colors` limits which of the commander's colours to play; `None` picks the best ones.
+pub fn autobuild(
+    commander: &Card,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    colors: Option<ColorSet>,
+) -> (Deck, u32) {
     let mut deck = Deck::new(&format!("auto-{}", commander.name));
     deck.commander = Some(commander.name.clone());
     let identity = commander.identity();
+    let plays = colors.unwrap_or_else(|| best_colors(commander, db, coll, rules));
     let main = rules.main_deck_size();
 
     // Nonbasic lands that make our colours come first; they count toward the land total.
     for land in db.cards.iter().filter(|c| c.is_land() && !c.is_basic()) {
         let ok_identity = !rules.enforce_color_identity || land.identity().is_subset_of(identity);
-        let useful = land.produces().0 & identity.0 != 0;
+        let useful = land.produces().0 & plays.0 != 0;
         if ok_identity && useful {
             let n = available(land, &deck, coll, rules);
             if n > 0 && n < 99 {
@@ -412,7 +456,7 @@ pub fn autobuild(commander: &Card, db: &CardDb, coll: &Collection, rules: &Rules
         deck = base.clone();
         let spell_slots = main.saturating_sub(lands);
         while deck.main_count() - land_count(&deck, db) < spell_slots {
-            let best = suggestions(&deck, db, coll, rules);
+            let best = suggestions_within(&deck, db, coll, rules, Some(plays));
             let Some(pick) = best.first() else { break };
             let name = pick.card.name.clone();
             deck.add(&name, 1);
@@ -449,9 +493,68 @@ pub fn fill_basics(deck: &mut Deck, db: &CardDb, rules: &Rules) -> [u32; 5] {
     split
 }
 
+/// Average score of the best spells you own inside `colors` - how strong a deck those colours make.
+fn pool_quality(
+    cmd: &Card,
+    colors: ColorSet,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+) -> f32 {
+    let mut deck = Deck::new("probe");
+    deck.commander = Some(cmd.name.clone());
+    let mut scores = Vec::new();
+    for c in db
+        .cards
+        .iter()
+        .filter(|c| !c.is_land() && c.identity().is_subset_of(colors))
+    {
+        let n = available(c, &deck, coll, rules);
+        if n == 0 || n >= 99 {
+            continue;
+        }
+        let (s, _) = score_card(c, &deck, db, rules);
+        for _ in 0..n {
+            scores.push(s);
+        }
+    }
+    scores.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    let slots = rules
+        .main_deck_size()
+        .saturating_sub(recommended_lands(3.0, rules)) as usize;
+    // Empty slots count as zero, so thin colour choices are penalised.
+    scores.iter().take(slots).sum::<f32>() / slots.max(1) as f32
+}
+
+/// For commanders with 3+ colours in their identity, picks the subset of colours to actually
+/// play: always the colours in the commander's own cost, plus the best others, at most
+/// max(2, cost colours) in total. Two-colour-or-less commanders just use their identity.
+pub fn best_colors(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> ColorSet {
+    let id = cmd.identity();
+    if id.count() <= 2 {
+        return id;
+    }
+    let base = cmd.cost_colors();
+    let max = base.count().max(2);
+    let mut best = (f32::MIN, id);
+    for mask in 1u8..32 {
+        let s = ColorSet(mask);
+        if !s.is_subset_of(id) || !base.is_subset_of(s) || s.count() > max {
+            continue;
+        }
+        let q = pool_quality(cmd, s, db, coll, rules);
+        if q > best.0 {
+            best = (q, s);
+        }
+    }
+    best.1
+}
+
 pub struct CommanderOption<'a> {
     pub card: &'a Card,
     pub identity: ColorSet,
+    /// The colours a deck for this commander would actually play.
+    pub plays: ColorSet,
     pub playables: u32,
     pub removal: u32,
     pub creatures: u32,
@@ -471,19 +574,18 @@ pub fn rank_commanders<'a>(
         .filter(|c| c.can_be_commander() && coll.owned(&c.name) > 0)
     {
         let id = cmd.identity();
-        let mut deck = Deck::new("probe");
-        deck.commander = Some(cmd.name.clone());
+        let plays = best_colors(cmd, db, coll, rules);
+        let deck = Deck::new("probe");
         let mut playables = 0;
         let mut removal = 0;
         let mut creatures = 0;
-        let mut scores = Vec::new();
         for c in db
             .cards
             .iter()
-            .filter(|c| !c.is_land() && c.identity().is_subset_of(id))
+            .filter(|c| !c.is_land() && c.identity().is_subset_of(plays))
         {
             let n = available(c, &deck, coll, rules);
-            if n == 0 || n >= 99 {
+            if n == 0 || n >= 99 || c.name == cmd.name {
                 continue;
             }
             playables += n;
@@ -493,19 +595,12 @@ pub fn rank_commanders<'a>(
             if c.is_creature() {
                 creatures += n;
             }
-            let (s, _) = score_card(c, &deck, db, rules);
-            for _ in 0..n {
-                scores.push(s);
-            }
         }
-        scores.sort_by(|a, b| b.partial_cmp(a).unwrap());
-        let slots = rules
-            .main_deck_size()
-            .saturating_sub(recommended_lands(3.0, rules)) as usize;
-        let quality: f32 = scores.iter().take(slots).sum::<f32>() / slots.max(1) as f32;
+        let quality = pool_quality(cmd, plays, db, coll, rules);
         out.push(CommanderOption {
             card: cmd,
             identity: id,
+            plays,
             playables,
             removal,
             creatures,
@@ -684,7 +779,7 @@ mod tests {
         let (db, coll) = setup();
         let rules = Rules::default();
         let boss = db.get("Boss").unwrap().clone();
-        let (deck, short) = autobuild(&boss, &db, &coll, &rules);
+        let (deck, short) = autobuild(&boss, &db, &coll, &rules, None);
         assert_eq!(short, 0);
         assert!(land_count(&deck, &db) < 30, "{}", deck.to_text());
         let problems: Vec<String> = deck
@@ -712,7 +807,7 @@ mod tests {
     fn simulation_runs() {
         let (db, coll) = setup();
         let rules = Rules::default();
-        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules);
+        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules, None);
         let r = simulate(&deck, &db, 2000);
         assert_eq!(r.land_hist.iter().sum::<u32>(), 2000);
         assert!(r.keepable > 0.5);

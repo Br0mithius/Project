@@ -15,6 +15,7 @@ Then try:
 commanders            # rank every legendary creature you own as a commander
 show madame hydra     # read a card (names can be partial; TAB completes)
 auto madame hydra     # build a full legal 60-card deck instantly
+auto thanos rb        # 3+ colour commanders: choose which colours to actually play
 stats                 # curve, colours, roles, land count advice
 cut                   # weakest cards in the deck
 suggest               # best cards you could still add

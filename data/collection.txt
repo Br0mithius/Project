@@ -83,3 +83,57 @@
 1 Pym Technologies
 1 Surveillance Room
 1 Baxter Building
+
+# --- Photo group 2 (picture 3) - 40 cards ---
+
+# Lands
+1 Training Compound
+1 Surveillance Room
+1 Gleaming Bastion
+
+# Column: Alien Invasion ... Borough Backup
+1 Alien Invasion
+1 Storm, Windrider
+1 Doc Samson, Super Psychiatrist
+1 Madame Masque
+1 Borough Backup
+
+# Column: Moonstone ... Iron Man
+1 Moonstone, Harsh Mistress
+1 A.I.M. Scientists
+1 She-Hulk, Jade Defender
+1 Crimson Operative
+1 Iron Man, Master of Machines
+
+# Column: Absorbing Man ... Dependable Quinjet
+1 Absorbing Man
+1 Construct a Cosmic Cube
+1 HYDRA Troopers
+1 Atlantean Cavalry
+1 Hex Magic
+1 Hire a Crew
+1 Rewrite History
+1 Dependable Quinjet
+
+# Column: Vision Quest ... Blazing Crescendo
+1 Vision Quest
+1 Hawkeye, Master Marksman
+1 Scientist Supreme of A.I.M.
+1 Misty Knight, Hero for Hire
+1 Knight of Wundagore
+1 Undercover Skrull
+1 Raft Security Officer
+1 Murdock's Crusade
+1 Hydraulic Helper
+1 Blazing Crescendo
+
+# Column: Nick Fury ... Serpent Specialist
+1 Nick Fury, Agent of S.H.I.E.L.D.
+1 Pym Particles
+1 Super Speed
+1 Crowd of True Believers
+1 Project Deathlok Soldier
+1 Giant Growth
+1 Whiplash, Vengeful Engineer
+1 Political Triumph
+1 Serpent Specialist

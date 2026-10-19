@@ -223,6 +223,16 @@ impl Card {
         set
     }
 
+    /// Colours the mana cost itself needs (ignores colours that only appear in rules text).
+    pub fn cost_colors(&self) -> ColorSet {
+        let p = self.pips();
+        ColorSet(
+            (0..5)
+                .filter(|&i| p[i] > 0)
+                .fold(0, |acc, i| acc | (1 << i)),
+        )
+    }
+
     pub fn mana_value(&self) -> u32 {
         self.cmc.round() as u32
     }

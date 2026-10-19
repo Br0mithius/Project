@@ -532,8 +532,8 @@ impl App {
         println!(
             "{}",
             self.style.dim(&format!(
-                "  #  {:<33} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8}",
-                "commander", "id", "cost", "playables", "removal", "creatures", "quality"
+                "  #  {:<33} {:<6} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8}",
+                "commander", "id", "plays", "cost", "playables", "removal", "creatures", "quality"
             ))
         );
         for (i, o) in opts.iter().enumerate() {
@@ -543,10 +543,11 @@ impl App {
                 String::new()
             };
             println!(
-                "{:>3}  {} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8.2}{}",
+                "{:>3}  {} {:<6} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8.2}{}",
                 i + 1,
                 self.style.name_padded(o.card, 33),
                 o.identity.to_string(),
+                o.plays.to_string(),
                 compact_cost(&o.card.mana_cost),
                 o.playables,
                 o.removal,
@@ -556,7 +557,8 @@ impl App {
             );
         }
         println!(
-            "Use `show <name>` to read one, `commander <name>` to pick, or `auto <name>` for an instant build."
+            "'plays' = the colours an auto-built deck would use (for 3+ colour commanders, the strongest subset).\n\
+             Use `show <name>` to read one, `commander <name>` to pick, or `auto <name> [colours]` for an instant build."
         );
     }
 
@@ -909,11 +911,21 @@ impl App {
     }
 
     fn auto(&mut self, q: &str) {
+        // Optional trailing colours: `auto nick fury wu`.
+        let (q, colors) = match q.rsplit_once(char::is_whitespace) {
+            Some((name, last))
+                if !matches!(self.db.lookup(q), Lookup::Found(_))
+                    && last.chars().all(|c| "wubrgWUBRG".contains(c)) =>
+            {
+                (name.trim(), ColorSet::parse(last))
+            }
+            _ => (q, None),
+        };
         let cmd = if q.is_empty() {
             match self.deck.commander.as_ref().and_then(|c| self.db.get(c)) {
                 Some(c) => c.clone(),
                 None => {
-                    println!("Give a commander: `auto <name>` (see `commanders`).");
+                    println!("Give a commander: `auto <name> [colours]` (see `commanders`).");
                     return;
                 }
             }
@@ -927,8 +939,35 @@ impl App {
                 None => return,
             }
         };
+        if let Some(cols) = colors {
+            if !cols.is_subset_of(cmd.identity()) {
+                println!(
+                    "{} is outside {}'s identity ({}).",
+                    cols,
+                    cmd.name,
+                    cmd.identity()
+                );
+                return;
+            }
+        }
+        let plays = colors
+            .unwrap_or_else(|| analysis::best_colors(&cmd, &self.db, &self.coll, &self.rules));
+        if plays != cmd.identity() {
+            println!(
+                "Playing {} out of {}'s {} identity{}.",
+                plays,
+                cmd.name,
+                cmd.identity(),
+                if colors.is_none() {
+                    " (strongest colours in your pool; pick others with `auto <name> <colours>`)"
+                } else {
+                    ""
+                }
+            );
+        }
         self.snapshot();
-        let (mut deck, shortfall) = analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules);
+        let (mut deck, shortfall) =
+            analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules, Some(plays));
         deck.name = self.deck.name.clone();
         self.deck = deck;
         println!(
