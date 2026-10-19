@@ -693,7 +693,7 @@ mod tests {
             .map(|p| p.message)
             .collect();
         assert!(problems.is_empty(), "{:?}", problems);
-        assert_eq!(deck.total_count(&rules), 60);
+        assert_eq!(deck.main_count(), 60);
         assert!(deck.count_of("Off Color") == 0);
         assert!(deck.count_of("Mountain") > 0 && deck.count_of("Swamp") > 0);
         assert_eq!(deck.count_of("Forest"), 0);

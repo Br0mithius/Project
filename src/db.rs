@@ -220,7 +220,7 @@ impl Default for Rules {
     fn default() -> Self {
         Rules {
             deck_size: 60,
-            commander_counts_toward_size: true,
+            commander_counts_toward_size: false,
             max_copies: 0,
             unlimited_basics: true,
             enforce_color_identity: true,

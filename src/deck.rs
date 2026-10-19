@@ -315,7 +315,7 @@ mod tests {
         let mut d = Deck::new("t");
         d.commander = Some("Red Hulk".into());
         d.add("Web Up", 3);
-        d.add("Mountain", 56);
+        d.add("Mountain", 57);
         let msgs: Vec<String> = d
             .validate(&db, &coll(), &rules)
             .into_iter()

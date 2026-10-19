@@ -48,7 +48,7 @@ printf 'auto thanos\nsim\n' | cargo run
 | Rule | Default |
 | --- | --- |
 | `deck_size` | 60 |
-| `commander_counts_toward_size` | true (59 + commander) |
+| `commander_counts_toward_size` | false (60 cards + the commander) |
 | `max_copies` | 0 = only limited by what you own |
 | `unlimited_basics` | true |
 | `enforce_color_identity` | true |
