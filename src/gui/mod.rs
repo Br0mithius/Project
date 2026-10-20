@@ -85,6 +85,8 @@ struct Settings {
     /// Show a big, readable copy of a card while the mouse rests on it.
     hover_zoom: bool,
     zoom_width: f32,
+    /// How much each part of the commander ranking counts.
+    weights: crate::ranking::Weights,
 }
 
 impl Default for Settings {
@@ -95,6 +97,7 @@ impl Default for Settings {
             visual_deck: true,
             hover_zoom: true,
             zoom_width: 400.0,
+            weights: crate::ranking::Weights::default(),
         }
     }
 }
@@ -126,14 +129,12 @@ enum Action {
     RulesChanged,
 }
 
-struct CommanderRow {
-    name: String,
-    identity: ColorSet,
-    plays: ColorSet,
-    playables: u32,
-    removal: u32,
-    creatures: u32,
-    quality: f32,
+/// A commander ranking being built on a background thread.
+struct RankJob {
+    done: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    total: usize,
+    rx: std::sync::mpsc::Receiver<Vec<crate::ranking::Evaluation>>,
+    key: String,
 }
 
 /// Results of the slower calculations, kept until the deck, pool or rules change
@@ -182,8 +183,10 @@ pub struct GuiApp {
     sim: Option<SimResult>,
     hand: Vec<String>,
     library: Vec<String>,
-    commanders: Option<Vec<CommanderRow>>,
-    piper_pick: usize,
+    ranking: Option<Vec<crate::ranking::Evaluation>>,
+    ranking_key: String,
+    rank_job: Option<RankJob>,
+    data_job: Option<std::sync::mpsc::Receiver<String>>,
     error: Option<String>,
     /// Bumped whenever the deck, pool or rules change; invalidates `memo`.
     rev: u64,
@@ -244,10 +247,11 @@ impl GuiApp {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
         let mut error = None;
-        let db = CardDb::load(&data_dir.join("cards.json")).unwrap_or_else(|e| {
+        let mut db = CardDb::load(&data_dir.join("cards.json")).unwrap_or_else(|e| {
             error = Some(e);
             CardDb::new(Vec::new())
         });
+        db.attach_ratings(&data_dir);
         let coll = Collection::load(&data_dir.join("collection.txt")).unwrap_or_else(|e| {
             error = Some(e);
             Collection::new(data_dir.join("collection.txt"), Default::default())
@@ -303,14 +307,20 @@ impl GuiApp {
             sim: None,
             hand: Vec::new(),
             library: Vec::new(),
-            commanders: None,
-            piper_pick: 0,
+            ranking: None,
+            ranking_key: String::new(),
+            rank_job: None,
+            data_job: None,
             error,
             rev: 1,
             memo: Memo::default(),
         };
         app.deck.name = app.deck_name.clone();
         app.refresh_saved_decks();
+        // Ratings are refreshed in the background when missing or older than 3 days.
+        if app.db.ratings_date.is_empty() || crate::ratings::age_days(&app.db.ratings_date) > 3 {
+            app.start_data_download();
+        }
         if app.settings.real_images {
             // Fetch the images for everything you own up front (cached ones load from disk).
             let owned: Vec<Card> = app
@@ -624,19 +634,16 @@ impl GuiApp {
                             size,
                             if single { "singleton" } else { "no singleton" }
                         );
-                        self.commanders = None;
                         self.sim = None;
                     }
                 }
                 Action::RulesChanged => {
                     self.rules.session = 0;
                     let _ = self.rules.save(&self.data_dir.join("rules.json"));
-                    self.commanders = None;
                 }
                 Action::Own(n, delta) => match self.coll.adjust(&n, delta) {
                     Ok(now) => {
                         self.status = format!("Your pool now has {} x {}.", now, n);
-                        self.commanders = None;
                     }
                     Err(e) => self.status = e,
                 },
@@ -651,7 +658,6 @@ impl GuiApp {
                 }
                 Action::DraftTook(n) => {
                     let _ = self.coll.adjust(&n, 1);
-                    self.commanders = None;
                     if let Some(i) = self.draft_pack.iter().position(|x| *x == n) {
                         self.draft_pack.remove(i);
                     }
@@ -889,6 +895,20 @@ impl GuiApp {
                 }
                 if self.images.failures() > 0 && ui.button("Retry images that failed").clicked() {
                     self.images.retry_failed();
+                }
+                ui.separator();
+                ui.label(RichText::new("Rankings data").strong());
+                ui.label(
+                    RichText::new(if self.db.ratings.is_empty() {
+                        "No 17Lands card ratings yet.".to_string()
+                    } else {
+                        format!("17Lands ratings from {} ({} cards).", self.db.ratings_date, self.db.ratings.len())
+                    })
+                    .small(),
+                );
+                if ui.add_enabled(self.data_job.is_none(), egui::Button::new("Update ratings now")).clicked() {
+                    self.start_data_download();
+                    ui.close();
                 }
                 ui.separator();
                 if ui
@@ -1274,6 +1294,34 @@ impl GuiApp {
                 league::vp_value(&card),
                 league::claim_cost(&card)
             ));
+            if let Some(r) = self.db.rating(&card.name) {
+                if let Some(wr) = r.gih_wr {
+                    let diff = (wr - self.db.gih_mean) * 100.0;
+                    ui.label(
+                        RichText::new(format!(
+                            "17Lands: {:.1}% win rate when drawn ({:+.1} vs set average) · {} games{}",
+                            wr * 100.0,
+                            diff,
+                            r.games,
+                            r.alsa.map(|a| format!(" · last seen pick {:.1}", a)).unwrap_or_default()
+                        ))
+                        .color(if diff >= 0.0 { Color32::from_rgb(140, 220, 140) } else { Color32::from_rgb(255, 170, 120) }),
+                    );
+                }
+            }
+            if card.can_be_commander() {
+                if let Some(s) = self.db.commander_stat(&card.name) {
+                    ui.label(
+                        RichText::new(format!(
+                            "As a commander: {:.0}% win rate in {} logged games ({}; 25% is average in 4-player pods)",
+                            s.win_rate * 100.0,
+                            s.games,
+                            s.source
+                        ))
+                        .small(),
+                    );
+                }
+            }
             ui.horizontal_wrapped(|ui| {
                 let fits = self.fits(&card);
                 if ui
@@ -1754,43 +1802,209 @@ impl GuiApp {
 
     // ------------------------------------------------------------------ commanders
 
-    fn commanders_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
-        if self.commanders.is_none() {
-            let rows = analysis::rank_commanders(&self.db, &self.coll, &self.rules)
-                .into_iter()
-                .map(|o| CommanderRow {
-                    name: o.card.name.clone(),
-                    identity: o.identity,
-                    plays: o.plays,
-                    playables: o.playables,
-                    removal: o.removal,
-                    creatures: o.creatures,
-                    quality: o.quality,
-                })
-                .collect();
-            self.commanders = Some(rows);
+    /// What the commander ranking depends on; when it changes, the ranking is rebuilt.
+    fn ranking_key(&self) -> String {
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            self.coll.total(),
+            self.coll.counts.len(),
+            self.rules.deck_size,
+            self.rules.singleton,
+            self.rules.players,
+            self.db.ratings_date,
+            self.db.commander_stats.len()
+        )
+    }
+
+    /// Starts rebuilding the ranking on a background thread (about 50 deck builds).
+    fn start_ranking(&mut self) {
+        let key = self.ranking_key();
+        if self.rank_job.as_ref().is_some_and(|j| j.key == key) {
+            return;
         }
-        let rows = self.commanders.take().unwrap_or_default();
-        ui.heading("Your possible commanders");
-        ui.label(
-            "Ranked by how strong a deck your pool can build for each. \"Plays\" is the colours an auto-built deck would use. \
-             Mono-colour commanders can add a second colour with The Prismatic Piper (league rule).",
+        let (db, coll, rules, weights) = (
+            self.db.clone(),
+            self.coll.clone(),
+            self.rules.clone(),
+            self.settings.weights,
         );
-        let slots = self.rules.main_deck_size() - analysis::recommended_lands(3.0, &self.rules);
+        let total = crate::ranking::candidates(&db, &coll, &rules).len().max(1);
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let progress = done.clone();
+        std::thread::spawn(move || {
+            let evals = crate::ranking::rank_all(&db, &coll, &rules, &weights, &progress);
+            let _ = tx.send(evals);
+        });
+        self.rank_job = Some(RankJob {
+            done,
+            total,
+            rx,
+            key,
+        });
+    }
+
+    fn poll_jobs(&mut self, ctx: &egui::Context) {
+        if let Some(job) = &self.rank_job {
+            match job.rx.try_recv() {
+                Ok(evals) => {
+                    self.ranking = Some(evals);
+                    self.ranking_key = job.key.clone();
+                    self.rank_job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(150))
+                }
+                Err(_) => self.rank_job = None,
+            }
+        }
+        if let Some(rx) = &self.data_job {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    self.db.attach_ratings(&self.data_dir);
+                    self.rev += 1;
+                    self.status = msg;
+                    self.data_job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(300))
+                }
+                Err(_) => self.data_job = None,
+            }
+        }
+    }
+
+    /// Downloads 17Lands card ratings and Playgroup.gg commander stats in the background.
+    fn start_data_download(&mut self) {
+        if self.data_job.is_some() {
+            return;
+        }
+        let dir = self.data_dir.clone();
+        let names: Vec<String> = self
+            .db
+            .cards
+            .iter()
+            .filter(|c| c.can_be_commander() && self.coll.owned(&c.name) > 0)
+            .map(|c| c.name.clone())
+            .collect();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let a = match crate::ratings::fetch_17lands(&dir) {
+                Ok(n) => format!("17Lands: {} cards rated", n),
+                Err(e) => format!("17Lands unavailable ({})", e),
+            };
+            let b = match crate::ratings::fetch_playgroup(&dir, &names) {
+                Ok(n) => format!("Playgroup.gg: {} commanders", n),
+                Err(_) => "Playgroup.gg unavailable".to_string(),
+            };
+            let _ = tx.send(format!("Ratings updated - {}; {}.", a, b));
+        });
+        self.data_job = Some(rx);
+        self.status = "Downloading card ratings in the background...".into();
+    }
+
+    fn commanders_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        if self.ranking.is_none() || self.ranking_key != self.ranking_key() {
+            self.start_ranking();
+        }
+        ui.horizontal(|ui| {
+            ui.heading("Your possible commanders");
+            if let Some(job) = &self.rank_job {
+                let done = job.done.load(std::sync::atomic::Ordering::Relaxed);
+                ui.add(
+                    egui::ProgressBar::new(done as f32 / job.total as f32)
+                        .desired_width(220.0)
+                        .text(format!("building test decks {}/{}", done, job.total)),
+                );
+            }
+        });
+        ui.label(
+            "Each commander is ranked by the full deck auto-build makes from your pool, graded on six parts below. \
+             Mono-colour commanders are also tried with The Prismatic Piper adding their two most promising colours.",
+        );
+        ui.horizontal_wrapped(|ui| {
+            let data = if self.db.ratings.is_empty() {
+                RichText::new("No 17Lands data yet - card strength uses rarity.")
+                    .color(Color32::from_rgb(255, 190, 110))
+            } else {
+                RichText::new(format!(
+                    "17Lands ratings from {} ({} cards, set average {:.1}%)",
+                    self.db.ratings_date,
+                    self.db.ratings.len(),
+                    self.db.gih_mean * 100.0
+                ))
+                .color(Color32::from_rgb(150, 220, 150))
+            };
+            ui.label(data);
+            ui.label(
+                RichText::new(format!(
+                    "· Playgroup.gg records for {} commanders",
+                    self.db.commander_stats.len()
+                ))
+                .weak(),
+            );
+            if ui
+                .add_enabled(self.data_job.is_none(), egui::Button::new("Update ratings"))
+                .clicked()
+            {
+                self.start_data_download();
+            }
+        });
+        let mut weights_changed = false;
+        ui.collapsing("How much each part matters (drag to change the ranking)", |ui| {
+            let w = &mut self.settings.weights;
+            egui::Grid::new("weights").show(ui, |ui| {
+                for (label, value, help) in [
+                    ("Cards", &mut w.cards, "average strength of the deck's spells (17Lands, roles, synergy, 4-player value)"),
+                    ("Curve", &mut w.curve, "how close the mana curve is to the targets"),
+                    ("Creatures", &mut w.creatures, "creature count vs. 15-20 per 60 cards"),
+                    ("Interaction", &mut w.interaction, "removal (board wipes count extra) and card draw"),
+                    ("Mana", &mut w.mana, "simulated hands: keepable, commander cast on time"),
+                    ("Commander", &mut w.commander, "the commander card itself: 17Lands, Playgroup.gg win rate, abilities, cost"),
+                ] {
+                    ui.label(label);
+                    weights_changed |= ui.add(egui::Slider::new(value, 0.0..=3.0).step_by(0.1)).changed();
+                    ui.label(RichText::new(help).small().weak());
+                    ui.end_row();
+                }
+            });
+            if ui.button("Reset to defaults").clicked() {
+                *w = crate::ranking::Weights::default();
+                weights_changed = true;
+            }
+        });
+        if weights_changed {
+            let w = self.settings.weights;
+            if let Some(r) = &mut self.ranking {
+                crate::ranking::reweigh(r, &w);
+            }
+            self.save_settings();
+        }
+        let Some(evals) = self.ranking.clone() else {
+            ui.label("Working out the rankings...");
+            return;
+        };
+        let groups: Vec<Vec<crate::ranking::Evaluation>> =
+            crate::ranking::best_per_commander(&evals)
+                .into_iter()
+                .map(|g| g.into_iter().cloned().collect())
+                .collect();
         ScrollArea::vertical()
             .id_salt("cmd_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(14.0, 14.0);
-                    for (rank, r) in rows.iter().enumerate() {
-                        let Some(card) = self.card(&r.name).cloned() else {
+                    for (rank, group) in groups.iter().enumerate() {
+                        let e = &group[0];
+                        let Some(card) = self.card(&e.commander).cloned() else {
                             continue;
                         };
-                        ui.allocate_ui(vec2(210.0, 470.0), |ui| {
+                        ui.allocate_ui(vec2(230.0, 640.0), |ui| {
                             ui.vertical(|ui| {
+                                ui.set_width(220.0);
                                 let current =
-                                    self.deck.commander.as_deref() == Some(r.name.as_str());
+                                    self.deck.commander.as_deref() == Some(e.commander.as_str());
                                 let resp = self.show_card(
                                     ui,
                                     CardLook {
@@ -1803,72 +2017,127 @@ impl GuiApp {
                                     },
                                 );
                                 if resp.clicked() {
-                                    acts.push(Action::Select(r.name.clone()));
+                                    acts.push(Action::Select(e.commander.clone()));
                                 }
                                 ui.horizontal(|ui| {
-                                    ui.label("Plays");
-                                    identity_dots(ui, r.plays, 13.0);
-                                    if r.plays != r.identity {
-                                        ui.label(
-                                            RichText::new(format!("of {}", r.identity))
+                                    ui.label(
+                                        RichText::new(format!("{:.1}", e.total))
+                                            .size(22.0)
+                                            .strong()
+                                            .color(Color32::from_rgb(255, 205, 80)),
+                                    );
+                                    ui.vertical(|ui| {
+                                        if let Some(c) = e.piper {
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "+ The Prismatic Piper ({})",
+                                                    c
+                                                ))
                                                 .small()
-                                                .weak(),
-                                        );
-                                    }
+                                                .color(Color32::from_rgb(200, 170, 255)),
+                                            );
+                                        }
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("plays").small());
+                                            identity_dots(ui, e.plays, 12.0);
+                                        });
+                                    });
                                 });
-                                let thin = r.playables < slots;
+                                // Part bars: green above zero, red below.
+                                for (label, v) in
+                                    crate::ranking::Parts::LABELS.iter().zip(e.parts.values())
+                                {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("{:<11}", label))
+                                                .monospace()
+                                                .size(11.0),
+                                        );
+                                        let (rect, _) = ui
+                                            .allocate_exact_size(vec2(110.0, 10.0), Sense::hover());
+                                        let mid = rect.left() + 30.0;
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            CornerRadius::from(2.0),
+                                            Color32::from_gray(45),
+                                        );
+                                        let len = (v.abs() * 13.0).min(if v >= 0.0 {
+                                            80.0
+                                        } else {
+                                            30.0
+                                        });
+                                        let bar = if v >= 0.0 {
+                                            egui::Rect::from_min_max(
+                                                pos2(mid, rect.top()),
+                                                pos2(mid + len, rect.bottom()),
+                                            )
+                                        } else {
+                                            egui::Rect::from_min_max(
+                                                pos2(mid - len, rect.top()),
+                                                pos2(mid, rect.bottom()),
+                                            )
+                                        };
+                                        ui.painter().rect_filled(
+                                            bar,
+                                            CornerRadius::from(2.0),
+                                            if v >= 0.0 {
+                                                Color32::from_rgb(90, 190, 110)
+                                            } else {
+                                                Color32::from_rgb(220, 90, 80)
+                                            },
+                                        );
+                                        ui.label(RichText::new(format!("{:+.1}", v)).small());
+                                    });
+                                }
                                 ui.label(
                                     RichText::new(format!(
-                                        "{} playable cards · {} removal · {} creatures",
-                                        r.playables, r.removal, r.creatures
-                                    ))
-                                    .small()
-                                    .color(if thin {
-                                        Color32::from_rgb(255, 190, 110)
-                                    } else {
-                                        Color32::LIGHT_GRAY
-                                    }),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Deck quality {:.2}{}",
-                                        r.quality,
-                                        if thin { " · thin pool" } else { "" }
+                                        "{} creatures · {} removal · {} draw · {:.0}% keepable",
+                                        e.creatures,
+                                        e.removal,
+                                        e.draw,
+                                        e.keepable * 100.0
                                     ))
                                     .small(),
                                 );
+                                if group.len() > 1 {
+                                    let others: Vec<String> = group[1..]
+                                        .iter()
+                                        .map(|o| match o.piper {
+                                            Some(c) => format!("+Piper({}) {:.1}", c, o.total),
+                                            None => format!("alone {:.1}", o.total),
+                                        })
+                                        .collect();
+                                    ui.label(
+                                        RichText::new(format!("Also: {}", others.join(" · ")))
+                                            .small()
+                                            .weak(),
+                                    );
+                                }
+                                egui::CollapsingHeader::new(RichText::new("Why?").small())
+                                    .id_salt(("why", &e.commander))
+                                    .show(ui, |ui| {
+                                        for n in &e.notes {
+                                            ui.label(RichText::new(format!("• {}", n)).small());
+                                        }
+                                    });
                                 ui.horizontal(|ui| {
                                     if ui
                                         .button("Build")
-                                        .on_hover_text("Auto-build a full deck")
+                                        .on_hover_text("Build this exact deck")
                                         .clicked()
                                     {
-                                        acts.push(Action::AutoBuild(r.name.clone(), None));
+                                        acts.push(Action::AutoBuild(e.commander.clone(), e.piper));
                                     }
                                     if ui
                                         .button("Set")
                                         .on_hover_text("Make this your commander and build by hand")
                                         .clicked()
                                     {
-                                        acts.push(Action::SetCommander(r.name.clone()));
+                                        acts.push(Action::SetCommander(e.commander.clone()));
+                                        if let Some(c) = e.piper {
+                                            acts.push(Action::PiperColor(c));
+                                        }
                                         self.tab = Tab::Build;
-                                    }
-                                    if r.identity.count() == 1 {
-                                        ui.menu_button("+ Piper", |ui| {
-                                            ui.label("Build with The Prismatic Piper adding:");
-                                            for (i, c) in COLORS.iter().enumerate() {
-                                                if r.identity.contains(i) {
-                                                    continue;
-                                                }
-                                                if ui.button(analysis::color_name(i)).clicked() {
-                                                    acts.push(Action::AutoBuild(
-                                                        r.name.clone(),
-                                                        Some(*c),
-                                                    ));
-                                                    ui.close();
-                                                }
-                                            }
-                                        });
                                     }
                                 });
                             });
@@ -1876,8 +2145,6 @@ impl GuiApp {
                     }
                 });
             });
-        self.commanders = Some(rows);
-        let _ = self.piper_pick;
     }
 
     // ------------------------------------------------------------------ draft
@@ -2429,6 +2696,19 @@ impl GuiApp {
                     .add(egui::DragValue::new(&mut self.rules.deck_size).range(40..=100))
                     .changed();
             });
+            ui.horizontal(|ui| {
+                ui.label("Players per game");
+                changed |= ui
+                    .add(egui::DragValue::new(&mut self.rules.players).range(2..=6))
+                    .changed();
+                ui.label(
+                    RichText::new(
+                        "(3+ values board wipes, card draw and \"each opponent\" effects more)",
+                    )
+                    .small()
+                    .weak(),
+                );
+            });
             changed |= ui
                 .checkbox(
                     &mut self.rules.singleton,
@@ -2567,6 +2847,7 @@ impl eframe::App for GuiApp {
         let ctx = ui.ctx().clone();
         let frame_start = std::time::Instant::now();
         self.images.poll(&ctx);
+        self.poll_jobs(&ctx);
         if self.memo.rev != self.rev {
             self.memo = Memo {
                 rev: self.rev,

@@ -9,4 +9,6 @@ pub mod deck;
 pub mod gui;
 pub mod league;
 pub mod paths;
+pub mod ranking;
+pub mod ratings;
 pub mod ui;

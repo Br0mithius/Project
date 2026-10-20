@@ -178,14 +178,94 @@ fn numeric(s: &Option<String>) -> Option<f32> {
     s.as_ref().and_then(|v| v.parse::<f32>().ok())
 }
 
+/// Games of 17Lands data at which its win rate counts as much as the rarity guess.
+const RATING_TRUST_GAMES: f32 = 500.0;
+
+/// Raw strength of a card on its own. Uses its 17Lands win rate when there's data
+/// (blended with a rarity-based guess when the sample is small), otherwise rarity alone.
+/// Returns (points, how much 17Lands data counted 0-1, explanation).
+pub fn card_power(card: &Card, db: &CardDb) -> (f32, f32, Option<String>) {
+    let prior = card.rarity_rank() as f32 * 0.6;
+    let Some(r) = db.rating(&card.name) else {
+        return (prior, 0.0, None);
+    };
+    let Some(wr) = r.gih_wr else {
+        return (prior, 0.0, None);
+    };
+    // 1.5 points for an average card, +1 per 4 percentage points above the set average.
+    let data = (1.5 + (wr - db.gih_mean) * 25.0).clamp(-1.0, 6.0);
+    let w = r.games as f32 / (r.games as f32 + RATING_TRUST_GAMES);
+    let points = w * data + (1.0 - w) * prior;
+    let note = format!(
+        "17Lands win rate {:.1}% ({} games, set avg {:.1}%)",
+        wr * 100.0,
+        r.games,
+        db.gih_mean * 100.0
+    );
+    (points, w, Some(note))
+}
+
+/// Adjustments for 3+ player games: effects that hit every opponent, board wipes, card
+/// flow and ramp gain value; small aggressive creatures and 1-for-1 trades lose some.
+fn multiplayer_adjust(card: &Card, roles: &[Role], rules: &Rules) -> (f32, Vec<String>) {
+    let mut score = 0.0;
+    let mut why = Vec::new();
+    if rules.players < 3 {
+        return (score, why);
+    }
+    let opponents = rules.players.saturating_sub(1) as f32;
+    if roles.contains(&Role::EachOpponent) {
+        score += 0.5 * (opponents - 1.0);
+        why.push(format!("hits all {} opponents", opponents as u32));
+    }
+    if roles.contains(&Role::Sweeper) {
+        score += 1.5;
+        why.push("board wipe (great with 4 players)".into());
+    } else if roles.contains(&Role::Removal) {
+        score -= 0.4; // a 1-for-1 only answers one of three opponents
+    }
+    if roles.contains(&Role::Draw) {
+        score += 0.6;
+        why.push("card flow matters in long multiplayer games".into());
+    }
+    if roles.contains(&Role::Ramp) {
+        score += 0.4;
+    }
+    if roles.contains(&Role::Lifegain) {
+        score += 0.2;
+    }
+    if card.text_lower().contains("goad") {
+        score += 0.8;
+        why.push("goad (politics)".into());
+    }
+    if card.is_creature() {
+        let t = numeric(&card.toughness).unwrap_or(0.0);
+        if t >= 4.0 {
+            score += 0.25; // deters attacks from three directions
+        }
+        if card.mana_value() <= 2 && roles.is_empty() {
+            score -= 0.5;
+            why.push("small vanilla creature (weaker with 4 players)".into());
+        }
+    }
+    (score, why)
+}
+
 /// How good `card` would be as the next addition to `deck`. Higher is better.
 /// This is a heuristic to rank options, not gospel - always read the cards.
 pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32, Vec<String>) {
-    let mut score = card.rarity_rank() as f32 * 0.6;
     let mut why = Vec::new();
     if card.is_land() {
         return (0.0, why);
     }
+    let (power, data_weight, note) = card_power(card, db);
+    let mut score = power;
+    if let Some(n) = note {
+        why.push(n);
+    }
+    // When real win-rate data is in, it already reflects most of what roles add,
+    // so roles count for less.
+    let role_weight = 1.0 - 0.5 * data_weight;
     let roles = card.roles();
     for r in &roles {
         let (pts, label) = match r {
@@ -201,15 +281,18 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             _ => (0.0, ""),
         };
         if pts > 0.0 {
-            score += pts;
+            score += pts * role_weight;
             why.push(label.to_string());
         }
     }
+    let (mp, mut mp_why) = multiplayer_adjust(card, &roles, rules);
+    score += mp;
+    why.append(&mut mp_why);
     let st = stats(deck, db);
     if card.is_creature() {
         if let (Some(p), Some(t)) = (numeric(&card.power), numeric(&card.toughness)) {
             let eff = (p + t) / (card.mana_value().max(1) as f32);
-            let bonus = (eff - 1.6).clamp(-1.0, 1.5);
+            let bonus = (eff - 1.6).clamp(-1.0, 1.5) * role_weight;
             score += bonus;
             if bonus >= 0.5 {
                 why.push(format!("efficient body {}/{}", p, t));
@@ -235,13 +318,12 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if card.mana_value() >= 7 {
         score -= 1.5;
     }
-    if let Some(cmd) = deck.commander.as_ref().and_then(|c| db.get(c)) {
+    let cmd = deck.commander.as_ref().and_then(|c| db.get(c));
+    if let Some(cmd) = cmd {
         let (syn, mut reasons) = synergy(cmd, card);
         score += syn;
         why.append(&mut reasons);
-    }
-    // With a 3+ colour commander, adding a colour the deck doesn't cast yet hurts consistency.
-    if let Some(cmd) = deck.commander.as_ref().and_then(|c| db.get(c)) {
+        // With a 3+ colour commander, adding a colour the deck doesn't cast yet hurts consistency.
         if cmd.identity().count() > 2 && st.nonlands >= 8 {
             let cast = ColorSet(
                 (0..5)
@@ -256,7 +338,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         }
     }
     // Tribal pull: cards that care about Heroes/Villains get better with more of them.
-    let text = card.oracle_text.to_lowercase();
+    let text = card.text_lower();
     for tribe in ["Hero", "Villain", "Robot"] {
         if text.contains(&tribe.to_lowercase()) {
             let n = *st.subtypes.get(tribe).unwrap_or(&0);
@@ -278,75 +360,235 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     (score, why)
 }
 
-/// Bonus for cards that play into what the commander's text asks for.
+/// Is `word` mentioned in `text` as something the commander *cares about* (e.g. "Villain
+/// spell", "other Heroes", "Equipment you control") rather than just named in passing?
+fn cares_about(text: &str, word: &str) -> bool {
+    let w = word.to_lowercase();
+    let plural = format!("{}s", w);
+    [
+        format!("{} spell", w),
+        format!("{} card", w),
+        format!("{} you control", w),
+        format!("{} you control", plural),
+        format!("other {}", w),
+        format!("nontoken {}", w),
+        format!("{} creatures you control", w),
+        format!("each {}", w),
+        format!("another {}", w),
+        format!("{} enters", w),
+        format!("{}, ", w), // lists like "a Hero, Equipment, or Vehicle card"
+        format!("or {} card", w),
+    ]
+    .iter()
+    .any(|p| text.contains(p.as_str()))
+}
+
+/// Things a commander's text can ask for, and what in a card answers it.
+struct Want {
+    /// Any of these in the commander's text turns the want on.
+    triggers: &'static [&'static str],
+    points: f32,
+    label: &'static str,
+    fits: fn(&Card) -> bool,
+}
+
+const WANTS: &[Want] = &[
+    Want {
+        triggers: &["noncreature spell"],
+        points: 1.5,
+        label: "noncreature spell triggers commander",
+        fits: |c| !c.is_creature() && !c.is_land(),
+    },
+    Want {
+        triggers: &[
+            "instant or sorcery",
+            "instant and sorcery",
+            "instants and sorceries",
+        ],
+        points: 1.5,
+        label: "instant/sorcery for commander",
+        fits: |c| c.main_type() == "Instant" || c.main_type() == "Sorcery",
+    },
+    Want {
+        triggers: &[
+            "another artifact",
+            "artifact you control",
+            "artifacts you control",
+            "nontoken artifact",
+            "sacrifice an artifact",
+            "artifact source",
+            "artifact enters",
+        ],
+        points: 1.25,
+        label: "artifact for commander",
+        fits: |c| c.type_line.contains("Artifact"),
+    },
+    Want {
+        triggers: &["equipment", "equipped"],
+        points: 2.0,
+        label: "Equipment for commander",
+        fits: |c| c.type_line.contains("Equipment"),
+    },
+    Want {
+        triggers: &["vehicle", "crew"],
+        points: 1.5,
+        label: "Vehicle for commander",
+        fits: |c| c.type_line.contains("Vehicle"),
+    },
+    Want {
+        triggers: &[
+            "enchantment you control",
+            "enchantments you control",
+            "non-aura enchantment",
+        ],
+        points: 1.0,
+        label: "enchantment for commander",
+        fits: |c| c.type_line.contains("Enchantment"),
+    },
+    Want {
+        triggers: &["plan card", "plan counter"],
+        points: 1.5,
+        label: "Plan for commander",
+        fits: |c| c.type_line.contains("Plan"),
+    },
+    Want {
+        triggers: &[
+            "counter on each",
+            "+1/+1 counters you",
+            "kind of counter",
+            "put that many plus one",
+            "remove a counter",
+            "counter on another",
+        ],
+        points: 1.0,
+        label: "+1/+1 counters synergy",
+        fits: |c| c.text_lower().contains("+1/+1 counter") || c.text_lower().contains("power-up"),
+    },
+    Want {
+        triggers: &[
+            "tokens you control",
+            "token you control",
+            "whenever a token",
+            "one or more tokens",
+        ],
+        points: 1.0,
+        label: "token synergy",
+        fits: |c| c.has_role(Role::Tokens),
+    },
+    Want {
+        triggers: &["is dealt damage", "enrage"],
+        points: 1.25,
+        label: "makes your Enrage creature take damage",
+        fits: |c| {
+            let t = c.text_lower();
+            t.contains("fight")
+                || t.contains("damage to each creature")
+                || t.contains("deals damage equal to its power")
+        },
+    },
+    Want {
+        triggers: &["noncombat damage"],
+        points: 1.5,
+        label: "burn boosted by commander",
+        fits: |c| !c.is_creature() && c.text_lower().contains("damage"),
+    },
+    Want {
+        triggers: &["second card each turn", "draw your second card"],
+        points: 1.5,
+        label: "draws the 2nd card each turn",
+        fits: |c| c.has_role(Role::Draw),
+    },
+    Want {
+        triggers: &[
+            "whenever you discard",
+            "discard a nonland card",
+            "or discard a card",
+            "discard a card:",
+        ],
+        points: 1.25,
+        label: "discard/loot synergy",
+        fits: |c| {
+            let t = c.text_lower();
+            t.contains("discard a card") || t.contains("connive") || t.contains("discard")
+        },
+    },
+    Want {
+        triggers: &["targets one or more creatures"],
+        points: 1.5,
+        label: "targets a creature (commander trigger)",
+        fits: |c| !c.is_creature() && c.text_lower().contains("target creature"),
+    },
+    Want {
+        triggers: &["becomes a copy", "copy of that artifact", "copy of it"],
+        points: 1.0,
+        label: "worth copying",
+        fits: |c| {
+            (c.type_line.contains("Artifact") || c.type_line.contains("Enchantment"))
+                && !c.is_creature()
+        },
+    },
+    Want {
+        triggers: &[
+            "landfall",
+            "land you control enters",
+            "play lands from the top",
+        ],
+        points: 0.75,
+        label: "extra lands for landfall",
+        fits: |c| {
+            c.text_lower()
+                .contains("search your library for a basic land")
+                || c.text_lower().contains("landcycling")
+        },
+    },
+    Want {
+        triggers: &["power-up"],
+        points: 0.5,
+        label: "mana for the commander's power-up",
+        fits: |c| c.has_role(Role::Ramp),
+    },
+    Want {
+        triggers: &["whenever you gain life", "lifelink"],
+        points: 0.5,
+        label: "life gain synergy",
+        fits: |c| c.has_role(Role::Lifegain),
+    },
+];
+
+/// Bonus for cards that play into what the commander's text asks for: creature types it
+/// cares about (Villain spells, other Heroes...), card types (artifacts, Equipment,
+/// Plans...) and mechanics (counters, discard, Enrage, noncombat damage...).
 pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
-    let ct = cmd.oracle_text.to_lowercase();
-    let ty = card.type_line.to_lowercase();
-    let text = card.oracle_text.to_lowercase();
-    let mut score = 0.0;
+    let ct = cmd.text_lower();
+    let mut score: f32 = 0.0;
     let mut why = Vec::new();
-    let mut add = |pts: f32, msg: String| {
-        score += pts;
-        why.push(msg);
-    };
     for sub in card.subtypes() {
         let s = sub.to_lowercase();
-        if s.len() > 2 && ct.contains(&s) {
-            add(2.0, format!("commander cares about {}", sub));
+        if s.len() < 3 || !ct.contains(&s) {
+            continue;
+        }
+        if cares_about(ct, &s) {
+            score += 2.0;
+            why.push(format!("commander cares about {}", sub));
+        } else {
+            score += 0.4;
+            why.push(format!("{} (mentioned by commander)", sub));
         }
     }
-    let checks: [(&str, bool, &str); 8] = [
-        (
-            "artifact",
-            ty.contains("artifact"),
-            "artifact for commander",
-        ),
-        (
-            "equipment",
-            ty.contains("equipment"),
-            "Equipment for commander",
-        ),
-        ("vehicle", ty.contains("vehicle"), "Vehicle for commander"),
-        (
-            "noncreature spell",
-            !card.is_creature(),
-            "noncreature spell triggers commander",
-        ),
-        (
-            "instant or sorcery",
-            ty.contains("instant") || ty.contains("sorcery"),
-            "spell triggers commander",
-        ),
-        (
-            "+1/+1 counter",
-            text.contains("counter"),
-            "counters synergy",
-        ),
-        (
-            "enchantment",
-            ty.contains("enchantment"),
-            "enchantment for commander",
-        ),
-        ("token", text.contains("token"), "token synergy"),
-    ];
-    for (needle, hit, msg) in checks {
-        if ct.contains(needle) && hit {
-            add(1.5, msg.to_string());
+    for want in WANTS {
+        if want.triggers.iter().any(|t| ct.contains(t)) && (want.fits)(card) {
+            score += want.points;
+            why.push(want.label.to_string());
         }
     }
-    if (ct.contains("dealt damage") || ct.contains("enrage")) && text.contains("damage") {
-        add(0.75, "damage synergy with Enrage".into());
-    }
-    if ct.contains("noncombat damage") && text.contains("damage") && !card.is_creature() {
-        add(1.5, "burn boosted by commander".into());
-    }
-    let cmd_tribes: Vec<String> = cmd.subtypes();
     for tribe in ["Hero", "Villain"] {
-        if cmd_tribes.iter().any(|t| t == tribe) && card.subtypes().iter().any(|t| t == tribe) {
-            add(0.5, format!("fellow {}", tribe));
+        if cmd.subtypes().iter().any(|t| t == tribe) && card.subtypes().iter().any(|t| t == tribe) {
+            score += 0.3;
+            why.push(format!("fellow {}", tribe));
         }
     }
-    (score, why)
+    // Stop one card from looking amazing just because it ticks many boxes.
+    (score.min(4.0), why)
 }
 
 /// Owned copies not already used by `deck`.
@@ -514,7 +756,7 @@ pub fn fill_basics(deck: &mut Deck, db: &CardDb, rules: &Rules) -> [u32; 5] {
 }
 
 /// Average score of the best spells you own inside `colors` - how strong a deck those colours make.
-fn pool_quality(
+pub fn pool_quality_for(
     cmd: &Card,
     colors: ColorSet,
     db: &CardDb,
@@ -562,7 +804,7 @@ pub fn best_colors(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) ->
         if !s.is_subset_of(id) || !base.is_subset_of(s) || s.count() > max {
             continue;
         }
-        let q = pool_quality(cmd, s, db, coll, rules);
+        let q = pool_quality_for(cmd, s, db, coll, rules);
         if q > best.0 {
             best = (q, s);
         }
@@ -616,7 +858,7 @@ pub fn rank_commanders<'a>(
                 creatures += n;
             }
         }
-        let quality = pool_quality(cmd, plays, db, coll, rules);
+        let quality = pool_quality_for(cmd, plays, db, coll, rules);
         out.push(CommanderOption {
             card: cmd,
             identity: id,
@@ -825,5 +1067,40 @@ mod tests {
         let r = simulate(&deck, &db, 2000);
         assert_eq!(r.land_hist.iter().sum::<u32>(), 2000);
         assert!(r.keepable > 0.5);
+    }
+}
+
+#[cfg(test)]
+mod power_tests {
+    use super::*;
+    use crate::ratings::Rating;
+
+    #[test]
+    fn win_rate_moves_card_power() {
+        let card = Card {
+            name: "Test Common".into(),
+            rarity: "common".into(),
+            ..Default::default()
+        };
+        let mut db = CardDb::new(vec![card.clone()]);
+        db.gih_mean = 0.56;
+        let (prior, w0, _) = card_power(&card, &db);
+        assert_eq!(w0, 0.0);
+        assert!((prior - 0.6).abs() < 1e-4);
+        db.ratings.insert(
+            "test common".into(),
+            Rating {
+                gih_wr: Some(0.64),
+                games: 5000,
+                alsa: None,
+                iwd: None,
+            },
+        );
+        let (strong, w, note) = card_power(&card, &db);
+        assert!(w > 0.9 && strong > 3.0, "{} {}", strong, w);
+        assert!(note.unwrap().contains("64.0%"));
+        db.ratings.get_mut("test common").unwrap().games = 50;
+        let (shrunk, _, _) = card_power(&card, &db);
+        assert!(shrunk < strong && shrunk > prior);
     }
 }

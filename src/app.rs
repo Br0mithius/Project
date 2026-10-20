@@ -30,6 +30,16 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "",
         "Rank every legendary creature you own as a possible commander",
     ),
+    (
+        "why",
+        "<commander>",
+        "Explain a commander's ranking (and its best Prismatic Piper colour)",
+    ),
+    (
+        "ratings",
+        "",
+        "Download 17Lands card ratings and Playgroup.gg commander win rates",
+    ),
     ("commander", "<card>", "Set the deck's commander"),
     (
         "add",
@@ -171,7 +181,8 @@ pub struct App {
 
 impl App {
     pub fn new(data_dir: PathBuf, style: Style) -> Result<App, String> {
-        let db = CardDb::load(&data_dir.join("cards.json"))?;
+        let mut db = CardDb::load(&data_dir.join("cards.json"))?;
+        db.attach_ratings(&data_dir);
         let coll = Collection::load(&data_dir.join("collection.txt"))?;
         let rules_path = data_dir.join("rules.json");
         let rules = if rules_path.exists() {
@@ -250,6 +261,8 @@ impl App {
             "pool" | "list" | "ls" => self.pool(rest),
             "show" | "card" | "info" => self.show(rest),
             "commanders" => self.commanders(),
+            "why" => self.why(rest),
+            "ratings" => self.ratings(),
             "commander" | "cmd" => self.set_commander(rest),
             "add" | "+" => self.add(rest),
             "rm" | "remove" | "-" => self.remove(rest),
@@ -519,6 +532,26 @@ impl App {
             c.identity(),
             c.mana_value()
         );
+        if let Some(r) = self.db.rating(&c.name) {
+            if let Some(wr) = r.gih_wr {
+                println!(
+                    "  17Lands: {:.1}% win rate when drawn ({:+.1} vs set average) · {} games",
+                    wr * 100.0,
+                    (wr - self.db.gih_mean) * 100.0,
+                    r.games
+                );
+            }
+        }
+        if c.can_be_commander() {
+            if let Some(st) = self.db.commander_stat(&c.name) {
+                println!(
+                    "  As a commander: {:.0}% win rate in {} logged games ({})",
+                    st.win_rate * 100.0,
+                    st.games,
+                    st.source
+                );
+            }
+        }
         if !c.is_verified() && !c.is_basic() {
             println!(
                 "  {} {}",
@@ -564,46 +597,156 @@ impl App {
     }
 
     fn commanders(&self) {
-        let opts = analysis::rank_commanders(&self.db, &self.coll, &self.rules);
-        if opts.is_empty() {
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let weights = crate::ranking::Weights::default();
+        let evals = crate::ranking::rank_all(&self.db, &self.coll, &self.rules, &weights, &done);
+        if evals.is_empty() {
             println!("You don't own any legendary creatures yet.");
             return;
         }
-        let slots = self.rules.main_deck_size() - analysis::recommended_lands(3.0, &self.rules);
+        let data = if self.db.ratings.is_empty() {
+            "no 17Lands data yet - run `ratings` to download it".to_string()
+        } else {
+            format!("17Lands data from {}", self.db.ratings_date)
+        };
         println!(
-            "Ranked by quality of the best {} non-land cards each could play (playables = owned non-land cards in identity).",
-            slots
+            "Each commander is ranked by the deck auto-build makes for it ({}).",
+            data
         );
         println!(
             "{}",
             self.style.dim(&format!(
-                "  #  {:<33} {:<6} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8}",
-                "commander", "id", "plays", "cost", "playables", "removal", "creatures", "quality"
+                "  #  {:<38} {:<6} {:>6} | {:>5} {:>5} {:>5} {:>6} {:>5} {:>5}",
+                "commander", "plays", "total", "cards", "curve", "crea", "inter", "mana", "cmdr"
             ))
         );
-        for (i, o) in opts.iter().enumerate() {
-            let short = if o.playables < slots {
-                self.style.warn(" (thin pool)")
-            } else {
-                String::new()
-            };
+        let groups = crate::ranking::best_per_commander(&evals);
+        for (i, g) in groups.iter().enumerate() {
+            let e = g[0];
+            let p = e.parts.values();
+            let other = g
+                .iter()
+                .skip(1)
+                .map(|o| {
+                    format!(
+                        "{} {:.1}",
+                        if o.piper.is_some() {
+                            format!("+Piper({})", o.piper.unwrap())
+                        } else {
+                            "alone".into()
+                        },
+                        o.total
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             println!(
-                "{:>3}  {} {:<6} {:<6} {:<5} {:>9} {:>8} {:>10} {:>8.2}{}",
+                "{:>3}  {:<38} {:<6} {:>6.1} | {:>5.1} {:>5.1} {:>5.1} {:>6.1} {:>5.1} {:>5.1}{}",
                 i + 1,
-                self.style.name_padded(o.card, 33),
-                o.identity.to_string(),
-                o.plays.to_string(),
-                compact_cost(&o.card.mana_cost),
-                o.playables,
-                o.removal,
-                o.creatures,
-                o.quality,
-                short
+                e.label(),
+                e.plays.to_string(),
+                e.total,
+                p[0],
+                p[1],
+                p[2],
+                p[3],
+                p[4],
+                p[5],
+                if other.is_empty() {
+                    String::new()
+                } else {
+                    self.style.dim(&format!("   (also: {})", other))
+                }
             );
         }
         println!(
-            "'plays' = the colours an auto-built deck would use (for 3+ colour commanders, the strongest subset).\n\
-             Use `show <name>` to read one, `commander <name>` to pick, or `auto <name> [colours]` for an instant build."
+            "Parts: cards = average spell strength; curve; creature count; removal & draw; mana = keepable hands / commander on time; commander's own strength."
+        );
+        println!(
+            "`why <commander>` explains one; `auto <name> [colours]` builds it; `piper <colour>` adds The Prismatic Piper."
+        );
+    }
+
+    fn why(&self, q: &str) {
+        let Some(c) = self.resolve(q) else { return };
+        if !c.can_be_commander() {
+            println!("{} isn't a legendary creature.", c.name);
+            return;
+        }
+        let w = crate::ranking::Weights::default();
+        let mut opts = vec![crate::ranking::evaluate(
+            &c,
+            None,
+            &self.db,
+            &self.coll,
+            &self.rules,
+            &w,
+        )];
+        if c.identity().count() == 1 {
+            for i in 0..5 {
+                if !c.identity().contains(i) {
+                    opts.push(crate::ranking::evaluate(
+                        &c,
+                        Some(crate::card::COLORS[i]),
+                        &self.db,
+                        &self.coll,
+                        &self.rules,
+                        &w,
+                    ));
+                }
+            }
+        }
+        opts.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap());
+        for e in opts.iter().take(3) {
+            let p = e.parts.values();
+            println!(
+                "{}  (plays {}) - total {:.1}",
+                self.style.bold(&e.label()),
+                e.plays,
+                e.total
+            );
+            for (label, v) in crate::ranking::Parts::LABELS.iter().zip(p) {
+                println!("  {:<12} {:>5.1}", label, v);
+            }
+            println!(
+                "  {} creatures, {} removal, {} draw · keepable hands {:.0}% · commander on time {:.0}%",
+                e.creatures,
+                e.removal,
+                e.draw,
+                e.keepable * 100.0,
+                e.on_curve * 100.0
+            );
+            for n in &e.notes {
+                println!("  - {}", n);
+            }
+        }
+    }
+
+    fn ratings(&mut self) {
+        println!("Downloading 17Lands card ratings...");
+        match crate::ratings::fetch_17lands(&self.data_dir) {
+            Ok(n) => println!("  {} cards rated.", n),
+            Err(e) => println!("  Couldn't download 17Lands data: {}", e),
+        }
+        println!("Downloading Playgroup.gg commander win rates...");
+        let names: Vec<String> = self
+            .db
+            .cards
+            .iter()
+            .filter(|c| c.can_be_commander() && self.coll.owned(&c.name) > 0)
+            .map(|c| c.name.clone())
+            .collect();
+        match crate::ratings::fetch_playgroup(&self.data_dir, &names) {
+            Ok(n) => println!("  {} commanders found.", n),
+            Err(e) => println!("  {}", e),
+        }
+        self.db.attach_ratings(&self.data_dir);
+        let rated = self.db.ratings.len();
+        println!(
+            "Using {} rated cards (set average win rate {:.1}%) and {} commander records.",
+            rated,
+            self.db.gih_mean * 100.0,
+            self.db.commander_stats.len()
         );
     }
 

@@ -35,6 +35,10 @@ pub struct Card {
     pub confidence: String,
     #[serde(default)]
     pub note: String,
+    #[serde(skip)]
+    pub roles_cache: std::sync::OnceLock<Vec<Role>>,
+    #[serde(skip)]
+    pub text_cache: std::sync::OnceLock<String>,
 }
 
 /// A set of colours stored as a bitmask in WUBRG order.
@@ -128,10 +132,14 @@ pub enum Role {
     Lifegain,
     Teamwork,
     Enrage,
+    /// Destroys or damages several creatures at once - strong in 4-player games.
+    Sweeper,
+    /// Hits every opponent at once (drain, discard, damage) - worth 3x in 4-player games.
+    EachOpponent,
 }
 
 impl Role {
-    pub const ALL: [Role; 12] = [
+    pub const ALL: [Role; 14] = [
         Role::Removal,
         Role::Bounce,
         Role::Counter,
@@ -144,6 +152,8 @@ impl Role {
         Role::Lifegain,
         Role::Teamwork,
         Role::Enrage,
+        Role::Sweeper,
+        Role::EachOpponent,
     ];
 
     pub fn label(self) -> &'static str {
@@ -160,6 +170,8 @@ impl Role {
             Role::Lifegain => "lifegain",
             Role::Teamwork => "teamwork",
             Role::Enrage => "enrage",
+            Role::Sweeper => "sweeper",
+            Role::EachOpponent => "each opponent",
         }
     }
 
@@ -322,14 +334,32 @@ impl Card {
         set
     }
 
+    /// What the card does, worked out once from its rules text and then remembered.
     pub fn roles(&self) -> Vec<Role> {
-        let t = strip_reminder(&self.oracle_text).to_lowercase();
+        self.roles_cache
+            .get_or_init(|| self.compute_roles())
+            .clone()
+    }
+
+    /// Rules text without reminder text, lower-cased (worked out once).
+    pub fn text_lower(&self) -> &str {
+        self.text_cache
+            .get_or_init(|| strip_reminder(&self.oracle_text).to_lowercase())
+    }
+
+    fn compute_roles(&self) -> Vec<Role> {
+        let t = self.text_lower();
         let has = |s: &str| t.contains(s);
         let mut roles = Vec::new();
         if has("destroy target")
             || has("exile target")
-            || has("damage to target")
+            || has("damage to target creature")
+            || has("damage to target attacking")
+            || has("damage to target blocking")
+            || has("damage to target nonland")
+            || has("damage to target permanent")
             || has("damage to any target")
+            || has("damage to any other target")
             || has("damage to another target")
             || has("damage to each creature")
             || has("damage to each opponent's creature")
@@ -352,10 +382,18 @@ impl Card {
         if has("counter target") {
             roles.push(Role::Counter);
         }
-        if has("draw a card")
-            || has("draw two")
-            || has("draw three")
-            || has("draws a card")
+        // Looting ("discard a card, then draw a card") is card filtering, not card advantage.
+        let unlooted = t
+            .replace("discard a card, then draw a card", "")
+            .replace("draw a card, then discard a card", "");
+        let has_draw = |s: &str| unlooted.contains(s);
+        if has_draw("draw a card")
+            || has_draw("draw two")
+            || has_draw("draw three")
+            || has_draw("draws a card")
+            || has_draw("draw x cards")
+            || has_draw("draw cards equal")
+            || has_draw("draws two")
             || has("investigate")
             || has("clue")
             || (has("look at the top") && has("into your hand"))
@@ -389,6 +427,30 @@ impl Card {
         }
         if has("enrage") || has("is dealt damage") {
             roles.push(Role::Enrage);
+        }
+        if has("destroy all creatures")
+            || has("destroy all other creatures")
+            || has("destroy all nonland")
+            || has("destroy all artifacts")
+            || has("exile all creatures")
+            || has("exile all nonland")
+            || has("damage to each creature")
+            || has("damage to each other creature")
+            || has("damage to each opponent's creature")
+            || has("all creatures get -")
+            || has("each creature gets -")
+            || has("creatures your opponents control get -")
+            || has("return all nonland")
+            || has("return all creatures")
+            || (has("destroy each") && has("creature"))
+        {
+            roles.push(Role::Sweeper);
+            if !roles.contains(&Role::Removal) {
+                roles.push(Role::Removal);
+            }
+        }
+        if has("each opponent") || has("each other player") {
+            roles.push(Role::EachOpponent);
         }
         roles
     }

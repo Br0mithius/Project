@@ -17,8 +17,17 @@ pub fn normalize(name: &str) -> String {
         .join(" ")
 }
 
+#[derive(Clone)]
 pub struct CardDb {
     pub cards: Vec<Card>,
+    /// 17Lands ratings by normalised name (empty until downloaded).
+    pub ratings: HashMap<String, crate::ratings::Rating>,
+    /// Game-weighted average 17Lands win rate across the set (the "average card" line).
+    pub gih_mean: f32,
+    /// When the ratings were downloaded ("" = never).
+    pub ratings_date: String,
+    /// Playgroup.gg commander win rates by normalised name.
+    pub commander_stats: HashMap<String, crate::ratings::CommanderStat>,
     /// Normalised name -> position in `cards`, so lookups don't scan the whole set.
     index: HashMap<String, usize>,
     /// Normalised name of each card, same order as `cards` (for searching).
@@ -49,11 +58,48 @@ impl CardDb {
         cards.sort_by(|a, b| a.name.cmp(&b.name));
         let mut db = CardDb {
             cards,
+            ratings: HashMap::new(),
+            gih_mean: 0.56,
+            ratings_date: String::new(),
+            commander_stats: HashMap::new(),
             index: HashMap::new(),
             norm: Vec::new(),
         };
         db.reindex();
         db
+    }
+
+    /// Loads 17Lands ratings and Playgroup.gg commander stats saved in `data_dir`.
+    pub fn attach_ratings(&mut self, data_dir: &Path) {
+        if let Some(file) = crate::ratings::load_ratings(data_dir) {
+            self.ratings = file
+                .cards
+                .into_iter()
+                .map(|(k, v)| (normalize(&k), v))
+                .collect();
+            self.ratings_date = file.fetched;
+            let (sum, n) = self
+                .ratings
+                .values()
+                .filter_map(|r| r.gih_wr.map(|w| (w * r.games as f32, r.games as f32)))
+                .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
+            if n > 0.0 {
+                self.gih_mean = sum / n;
+            }
+        }
+        self.commander_stats = crate::ratings::load_commander_stats(data_dir)
+            .commanders
+            .into_iter()
+            .map(|(k, v)| (normalize(&k), v))
+            .collect();
+    }
+
+    pub fn rating(&self, name: &str) -> Option<&crate::ratings::Rating> {
+        self.ratings.get(&normalize(name))
+    }
+
+    pub fn commander_stat(&self, name: &str) -> Option<&crate::ratings::CommanderStat> {
+        self.commander_stats.get(&normalize(name))
     }
 
     /// Call after changing `cards` (e.g. adding a card by hand).
@@ -151,6 +197,7 @@ pub fn parse_count_line(line: &str) -> Option<(u32, String)> {
 }
 
 /// The cards you physically own, kept in `data/collection.txt` as "count name" lines.
+#[derive(Clone)]
 pub struct Collection {
     pub path: PathBuf,
     pub counts: BTreeMap<String, u32>,
@@ -249,6 +296,9 @@ impl Collection {
 /// House rules for the format; editable in-app with `rules <key> <value>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rules {
+    /// Players per game; 3+ turns on the multiplayer adjustments in card scoring.
+    #[serde(default = "four")]
+    pub players: u32,
     pub deck_size: u32,
     /// Whether the commander is one of the `deck_size` cards.
     pub commander_counts_toward_size: bool,
@@ -275,9 +325,14 @@ fn yes() -> bool {
     true
 }
 
+fn four() -> u32 {
+    4
+}
+
 impl Default for Rules {
     fn default() -> Self {
         Rules {
+            players: 4,
             deck_size: 60,
             commander_counts_toward_size: true,
             max_copies: 0,
@@ -335,6 +390,7 @@ impl Rules {
             "enforce_color_identity" => self.enforce_color_identity = parse_bool(value)?,
             "enforce_collection" => self.enforce_collection = parse_bool(value)?,
             "starting_life" => self.starting_life = parse_num(value)?,
+            "players" => self.players = parse_num(value)?,
             "singleton" => self.singleton = parse_bool(value)?,
             "piper_free" => self.piper_free = parse_bool(value)?,
             _ => return Err(format!("unknown rule '{}'", key)),
