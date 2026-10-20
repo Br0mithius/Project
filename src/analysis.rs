@@ -408,10 +408,6 @@ fn multiplayer_adjust(card: &Card, roles: &[Role], rules: &Rules) -> (f32, Vec<S
         if t >= 4.0 {
             score += 0.25; // deters attacks from three directions
         }
-        if card.mana_value() <= 2 && roles.is_empty() {
-            score -= 0.5;
-            why.push("small vanilla creature (weaker with 4 players)".into());
-        }
     }
     (score, why)
 }
@@ -433,7 +429,25 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let parsed = card.parsed();
     // Removal is graded by what it can actually answer (see `abilities::Parsed::removal`).
     let removal = parsed.removal();
+    let creature = card.is_creature();
     for r in &roles {
+        // A creature's abilities are already counted in its value for its cost below.
+        if creature
+            && matches!(
+                r,
+                Role::Removal
+                    | Role::Counter
+                    | Role::Bounce
+                    | Role::Draw
+                    | Role::Ramp
+                    | Role::Tokens
+                    | Role::Protection
+                    | Role::Evasion
+                    | Role::Trick
+            )
+        {
+            continue;
+        }
         let (pts, label) = match r {
             Role::Removal => match removal {
                 Some(rm) => (rm.points, rm.label),
@@ -459,7 +473,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     why.append(&mut mp_why);
     // Permanents that keep producing value (each-turn triggers, repeatable abilities) are
     // worth more in long 4-player games.
-    if !matches!(card.main_type(), "Instant" | "Sorcery") {
+    if !creature && !matches!(card.main_type(), "Instant" | "Sorcery") {
         let engine = parsed.repeatable_value().min(2.0);
         if engine >= 0.5 {
             score += 0.5 * engine;
@@ -469,14 +483,22 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let st = stats(deck, db);
     let plan = deck_plan(deck, db, rules);
     if card.is_creature() {
-        if let (Some(p), Some(t)) = (numeric(&card.power), numeric(&card.toughness)) {
-            let eff = (p + t) / (card.mana_value().max(1) as f32);
-            let bonus = (eff - 1.6).clamp(-1.0, 1.5);
-            score += bonus;
-            if bonus >= 0.5 {
-                why.push(format!("efficient body {}/{}", p, t));
-            }
-        }
+        // Body, keywords and abilities against what a fair creature of its cost gives.
+        let v = crate::value::creature_value(card);
+        score += crate::value::creature_points(&v);
+        let best: Vec<String> = v
+            .parts
+            .iter()
+            .filter(|(_, x)| *x > 0.0)
+            .take(3)
+            .map(|(l, _)| l.clone())
+            .collect();
+        why.push(format!(
+            "{:.0}% of fair value for {} mana ({})",
+            v.efficiency * 100.0,
+            card.mana_value(),
+            best.join(", ")
+        ));
         let creature_target = plan.creatures.0;
         if st.creatures < creature_target {
             score += 1.0;
@@ -513,6 +535,10 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         let (syn, mut reasons) = synergy(cmd, card);
         score += syn;
         why.append(&mut reasons);
+        // ...and with the rest of the deck being built.
+        let (ds, mut ds_why) = deck_synergy(card, deck, db);
+        score += ds;
+        why.append(&mut ds_why);
         // With a 3+ colour commander, adding a colour the deck doesn't cast yet hurts consistency.
         if cmd.identity().count() > 2 && st.nonlands >= 8 {
             let cast = ColorSet(
@@ -1249,6 +1275,140 @@ fn payoff_penalty(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         }
     }
     (pen, why)
+}
+
+/// What the rest of a deck does, for judging how a card fits into it: per mechanic, how
+/// strongly the deck's cards reward it (payoffs) and feed it (enablers), plus which creature
+/// types its cards care about. Built once per deck version and reused while auto-build
+/// scores every candidate against the same deck.
+struct DeckProfile {
+    key: u64,
+    /// Per `MECHANICS` entry: (payoff strength x copies, enabler strength x copies).
+    mech: Vec<(f32, f32)>,
+    /// Per card name: its own (payoff, feed) per mechanic, so a card isn't its own partner.
+    own: std::collections::HashMap<String, Vec<(f32, f32)>>,
+    /// Creature type -> deck cards that care about it (filled on demand).
+    tribes: std::collections::HashMap<String, u32>,
+    texts: Vec<(String, String, u32)>,
+}
+
+fn deck_key(deck: &Deck) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    deck.commander.hash(&mut h);
+    deck.partner.hash(&mut h);
+    deck.cards.hash(&mut h);
+    h.finish()
+}
+
+thread_local! {
+    static PROFILE: std::cell::RefCell<Option<DeckProfile>> = const { std::cell::RefCell::new(None) };
+}
+
+fn with_profile<R>(deck: &Deck, db: &CardDb, f: impl FnOnce(&mut DeckProfile) -> R) -> R {
+    let key = deck_key(deck);
+    PROFILE.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.as_ref().is_none_or(|p| p.key != key) {
+            let cmds: Vec<&String> = deck.commanders();
+            let cards: Vec<(&Card, u32)> = resolved(deck, db)
+                .into_iter()
+                .filter(|(c, _)| !c.is_land() && !cmds.contains(&&c.name))
+                .collect();
+            let mut mech = vec![(0.0, 0.0); MECHANICS.len()];
+            let mut own = std::collections::HashMap::new();
+            for (c, n) in &cards {
+                let mine: Vec<(f32, f32)> = MECHANICS
+                    .iter()
+                    .map(|m| ((m.payoff)(c), feed(m, c)))
+                    .collect();
+                for (k, (pay, fd)) in mine.iter().enumerate() {
+                    mech[k].0 += pay * *n as f32;
+                    mech[k].1 += fd * *n as f32;
+                }
+                own.insert(c.name.clone(), mine);
+            }
+            *slot = Some(DeckProfile {
+                key,
+                mech,
+                own,
+                tribes: std::collections::HashMap::new(),
+                texts: cards
+                    .iter()
+                    .map(|(c, n)| (c.name.clone(), c.text_lower().to_string(), *n))
+                    .collect(),
+            });
+        }
+        f(slot.as_mut().unwrap())
+    })
+}
+
+/// How well a card fits the deck being built (beyond its commander): it feeds payoffs
+/// already in the deck, its own payoff is fed by the deck's enablers, or it's a creature
+/// type other cards in the deck care about. About 0 .. +3.
+pub fn deck_synergy(card: &Card, deck: &Deck, db: &CardDb) -> (f32, Vec<String>) {
+    if card.is_land() {
+        return (0.0, Vec::new());
+    }
+    with_profile(deck, db, |prof| {
+        let mut score = 0.0;
+        let mut why = Vec::new();
+        let copies = deck.count_of(&card.name) as f32;
+        let own = prof.own.get(&card.name).cloned();
+        let mut mech_total = 0.0;
+        for (k, m) in MECHANICS.iter().enumerate() {
+            let (mut payoffs, mut enablers) = prof.mech[k];
+            if let Some(o) = &own {
+                payoffs -= o[k].0 * copies;
+                enablers -= o[k].1 * copies;
+            }
+            let fd = feed(m, card);
+            let pay = (m.payoff)(card);
+            let mut pts = 0.0;
+            if fd > 0.0 && payoffs >= 0.5 {
+                pts += fd * 0.35 * payoffs.min(4.0);
+                why.push(format!(
+                    "feeds {:.0} {} payoff(s) in the deck",
+                    payoffs, m.need
+                ));
+            }
+            if pay > 0.0 && enablers >= 1.0 {
+                pts += pay * 0.25 * enablers.min(6.0);
+                why.push(format!("{:.0} {} in the deck feed it", enablers, m.need));
+            }
+            mech_total += pts.min(1.5);
+        }
+        score += mech_total.min(2.5);
+        // Creature types the deck's other cards care about ("other Villains you control").
+        if card.is_creature() {
+            let changeling = card.parsed().has_keyword("changeling");
+            let subs: Vec<String> = if changeling {
+                vec!["hero".into(), "villain".into()]
+            } else {
+                card.subtypes().iter().map(|s| s.to_lowercase()).collect()
+            };
+            for sub in subs.iter().filter(|s| s.len() >= 3) {
+                let n = match prof.tribes.get(sub) {
+                    Some(n) => *n,
+                    None => {
+                        let n: u32 = prof
+                            .texts
+                            .iter()
+                            .filter(|(name, text, _)| name != &card.name && cares_about(text, sub))
+                            .map(|(_, _, n)| *n)
+                            .sum();
+                        prof.tribes.insert(sub.clone(), n);
+                        n
+                    }
+                };
+                if n > 0 {
+                    score += 0.4 * n.min(4) as f32;
+                    why.push(format!("{} card(s) in the deck care about {}s", n, sub));
+                }
+            }
+        }
+        (score.min(3.0), why)
+    })
 }
 
 /// How much of a commander's ability value its deck can actually use (0.25..1).

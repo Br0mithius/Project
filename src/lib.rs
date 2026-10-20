@@ -19,3 +19,4 @@ pub mod setdata;
 pub mod tags;
 pub mod ui;
 pub mod upgrades;
+pub mod value;
