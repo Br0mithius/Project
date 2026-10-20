@@ -1,7 +1,9 @@
 """Re-verify every card in data/cards.json against Forge's card scripts (exact oracle text).
 
-Usage:  python3 tools/verify_with_forge.py           # show differences only
-        python3 tools/verify_with_forge.py --write   # also update data/cards.json
+Usage:  python3 tools/verify_with_forge.py                      # show differences only
+        python3 tools/verify_with_forge.py --write              # also update data/cards.json
+        python3 tools/verify_with_forge.py --import-set --write # add every MSH card (not just owned)
+        python3 tools/verify_with_forge.py --add "Prismatic Piper" --write   # add one card by name
 
 Forge (github.com/Card-Forge/forge) is an open-source MTG engine whose card scripts carry
 the official oracle text. Cards you add with `newcard` can be checked the same way.
@@ -38,7 +40,20 @@ for line in ed.splitlines():
         if name not in numbers:
             numbers[name] = (num, {"C":"common","U":"uncommon","R":"rare","M":"mythic","L":"common","S":"special","T":"common"}[rar])
 
+# Double-faced cards are filed under "front_back" in Forge; the edition list only names the front.
+DFC_BACK = {
+    "Bruce Banner": "The Incredible Hulk",
+    "Tony Stark": "The Invincible Iron Man",
+    "Jennifer Walters": "The Sensational She-Hulk",
+    "King T'Challa": "Black Panther, Hope Enduring",
+    "Monica Rambeau": "Photon, Living Light",
+}
+
 def candidates(name):
+    import unicodedata
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    if name in DFC_BACK:
+        name = name + " " + DFC_BACK[name]
     base = name.lower()
     a = re.sub(r"[^a-z0-9 _-]", "", base)
     outs = []
@@ -85,6 +100,20 @@ def identity(c, text):
 
 db = json.load(open(DB))
 report = []
+have = {c["name"] for c in db}
+BASICS = {"Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"}
+wanted = []
+if "--import-set" in sys.argv:
+    wanted += [n for n in numbers if n not in BASICS]
+for i, a in enumerate(sys.argv):
+    if a == "--add" and i + 1 < len(sys.argv):
+        wanted.append(sys.argv[i + 1])
+wanted = ["The Prismatic Piper" if w.lower() in ("prismatic piper", "the prismatic piper") else w for w in wanted]
+for name in wanted:
+    if name not in have:
+        db.append({"name": name, "set": "MSH" if name in numbers else "", "confidence": "new"})
+        have.add(name)
+        report.append(f"++ adding {name}")
 for card in db:
     script = None
     for f in candidates(card["name"]):
@@ -93,13 +122,16 @@ for card in db:
     if not script:
         report.append(f"!! NOT FOUND in Forge: {card['name']}")
         continue
-    # Only the front face (Forge scripts can hold several faces after ALTERNATE).
-    script = script.split("\nALTERNATE")[0]
-    fields = {}
-    for line in script.splitlines():
-        k, _, v = line.partition(":")
-        if k in ("Name","ManaCost","Types","PT","Oracle","Loyalty") and k not in fields:
-            fields[k] = v
+    def parse(face):
+        fields = {}
+        for line in face.splitlines():
+            k, _, v = line.partition(":")
+            if k in ("Name","ManaCost","Types","PT","Oracle","Loyalty") and k not in fields:
+                fields[k] = v
+        return fields
+    faces = script.split("\nALTERNATE")
+    fields = parse(faces[0])
+    back = parse(faces[1]) if len(faces) > 1 else None
     new = dict(card)
     new["name"] = fields.get("Name", card["name"])
     new["mana_cost"] = cost(fields.get("ManaCost", ""))
@@ -108,9 +140,15 @@ for card in db:
     new["oracle_text"] = fields.get("Oracle", "").replace("\\n", "\n").strip()
     # Forge typo on the MSH dual lands.
     new["oracle_text"] = new["oracle_text"].replace("if your control a basic land", "if you control a basic land")
+    if back:
+        # Show the back face under the front; its colours count toward colour identity.
+        bcost = cost(back.get("ManaCost", ""))
+        btext = back.get("Oracle", "").replace("\\n", "\n").strip()
+        bpt = (" " + back["PT"]) if back.get("PT") else ""
+        new["oracle_text"] += f"\n\n// Back face: {back.get('Name','')} {bcost}\n{type_line(back.get('Types',''))}{bpt}\n{btext}"
     pt = fields.get("PT")
     new["power"], new["toughness"] = (pt.split("/", 1) if pt else (None, None))
-    new["color_identity"] = identity(new["mana_cost"], new["oracle_text"])
+    new["color_identity"] = identity(new["mana_cost"] + (cost(back.get("ManaCost", "")) if back else ""), new["oracle_text"])
     if new["name"] in numbers:
         new["collector_number"], new["rarity"] = numbers[new["name"]]
     else:
@@ -118,14 +156,15 @@ for card in db:
     diffs = [k for k in ("name","mana_cost","cmc","type_line","oracle_text","power","toughness","rarity","color_identity","collector_number")
              if str(card.get(k)) != str(new.get(k)) and not (k == "cmc" and float(card.get(k) or 0) == float(new.get(k)))]
     if diffs:
-        report.append(f"-- {card['name']} [{card['confidence']}] changed: {', '.join(diffs)}")
-        for k in diffs:
+        if card.get("confidence") != "new":
+            report.append(f"-- {card['name']} [{card['confidence']}] changed: {', '.join(diffs)}")
+        for k in (diffs if card.get("confidence") != "new" else []):
             if k == "oracle_text":
                 report.append(f"     old: {card[k]!r}\n     new: {new[k]!r}")
             else:
                 report.append(f"     {k}: {card.get(k)!r} -> {new.get(k)!r}")
     new["confidence"] = "verified"
-    new["note"] = "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its MSH edition list."
+    new["note"] = "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge)" + ("; number and rarity from its MSH edition list." if new["name"] in numbers else ".")
     card.clear(); card.update(new)
 if "--write" in sys.argv:
     db.sort(key=lambda c: c["name"])
