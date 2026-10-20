@@ -451,6 +451,11 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if let Some(n) = note {
         why.push(n);
     }
+    // How much Commander players play it overall, compared with its set (EDHREC).
+    if let Some((pts, note)) = crate::edhrec::rank_points(&db.edhrec, &card.name) {
+        score += pts;
+        why.push(note);
+    }
     // When real win-rate data is in, it already reflects most of what roles add,
     // so roles count for less.
     let role_weight = 1.0 - 0.5 * data_weight;
@@ -527,6 +532,23 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let (pen, mut pen_why) = payoff_penalty(card, deck, db, rules);
     score -= pen;
     why.append(&mut pen_why);
+    // EDHREC players' picks for this commander (or its partner): what real decks run with it.
+    let best_pick = deck
+        .commanders()
+        .iter()
+        .filter_map(|c| db.edhrec.pick(c, &card.name).map(|p| (c.to_string(), p)))
+        .max_by(|a, b| {
+            crate::edhrec::pick_points(a.1)
+                .partial_cmp(&crate::edhrec::pick_points(b.1))
+                .unwrap()
+        });
+    if let Some((c, p)) = best_pick {
+        let pts = crate::edhrec::pick_points(p);
+        if pts > 0.0 {
+            score += pts;
+            why.push(crate::edhrec::describe_pick(&c, p));
+        }
+    }
     let cmd = deck.commander.as_ref().and_then(|c| db.get(c));
     if let Some(cmd) = cmd {
         let (syn, mut reasons) = synergy(cmd, card);

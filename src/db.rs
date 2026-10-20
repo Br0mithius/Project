@@ -33,6 +33,8 @@ pub struct CardDb {
     pub ratings_date: String,
     /// Playgroup.gg commander win rates by normalised name.
     pub commander_stats: HashMap<String, crate::ratings::CommanderStat>,
+    /// EDHREC card ranks and commander pages (empty until downloaded).
+    pub edhrec: crate::edhrec::Edhrec,
     /// Normalised name -> position in `cards`, so lookups don't scan the whole set.
     index: HashMap<String, usize>,
     /// Normalised name of each card, same order as `cards` (for searching).
@@ -68,6 +70,7 @@ impl CardDb {
             gih_means: HashMap::new(),
             ratings_date: String::new(),
             commander_stats: HashMap::new(),
+            edhrec: Default::default(),
             index: HashMap::new(),
             norm: Vec::new(),
         };
@@ -75,7 +78,7 @@ impl CardDb {
         db
     }
 
-    /// Loads 17Lands ratings and Playgroup.gg commander stats saved in `data_dir`.
+    /// Loads 17Lands ratings, Playgroup.gg commander stats and EDHREC data saved in `data_dir`.
     pub fn attach_ratings(&mut self, data_dir: &Path) {
         if let Some(file) = crate::ratings::load_ratings(data_dir) {
             self.ratings = file
@@ -111,6 +114,8 @@ impl CardDb {
             .into_iter()
             .map(|(k, v)| (normalize(&k), v))
             .collect();
+        let edhrec = crate::edhrec::Edhrec::new(crate::edhrec::load_file(data_dir), self);
+        self.edhrec = edhrec;
     }
 
     pub fn rating(&self, name: &str) -> Option<&crate::ratings::Rating> {

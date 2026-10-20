@@ -7,6 +7,7 @@ pub mod app;
 pub mod card;
 pub mod db;
 pub mod deck;
+pub mod edhrec;
 pub mod gui;
 pub mod league;
 pub mod packs;

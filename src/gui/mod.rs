@@ -961,6 +961,19 @@ impl GuiApp {
                     .small(),
                 );
                 ui.label(
+                    RichText::new(if self.db.edhrec.is_empty() {
+                        "No EDHREC data yet.".to_string()
+                    } else {
+                        format!(
+                            "EDHREC from {} ({} cards ranked, {} commander pages).",
+                            self.db.edhrec.fetched,
+                            self.db.edhrec.ranked_cards(),
+                            self.db.edhrec.commander_count()
+                        )
+                    })
+                    .small(),
+                );
+                ui.label(
                     RichText::new("Downloaded once and saved; re-downloaded only when you press a button below.")
                         .small()
                         .weak(),
@@ -1398,6 +1411,9 @@ impl GuiApp {
                         .color(if diff >= 0.0 { Color32::from_rgb(140, 220, 140) } else { Color32::from_rgb(255, 170, 120) }),
                     );
                 }
+            }
+            for line in crate::edhrec::card_summary(&self.db.edhrec, &card.name, &self.deck.commanders()) {
+                ui.label(RichText::new(line).small());
             }
             if card.can_be_commander() {
                 if let Some(s) = self.db.commander_stat(&card.name) {
@@ -1999,7 +2015,7 @@ impl GuiApp {
         }
     }
 
-    /// Downloads 17Lands card ratings and Playgroup.gg commander stats in the background.
+    /// Downloads 17Lands card ratings, Playgroup.gg commander stats and EDHREC data in the background.
     fn start_data_download(&mut self) {
         if self.data_job.is_some() {
             return;
@@ -2044,6 +2060,24 @@ impl GuiApp {
                 Err(_) => "Playgroup.gg unavailable".to_string(),
             };
             parts.push(b);
+            // EDHREC: card ranks, and a fresh page for each commander you own.
+            let c = match CardDb::load(&dir.join("cards.json"))
+                .map_err(|e| e.to_string())
+                .and_then(|db| crate::edhrec::fetch(&dir, &db, &names, true))
+            {
+                Ok(f) => format!(
+                    "EDHREC: {} cards ranked, {} commander pages{}",
+                    f.ranks,
+                    f.pages,
+                    if f.no_page > 0 {
+                        format!(" ({} commanders have no page yet)", f.no_page)
+                    } else {
+                        String::new()
+                    }
+                ),
+                Err(_) => "EDHREC unavailable (offline?)".to_string(),
+            };
+            parts.push(c);
             let _ = tx.send(format!("Updated - {}.", parts.join("; ")));
         });
         self.data_job = Some(rx);
@@ -2110,6 +2144,7 @@ impl GuiApp {
                     ("Mana", &mut w.mana, "simulated hands: keepable, commander cast on time"),
                     ("Commander", &mut w.commander, "the commander card itself: 17Lands, Playgroup.gg win rate, abilities, cost"),
                     ("Playtest", &mut w.playtest, "win rate in simulated 4-player games vs. decks from simulated league pools"),
+                    ("EDHREC", &mut w.edhrec, "how much of the deck is what EDHREC players run with this commander, and its popularity there"),
                 ] {
                     ui.label(label);
                     weights_changed |= ui.add(egui::Slider::new(value, 0.0..=3.0).step_by(0.1)).changed();

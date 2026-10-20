@@ -38,7 +38,7 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
     (
         "ratings",
         "",
-        "Download 17Lands card ratings and Playgroup.gg commander win rates",
+        "Download 17Lands card ratings, Playgroup.gg commander win rates and EDHREC data",
     ),
     (
         "import",
@@ -575,6 +575,9 @@ impl App {
                 );
             }
         }
+        for line in crate::edhrec::card_summary(&self.db.edhrec, &c.name, &self.deck.commanders()) {
+            println!("  {}", line);
+        }
         let parsed = c.parsed();
         let reading = parsed.describe();
         if !reading.is_empty() || !parsed.unparsed.is_empty() {
@@ -691,7 +694,7 @@ impl App {
         println!(
             "{}",
             self.style.dim(&format!(
-                "  #  {:<38} {:<6} {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | {}",
+                "  #  {:<38} {:<6} {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | {}",
                 "commander",
                 "plays",
                 "score",
@@ -702,6 +705,7 @@ impl App {
                 "mana",
                 "cmdr",
                 "play",
+                "edh",
                 if ranks.singleton.is_some() {
                     "singleton (Session 6+)"
                 } else {
@@ -727,7 +731,7 @@ impl App {
                 .map(|(p, t)| format!("#{} ({:.0})", p, t))
                 .unwrap_or_default();
             println!(
-                "{:>3}  {:<38} {:<6} {:>5.0} | {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} | {}{}",
+                "{:>3}  {:<38} {:<6} {:>5.0} | {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} | {}{}",
                 i + 1,
                 e.label(),
                 e.plays.to_string(),
@@ -739,6 +743,7 @@ impl App {
                 z[4],
                 z[5],
                 z[6],
+                z[7],
                 single,
                 if other.is_empty() {
                     String::new()
@@ -751,7 +756,7 @@ impl App {
             "Score: 0-100, 50 = your middle option. Parts are on one scale: +1 = one typical spread better than your middle option."
         );
         println!(
-            "Parts: cards = spell strength; curve and creatures vs. the commander's plan; removal & draw; mana = keepable hands / commander on time; commander's own strength; play = simulated 4-player games."
+            "Parts: cards = spell strength; curve and creatures vs. the commander's plan; removal & draw; mana = keepable hands / commander on time; commander's own strength; play = simulated 4-player games; edh = fit with the commander's EDHREC page."
         );
         println!(
             "`why <commander>` explains one; `auto <name> [colours]` builds it; `piper <colour>` adds The Prismatic Piper."
@@ -798,6 +803,8 @@ impl App {
                     e.scaled[k],
                     self.style.dim(&if k == 6 {
                         format!("(won {:.0}%)", raw[k] * 100.0)
+                    } else if !raw[k].is_finite() {
+                        "(no data - middle)".to_string()
                     } else {
                         format!("(raw {:.2})", raw[k])
                     })
@@ -1047,6 +1054,17 @@ impl App {
         match crate::ratings::fetch_playgroup(&self.data_dir, &names) {
             Ok(n) => println!("  {} commanders found.", n),
             Err(e) => println!("  {}", e),
+        }
+        println!(
+            "Downloading EDHREC card ranks (via Scryfall) and {} commander pages...",
+            names.len()
+        );
+        match crate::edhrec::fetch(&self.data_dir, &self.db, &names, true) {
+            Ok(f) => println!(
+                "  {} cards ranked, {} commander pages, {} commanders without a page.",
+                f.ranks, f.pages, f.no_page
+            ),
+            Err(e) => println!("  Couldn't download EDHREC data: {}", e),
         }
         self.db.attach_ratings(&self.data_dir);
         let rated = self.db.ratings.len();

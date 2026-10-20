@@ -2,7 +2,7 @@
 //! Prismatic Piper) is judged by the actual deck auto-build makes from your pool, plus the
 //! commander's own strength.
 //!
-//! Each option is graded on seven parts:
+//! Each option is graded on eight parts:
 //! * **Cards**       average strength of the deck's spells (17Lands win rates when
 //!   downloaded, roles, synergy with the commander, 4-player adjustments)
 //! * **Curve**       how close the mana curve is to the commander's plan (aggro decks want
@@ -14,6 +14,9 @@
 //!   4-player games, and its abilities (repeatable triggers, mana sinks, evasion, cost)
 //! * **Playtest**    win rate in simulated 4-player games against decks built from
 //!   simulated league pools (`playtest`)
+//! * **EDHREC**      how much of the deck is what EDHREC players run with this commander
+//!   (inclusion and synergy on its EDHREC page) and how popular the commander is there.
+//!   Options without an EDHREC page sit at the middle.
 //!
 //! Parts come in different units, so before weighting each one is put on the same scale:
 //! how far above or below your typical option it is (median, scaled by the median absolute
@@ -40,7 +43,11 @@ pub struct Weights {
     pub mana: f32,
     pub commander: f32,
     pub playtest: f32,
+    pub edhrec: f32,
 }
+
+/// Number of ranking parts.
+pub const PARTS: usize = 8;
 
 impl Default for Weights {
     fn default() -> Self {
@@ -52,12 +59,14 @@ impl Default for Weights {
             mana: 1.0,
             commander: 1.0,
             playtest: 1.0,
+            // Popularity among 100-card decks is a hint, not proof, for league pools.
+            edhrec: 0.5,
         }
     }
 }
 
 impl Weights {
-    pub fn values(&self) -> [f32; 7] {
+    pub fn values(&self) -> [f32; PARTS] {
         [
             self.cards,
             self.curve,
@@ -66,6 +75,7 @@ impl Weights {
             self.mana,
             self.commander,
             self.playtest,
+            self.edhrec,
         ]
     }
 }
@@ -80,14 +90,16 @@ pub struct Parts {
     pub commander: f32,
     /// Win rate in simulated 4-player games (0.25 = as good as the test decks).
     pub playtest: f32,
+    /// Fit with the commander's EDHREC page (NaN = no page; ranked as the middle option).
+    pub edhrec: f32,
 }
 
 /// The smallest difference in each part (in its own units) that's worth caring about.
 /// Used as the minimum spread when normalising, so near-identical options stay close.
-const MIN_SPREAD: [f32; 7] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.04];
+const MIN_SPREAD: [f32; PARTS] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.04, 0.2];
 
 impl Parts {
-    pub const LABELS: [&'static str; 7] = [
+    pub const LABELS: [&'static str; PARTS] = [
         "Cards",
         "Curve",
         "Creatures",
@@ -95,9 +107,10 @@ impl Parts {
         "Mana",
         "Commander",
         "Playtest",
+        "EDHREC",
     ];
 
-    pub fn values(&self) -> [f32; 7] {
+    pub fn values(&self) -> [f32; PARTS] {
         [
             self.cards,
             self.curve,
@@ -106,6 +119,7 @@ impl Parts {
             self.mana,
             self.commander,
             self.playtest,
+            self.edhrec,
         ]
     }
 }
@@ -120,7 +134,7 @@ pub struct Evaluation {
     /// Raw part values, in their own units.
     pub parts: Parts,
     /// Parts on a common scale: spreads above/below your middle option (-2.5..2.5).
-    pub scaled: [f32; 7],
+    pub scaled: [f32; PARTS],
     /// 0-100; 50 = the middle of the options ranked together.
     pub total: f32,
     pub archetype: Archetype,
@@ -292,6 +306,52 @@ pub fn commander_power(
     (score, why)
 }
 
+/// How closely the deck matches what EDHREC players run with its commander(s): average
+/// inclusion and synergy of its spells on the commander's page, plus how popular the
+/// commander is there. NaN when no commander has a saved page.
+pub fn edhrec_fit(deck: &Deck, db: &CardDb) -> (f32, Option<String>) {
+    let pages: Vec<(&String, &crate::edhrec::CommanderPage)> = deck
+        .commanders()
+        .into_iter()
+        .filter_map(|c| db.edhrec.page(c).map(|p| (c, p)))
+        .collect();
+    if pages.is_empty() {
+        let note = (!db.edhrec.is_empty()).then(|| {
+            "no EDHREC page saved for this commander (EDHREC part set to the middle)".to_string()
+        });
+        return (f32::NAN, note);
+    }
+    let (mut copies, mut listed, mut inclusion, mut synergy) = (0u32, 0u32, 0.0, 0.0);
+    for (name, &n) in &deck.cards {
+        if db.get(name).is_none_or(|c| c.is_land()) {
+            continue;
+        }
+        copies += n;
+        let best = pages
+            .iter()
+            .filter_map(|(c, _)| db.edhrec.pick(c, name))
+            .max_by(|a, b| a.inclusion.partial_cmp(&b.inclusion).unwrap());
+        if let Some(p) = best {
+            listed += n;
+            inclusion += p.inclusion * n as f32;
+            synergy += p.synergy * n as f32;
+        }
+    }
+    let per = copies.max(1) as f32;
+    let decks = pages.iter().map(|(_, p)| p.decks).max().unwrap_or(0);
+    let value = 4.0 * inclusion / per + 2.0 * synergy / per + 0.3 * ((decks + 1) as f32).log10();
+    let note = format!(
+        "EDHREC: {} of {} spells are on {}'s page (average inclusion {:.0}%, synergy {:+.0}%); {} decks on EDHREC",
+        listed,
+        copies,
+        pages[0].0,
+        100.0 * inclusion / per,
+        100.0 * synergy / per,
+        decks
+    );
+    (value, Some(note))
+}
+
 fn parts_for(
     deck: &Deck,
     db: &CardDb,
@@ -367,6 +427,7 @@ fn parts_for(
             mana,
             commander: 0.0,
             playtest: 0.25,
+            edhrec: f32::NAN,
         },
         st.creatures,
         removal_n,
@@ -436,6 +497,9 @@ pub fn evaluate(
             bed.games
         ));
     }
+    let (fit, fit_note) = edhrec_fit(&deck, db);
+    parts.edhrec = fit;
+    notes.extend(fit_note);
     let archetype = deck_plan(&deck, db, rules).archetype;
     Evaluation {
         commander: cmd.name.clone(),
@@ -443,7 +507,7 @@ pub fn evaluate(
         identity: cmd.identity(),
         plays,
         parts,
-        scaled: [0.0; 7],
+        scaled: [0.0; PARTS],
         total: 50.0,
         archetype,
         creatures,
@@ -463,15 +527,21 @@ pub fn finalize(evals: &mut [Evaluation], weights: &Weights) {
     if evals.is_empty() {
         return;
     }
-    for k in 0..7 {
+    for k in 0..PARTS {
         let vals: Vec<f32> = evals.iter().map(|e| e.parts.values()[k]).collect();
         // Median and median absolute deviation: one freak option (say, a colourless
-        // commander with no deck) can't squash everyone else together.
-        let mid = median(&vals);
-        let mad = median(&vals.iter().map(|v| (v - mid).abs()).collect::<Vec<_>>());
+        // commander with no deck) can't squash everyone else together. Missing values
+        // (NaN: no data for that option) don't count and land in the middle.
+        let known: Vec<f32> = vals.iter().copied().filter(|v| v.is_finite()).collect();
+        let mid = median(&known);
+        let mad = median(&known.iter().map(|v| (v - mid).abs()).collect::<Vec<_>>());
         let spread = (1.4826 * mad).max(MIN_SPREAD[k]);
         for (e, v) in evals.iter_mut().zip(&vals) {
-            e.scaled[k] = ((v - mid) / spread).clamp(-2.5, 2.5);
+            e.scaled[k] = if v.is_finite() {
+                ((v - mid) / spread).clamp(-2.5, 2.5)
+            } else {
+                0.0
+            };
         }
     }
     let w = weights.values();
@@ -634,7 +704,7 @@ pub fn build_count(db: &CardDb, coll: &Collection, rules: &Rules) -> usize {
 /// Changes to any of these mean the ranking must be rebuilt.
 pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{:?}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}",
         coll.total(),
         coll.counts.len(),
         rules.deck_size,
@@ -643,6 +713,8 @@ pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
         rules.session,
         db.ratings_date,
         db.commander_stats.len(),
+        db.edhrec.fetched,
+        db.edhrec.commander_count(),
         rules.roster
     )
 }
@@ -681,7 +753,7 @@ mod tests {
                 playtest: 0.25,
                 ..Default::default()
             },
-            scaled: [0.0; 7],
+            scaled: [0.0; PARTS],
             total: 0.0,
             archetype: Archetype::Midrange,
             creatures: 0,
