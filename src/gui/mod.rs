@@ -345,7 +345,7 @@ impl GuiApp {
         // Ratings are downloaded once, on first launch; after that only when you ask
         // (Settings > Update ratings), so the sites aren't hit repeatedly.
         let stamp = app.data_dir.join("ratings_downloaded.txt");
-        if app.db.ratings_date.is_empty() && !stamp.exists() {
+        if !stamp.exists() {
             let _ = std::fs::write(&stamp, crate::ratings::today());
             app.start_data_download();
         }
@@ -954,14 +954,6 @@ impl GuiApp {
                 ui.separator();
                 ui.label(RichText::new("Rankings data").strong());
                 ui.label(
-                    RichText::new(if self.db.ratings.is_empty() {
-                        "No 17Lands card ratings yet.".to_string()
-                    } else {
-                        format!("17Lands ratings from {} ({} cards).", self.db.ratings_date, self.db.ratings.len())
-                    })
-                    .small(),
-                );
-                ui.label(
                     RichText::new(if self.db.edhrec.is_empty() {
                         "No EDHREC data yet.".to_string()
                     } else {
@@ -1239,7 +1231,7 @@ impl GuiApp {
                 other => other.to_string(),
             };
             let mut sets = vec![String::new()];
-            sets.extend(self.db.rated_sets());
+            sets.extend(self.db.league_sets());
             sets.push("LEAGUE".into());
             egui::ComboBox::from_id_salt("setfilter")
                 .selected_text(label(&self.set_filter))
@@ -1401,21 +1393,6 @@ impl GuiApp {
                 league::vp_value(&card),
                 league::claim_cost(&card)
             ));
-            if let Some(r) = self.db.rating(&card.name) {
-                if let Some(wr) = r.gih_wr {
-                    let diff = (wr - self.db.gih_mean) * 100.0;
-                    ui.label(
-                        RichText::new(format!(
-                            "17Lands: {:.1}% win rate when drawn ({:+.1} vs set average) · {} games{}",
-                            wr * 100.0,
-                            diff,
-                            r.games,
-                            r.alsa.map(|a| format!(" · last seen pick {:.1}", a)).unwrap_or_default()
-                        ))
-                        .color(if diff >= 0.0 { Color32::from_rgb(140, 220, 140) } else { Color32::from_rgb(255, 170, 120) }),
-                    );
-                }
-            }
             if !card.tags.is_empty() {
                 ui.label(RichText::new(format!("Scryfall tags: {}", card.tags.join(", "))).small())
                     .on_hover_text("Community Tagger tags from Scryfall - used to confirm roles and synergy");
@@ -2023,7 +2000,7 @@ impl GuiApp {
         }
     }
 
-    /// Downloads 17Lands card ratings, Playgroup.gg commander stats and EDHREC data in the background.
+    /// Downloads Playgroup.gg commander stats, EDHREC data and Scryfall tags in the background.
     fn start_data_download(&mut self) {
         if self.data_job.is_some() {
             return;
@@ -2055,14 +2032,6 @@ impl GuiApp {
                     ),
                 }
             }
-            let sets = CardDb::load(&dir.join("cards.json"))
-                .map(|db| db.rated_sets())
-                .unwrap_or_else(|_| vec!["MSH".into()]);
-            let a = match crate::ratings::fetch_17lands(&dir, &sets) {
-                Ok(n) => format!("17Lands: {} cards rated", n),
-                Err(_) => "17Lands unavailable (offline?)".to_string(),
-            };
-            parts.push(a);
             let b = match crate::ratings::fetch_playgroup(&dir, &names) {
                 Ok(n) => format!("Playgroup.gg: {} commanders", n),
                 Err(_) => "Playgroup.gg unavailable".to_string(),
@@ -2074,13 +2043,20 @@ impl GuiApp {
                 .and_then(|db| crate::edhrec::fetch(&dir, &db, &names, true))
             {
                 Ok(f) => format!(
-                    "EDHREC: {} cards ranked, {} commander pages{}",
+                    "EDHREC: {} cards ranked, {} commander pages{}{}",
                     f.ranks,
                     f.pages,
                     if f.no_page > 0 {
                         format!(" ({} commanders have no page yet)", f.no_page)
                     } else {
                         String::new()
+                    },
+                    match &f.first_error {
+                        Some(e) => format!(
+                            " - some pages failed ({}; details in data/edhrec_log.txt)",
+                            e
+                        ),
+                        None => String::new(),
                     }
                 ),
                 Err(_) => "EDHREC unavailable (offline?)".to_string(),
@@ -2116,20 +2092,20 @@ impl GuiApp {
             }
         });
         ui.label(
-            "Each commander is ranked by the full deck auto-build makes from your pool, graded on seven parts below and playtested \
+            "Each commander is ranked by the full deck auto-build makes from your pool, graded on eight parts below and playtested \
              in simulated 4-player games. Mono-colour commanders are also tried with The Prismatic Piper adding their two most \
              promising colours. Scores run 0-100: 50 is your middle option.",
         );
         ui.horizontal_wrapped(|ui| {
-            let data = if self.db.ratings.is_empty() {
-                RichText::new("No 17Lands data yet - card strength uses rarity.")
+            let data = if self.db.edhrec.is_empty() {
+                RichText::new("No EDHREC data yet - press Update ratings.")
                     .color(Color32::from_rgb(255, 190, 110))
             } else {
                 RichText::new(format!(
-                    "17Lands ratings from {} ({} cards, set average {:.1}%)",
-                    self.db.ratings_date,
-                    self.db.ratings.len(),
-                    self.db.gih_mean * 100.0
+                    "EDHREC data from {} ({} cards ranked, {} commander pages)",
+                    self.db.edhrec.fetched,
+                    self.db.edhrec.ranked_cards(),
+                    self.db.edhrec.commander_count()
                 ))
                 .color(Color32::from_rgb(150, 220, 150))
             };
@@ -2153,12 +2129,12 @@ impl GuiApp {
             let w = &mut self.settings.weights;
             egui::Grid::new("weights").show(ui, |ui| {
                 for (label, value, help) in [
-                    ("Cards", &mut w.cards, "average strength of the deck's spells (17Lands, roles, synergy, 4-player value)"),
+                    ("Cards", &mut w.cards, "average strength of the deck's spells (roles, synergy, EDHREC rank, 4-player value)"),
                     ("Curve", &mut w.curve, "mana curve vs. the commander's plan (aggro decks want it lower, big-mana decks higher)"),
                     ("Creatures", &mut w.creatures, "creature count vs. the plan (e.g. 18-24 aggro, 15-20 midrange, 9-14 spells)"),
                     ("Interaction", &mut w.interaction, "removal (board wipes count extra) and card draw vs. the plan"),
                     ("Mana", &mut w.mana, "simulated hands: keepable, commander cast on time"),
-                    ("Commander", &mut w.commander, "the commander card itself: 17Lands, Playgroup.gg win rate, abilities, cost"),
+                    ("Commander", &mut w.commander, "the commander card itself: Playgroup.gg win rate, abilities, cost"),
                     ("Playtest", &mut w.playtest, "win rate in simulated 4-player games vs. decks from simulated league pools"),
                     ("EDHREC", &mut w.edhrec, "how much of the deck is what EDHREC players run with this commander, and its popularity there"),
                 ] {

@@ -1,47 +1,24 @@
-//! Outside data that sharpens the rankings, downloaded on your PC and saved in `data/`:
+//! Outside commander data, downloaded on your PC and saved in `data/`:
+//! **Playgroup.gg** commander win rates from logged casual Commander games (mostly 4-player
+//! pods; a 25% win rate is average). These are 100-card constructed decks, so they're a
+//! weaker signal for league pools and are weighted lightly. Optional. Also the league sets'
+//! release dates, used to judge how much data a set has had time to collect.
 //!
-//! * **17Lands** card ratings for Marvel Super Heroes Premier Draft: how often decks win
-//!   when a card was drawn ("GIH WR"), from many thousands of real MTG Arena games.
-//! * **Playgroup.gg** commander win rates from logged casual Commander games (mostly 4-player
-//!   pods; a 25% win rate is average). These are 100-card constructed decks, so they're a
-//!   weaker signal for league pools and are weighted lightly.
-//!
-//! Both are optional: without them the app falls back to rarity and its own heuristics.
+//! 17Lands draft ratings were used here once; they're no longer used and any saved copy is
+//! deleted (`remove_17lands_data`).
 
 use crate::db::normalize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Release dates of the league sets - the start of 17Lands' data window for each.
+/// Release dates of the league sets.
 const SET_RELEASES: [(&str, &str); 4] = [
     ("MSH", "2026-06-26"),
     ("HOB", "2026-08-14"),
     ("FRA", "2026-10-02"),
     ("FDN", "2024-11-15"),
 ];
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Rating {
-    /// Set code the rating is from (cards are compared with their own set's average).
-    #[serde(default)]
-    pub set: String,
-    /// Win rate of games where the card was drawn or in the opening hand (0-1).
-    pub gih_wr: Option<f32>,
-    /// Games behind `gih_wr`.
-    pub games: u32,
-    /// Average pick position it was last seen at (lower = drafters value it more).
-    pub alsa: Option<f32>,
-    /// Improvement in win rate when drawn ("IWD").
-    pub iwd: Option<f32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RatingsFile {
-    pub fetched: String,
-    pub source: String,
-    pub cards: BTreeMap<String, Rating>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommanderStat {
@@ -57,8 +34,12 @@ pub struct CommanderStatsFile {
     pub commanders: BTreeMap<String, CommanderStat>,
 }
 
-pub fn ratings_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("ratings_17lands.json")
+/// Deletes 17Lands draft ratings saved by earlier versions (they're no longer used).
+pub fn remove_17lands_data(data_dir: &Path) {
+    let old = data_dir.join("ratings_17lands.json");
+    if old.exists() {
+        let _ = std::fs::remove_file(old);
+    }
 }
 
 pub fn commander_stats_path(data_dir: &Path) -> PathBuf {
@@ -114,11 +95,6 @@ pub fn age_days(date: &str) -> i64 {
 
 // ---------------------------------------------------------------- loading
 
-pub fn load_ratings(data_dir: &Path) -> Option<RatingsFile> {
-    let text = std::fs::read_to_string(ratings_path(data_dir)).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
 /// Snapshot of Playgroup.gg numbers found while building this feature (Oct 2026), used
 /// until the app can download fresh ones.
 fn builtin_commander_stats() -> CommanderStatsFile {
@@ -154,7 +130,7 @@ pub fn load_commander_stats(data_dir: &Path) -> CommanderStatsFile {
     file
 }
 
-// ---------------------------------------------------------------- 17Lands
+// ---------------------------------------------------------------- downloads
 
 fn get_text(url: &str) -> Result<String, String> {
     ureq::get(url)
@@ -166,82 +142,6 @@ fn get_text(url: &str) -> Result<String, String> {
         .limit(32 * 1024 * 1024)
         .read_to_string()
         .map_err(|e| e.to_string())
-}
-
-fn num(v: &serde_json::Value) -> Option<f32> {
-    v.as_f64().map(|x| x as f32)
-}
-
-/// Reads 17Lands' card_ratings JSON (a list of cards with `ever_drawn_win_rate` etc.).
-pub fn parse_17lands(json: &str, set: &str) -> Result<BTreeMap<String, Rating>, String> {
-    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let list = v
-        .as_array()
-        .ok_or("17Lands returned something other than a card list")?;
-    let mut out = BTreeMap::new();
-    for card in list {
-        let Some(name) = card["name"].as_str() else {
-            continue;
-        };
-        // Double-faced cards are listed as "Front // Back"; the app uses the front name.
-        let name = name.split(" // ").next().unwrap_or(name).to_string();
-        let r = Rating {
-            set: set.to_string(),
-            gih_wr: num(&card["ever_drawn_win_rate"]),
-            games: card["ever_drawn_game_count"].as_u64().unwrap_or(0) as u32,
-            alsa: num(&card["avg_seen"]),
-            iwd: num(&card["drawn_improvement_win_rate"]),
-        };
-        out.insert(name, r);
-    }
-    if out.is_empty() {
-        return Err("17Lands returned no cards".into());
-    }
-    Ok(out)
-}
-
-/// Downloads the latest 17Lands ratings for each set code and saves them together.
-/// Returns the number of cards rated; sets without data are skipped.
-pub fn fetch_17lands(data_dir: &Path, sets: &[String]) -> Result<usize, String> {
-    let mut cards = BTreeMap::new();
-    let mut errors = Vec::new();
-    for set in sets {
-        let start = SET_RELEASES
-            .iter()
-            .find(|(c, _)| c == set)
-            .map(|(_, d)| d.to_string())
-            .unwrap_or_else(|| "2026-01-01".into());
-        let url = std::env::var("MSH_17LANDS_URL").unwrap_or_else(|_| {
-            format!(
-                "https://www.17lands.com/card_ratings/data?expansion={}&format=PremierDraft&start_date={}&end_date={}",
-                set,
-                start,
-                today()
-            )
-        });
-        match get_text(&url).and_then(|t| parse_17lands(&t, set)) {
-            // Earlier sets win for reprints (the league's starter set comes first).
-            Ok(r) => {
-                for (k, v) in r {
-                    cards.entry(k).or_insert(v);
-                }
-            }
-            Err(e) => errors.push(format!("{}: {}", set, e)),
-        }
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    if cards.is_empty() {
-        return Err(errors.join("; "));
-    }
-    let n = cards.len();
-    let file = RatingsFile {
-        fetched: today(),
-        source: "17lands.com Premier Draft".into(),
-        cards,
-    };
-    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
-    std::fs::write(ratings_path(data_dir), json).map_err(|e| e.to_string())?;
-    Ok(n)
 }
 
 // ---------------------------------------------------------------- Playgroup.gg
@@ -422,21 +322,6 @@ pub fn fetch_playgroup(data_dir: &Path, names: &[String]) -> Result<usize, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_17lands_json() {
-        let json = r#"[
-            {"name": "Red Hulk", "ever_drawn_win_rate": 0.583, "ever_drawn_game_count": 4210, "avg_seen": 3.1, "drawn_improvement_win_rate": 0.031},
-            {"name": "Bruce Banner // The Incredible Hulk", "ever_drawn_win_rate": 0.66, "ever_drawn_game_count": 900, "avg_seen": null, "drawn_improvement_win_rate": null},
-            {"name": "Unplayed", "ever_drawn_win_rate": null, "ever_drawn_game_count": 0}
-        ]"#;
-        let r = parse_17lands(json, "MSH").unwrap();
-        assert_eq!(r["Red Hulk"].set, "MSH");
-        assert_eq!(r["Red Hulk"].games, 4210);
-        assert!((r["Red Hulk"].gih_wr.unwrap() - 0.583).abs() < 1e-4);
-        assert!(r.contains_key("Bruce Banner"));
-        assert!(r["Unplayed"].gih_wr.is_none());
-    }
 
     #[test]
     fn parses_playgroup_text_and_json() {

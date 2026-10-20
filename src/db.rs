@@ -23,14 +23,6 @@ pub fn normalize(name: &str) -> String {
 #[derive(Clone)]
 pub struct CardDb {
     pub cards: Vec<Card>,
-    /// 17Lands ratings by normalised name (empty until downloaded).
-    pub ratings: HashMap<String, crate::ratings::Rating>,
-    /// Game-weighted average 17Lands win rate across all rated cards.
-    pub gih_mean: f32,
-    /// The same average per set, so each card is compared with its own set.
-    pub gih_means: HashMap<String, f32>,
-    /// When the ratings were downloaded ("" = never).
-    pub ratings_date: String,
     /// Playgroup.gg commander win rates by normalised name.
     pub commander_stats: HashMap<String, crate::ratings::CommanderStat>,
     /// EDHREC card ranks and commander pages (empty until downloaded).
@@ -67,10 +59,6 @@ impl CardDb {
         cards.sort_by(|a, b| a.name.cmp(&b.name));
         let mut db = CardDb {
             cards,
-            ratings: HashMap::new(),
-            gih_mean: 0.56,
-            gih_means: HashMap::new(),
-            ratings_date: String::new(),
             commander_stats: HashMap::new(),
             edhrec: Default::default(),
             tags_date: String::new(),
@@ -81,37 +69,9 @@ impl CardDb {
         db
     }
 
-    /// Loads 17Lands ratings, Playgroup.gg commander stats and EDHREC data saved in `data_dir`.
+    /// Loads Playgroup.gg commander stats, EDHREC data and Scryfall tags saved in `data_dir`.
     pub fn attach_ratings(&mut self, data_dir: &Path) {
-        if let Some(file) = crate::ratings::load_ratings(data_dir) {
-            self.ratings = file
-                .cards
-                .into_iter()
-                .map(|(k, v)| (normalize(&k), v))
-                .collect();
-            self.ratings_date = file.fetched;
-            let (sum, n) = self
-                .ratings
-                .values()
-                .filter_map(|r| r.gih_wr.map(|w| (w * r.games as f32, r.games as f32)))
-                .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
-            if n > 0.0 {
-                self.gih_mean = sum / n;
-            }
-            let mut per: HashMap<String, (f32, f32)> = HashMap::new();
-            for r in self.ratings.values() {
-                if let Some(w) = r.gih_wr {
-                    let e = per.entry(r.set.clone()).or_insert((0.0, 0.0));
-                    e.0 += w * r.games as f32;
-                    e.1 += r.games as f32;
-                }
-            }
-            self.gih_means = per
-                .into_iter()
-                .filter(|(_, (_, n))| *n > 0.0)
-                .map(|(k, (s, n))| (k, s / n))
-                .collect();
-        }
+        crate::ratings::remove_17lands_data(data_dir);
         self.commander_stats = crate::ratings::load_commander_stats(data_dir)
             .commanders
             .into_iter()
@@ -136,24 +96,15 @@ impl CardDb {
         }
     }
 
-    pub fn rating(&self, name: &str) -> Option<&crate::ratings::Rating> {
-        self.ratings.get(&normalize(name))
-    }
-
-    /// Average 17Lands win rate of the set a rating came from.
-    pub fn set_mean(&self, set: &str) -> f32 {
-        *self.gih_means.get(set).unwrap_or(&self.gih_mean)
-    }
-
-    /// Set codes in the database that 17Lands could rate (not staples or promos).
-    pub fn rated_sets(&self) -> Vec<String> {
+    /// Set codes of the league's booster sets in the database (not staples or promos).
+    pub fn league_sets(&self) -> Vec<String> {
         let mut sets: Vec<String> = Vec::new();
         for c in &self.cards {
             if !c.set.is_empty() && c.set != "LEAGUE" && c.set != "CMR" && !sets.contains(&c.set) {
                 sets.push(c.set.clone());
             }
         }
-        // The league's starter set first, so its ratings win for reprints.
+        // The league's starter set first.
         sets.sort_by_key(|s| if s == "MSH" { 0 } else { 1 });
         sets
     }

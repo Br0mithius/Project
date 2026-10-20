@@ -41,13 +41,12 @@ smooth. If an image can't be fetched, the app draws a stand-in card face.
 
 | Source | Used for | When it's downloaded |
 | --- | --- | --- |
-| [17Lands](https://www.17lands.com) | Games-in-hand win rate per card, a variable in card strength | Once, on first start; then only via Settings > "Update ratings now" |
-| [Playgroup.gg](https://playgroup.gg) | Commander win rates in recorded multiplayer games | Same as 17Lands (one gentle request at a time, stops early if the site doesn't answer) |
-| [EDHREC](https://edhrec.com) | Each card's EDHREC rank (read from Scryfall, which publishes it, 75 cards per request) and, for each commander you own, the cards EDHREC players run with it | Only via "Update ratings now" (one request per commander, a second apart; commanders without a page aren't asked again until the next update) |
+| [Playgroup.gg](https://playgroup.gg) | Commander win rates in recorded multiplayer games | Once, on first start; then only via Settings > "Update ratings now" (one gentle request at a time, stops early if the site doesn't answer) |
+| [EDHREC](https://edhrec.com) | Each card's EDHREC rank (read from Scryfall, which publishes it, 75 cards per request) and, for each commander you own, the cards EDHREC players run with it | Only via "Update ratings now" (one request per commander, a second apart; commanders without a page aren't asked again until the next update). If EDHREC's shield refuses the JSON address, the app retries once with a plain user agent, then reads the same data from the commander's edhrec.com page, and follows EDHREC's renamed-page redirects |
 | [Scryfall Tagger](https://scryfall.com/docs/tagger-tags) | Community tags for what cards do (removal, ramp, sacrifice outlet...) | Only via "Update ratings now": the tag list page, then one search per useful tag, limited to the league sets |
 | [Scryfall](https://scryfall.com) | Card images; new league cards | Each image once, then read from `images/`; cards only via "Update card database" |
 
-Everything downloaded is saved in `data/` (`ratings_17lands.json`, `commander_stats.json`, `edhrec.json`,
+Everything downloaded is saved in `data/` (`commander_stats.json`, `edhrec.json`,
 `scryfall_tags.json`), so the app never asks the sites for the same data twice unless you press a button.
 
 ## Running from source
@@ -68,8 +67,8 @@ Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red
 | --- | --- |
 | `data/cards.json` | Card database (cost, type, rules text, P/T, rarity, colour identity). |
 | `data/collection.txt` | The cards you own, one `count name` per line (empty until you import). Edit by hand or with `own` / `unown`. |
-| `data/ratings_17lands.json`, `data/commander_stats.json` | Saved 17Lands and Playgroup.gg data. |
-| `data/edhrec.json`, `data/scryfall_tags.json` | Saved EDHREC ranks and commander pages, and Scryfall Tagger tags. |
+| `data/commander_stats.json` | Saved Playgroup.gg data. |
+| `data/edhrec.json`, `data/scryfall_tags.json` | Saved EDHREC ranks and commander pages, and Scryfall Tagger tags. `data/edhrec_log.txt` lists every EDHREC request of the last update and how it went. |
 | `data/public_pool.txt` | The league's Public Pool, pasted from Mana Mixer (Upgrades tab or `publicpool <file>`). |
 | `data/rules.json` | Format rules, created when you change one with `rules <key> <value>`. |
 | `decks/*.txt` | Saved decks (`decks/_current.txt` is the auto-saved working deck). |
@@ -119,10 +118,9 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   couldn't read with "?". `cargo run --release --example parse_report -- data` reports coverage (`--card "Name"`,
   `--removal`, `--roles`, `--synergy "Commander"` for details).
 
-* **Card strength** blends a rarity guess with the card's 17Lands win rate compared with its set's average; the more
-  games 17Lands has recorded, the more the real data counts (half at 500 games). Without data a card counts as
-  average, nudged a little by rarity (mythic +0.5 over common - about 2 points of win rate, roughly what 17Lands
-  shows between rarities). Roles from the card reading (graded removal, card draw, board wipes, "each opponent"
+* **Card strength** starts every card as average, nudged a little by rarity (mythic +0.5 over common). 17Lands draft
+  win rates were used here before; they come from 2-player 40-card draft games, so they've been dropped (and any
+  saved copy is deleted). Roles from the card reading (graded removal, card draw, board wipes, "each opponent"
   effects that are better with 4 players, repeatable engines...), creature stats for the cost, curve fit and synergy
   with your commander are added on top.
 * **EDHREC** adds two things. A card's EDHREC rank, compared with the rest of its set, moves it up to ±0.4 - less
@@ -143,7 +141,7 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   Stats tab's curve targets and the ranking all use that plan.
 * **Commander ranking** auto-builds a full deck for each commander (and each mono-colour commander with The Prismatic
   Piper in its two best extra colours) and grades it on eight parts - Cards, Curve, Creatures, Interaction, Mana,
-  Commander (17Lands, Playgroup.gg win rate, abilities, cost), Playtest and EDHREC (how much of the deck is what EDHREC
+  Commander (Playgroup.gg win rate, abilities, cost), Playtest and EDHREC (how much of the deck is what EDHREC
   players run with that commander; middle when there's no page or one built on under 20 decks). Parts are put on one
   scale (how far above or below your middle option, using the median so one freak option can't distort the rest), the
   sliders set how much each part counts, and the total runs 0-100 with 50 = your middle option.

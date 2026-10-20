@@ -173,7 +173,7 @@ pub fn fetch(data_dir: &Path, db: &CardDb) -> Result<(usize, usize), String> {
         .map(|(t, _)| *t)
         .filter(|t| listed.is_empty() || listed.iter().any(|l| l == t))
         .collect();
-    let sets = db.rated_sets();
+    let sets = db.league_sets();
     let sets_q = sets
         .iter()
         .map(|s| format!("e%3A{}", s.to_lowercase()))

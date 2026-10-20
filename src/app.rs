@@ -38,7 +38,7 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
     (
         "ratings",
         "",
-        "Download 17Lands card ratings, Playgroup.gg commander win rates and EDHREC data",
+        "Download EDHREC data, Scryfall tags and Playgroup.gg commander win rates",
     ),
     (
         "import",
@@ -565,16 +565,6 @@ impl App {
             c.identity(),
             c.mana_value()
         );
-        if let Some(r) = self.db.rating(&c.name) {
-            if let Some(wr) = r.gih_wr {
-                println!(
-                    "  17Lands: {:.1}% win rate when drawn ({:+.1} vs set average) · {} games",
-                    wr * 100.0,
-                    (wr - self.db.gih_mean) * 100.0,
-                    r.games
-                );
-            }
-        }
         if !c.tags.is_empty() {
             println!("  Scryfall tags: {}", c.tags.join(", "));
         }
@@ -685,10 +675,10 @@ impl App {
             println!("You don't own any legendary creatures yet.");
             return;
         }
-        let data = if self.db.ratings.is_empty() {
-            "no 17Lands data yet - run `ratings` to download it".to_string()
+        let data = if self.db.edhrec.is_empty() {
+            "no EDHREC data yet - run `ratings` to download it".to_string()
         } else {
-            format!("17Lands data from {}", self.db.ratings_date)
+            format!("EDHREC data from {}", self.db.edhrec.fetched)
         };
         println!(
             "Each commander is ranked by the deck auto-build makes for it ({}).",
@@ -1041,11 +1031,6 @@ impl App {
     }
 
     fn ratings(&mut self) {
-        println!("Downloading 17Lands card ratings...");
-        match crate::ratings::fetch_17lands(&self.data_dir, &self.db.rated_sets()) {
-            Ok(n) => println!("  {} cards rated.", n),
-            Err(e) => println!("  Couldn't download 17Lands data: {}", e),
-        }
         println!("Downloading Playgroup.gg commander win rates...");
         let names: Vec<String> = self
             .db
@@ -1063,10 +1048,18 @@ impl App {
             names.len()
         );
         match crate::edhrec::fetch(&self.data_dir, &self.db, &names, true) {
-            Ok(f) => println!(
-                "  {} cards ranked, {} commander pages, {} commanders without a page.",
-                f.ranks, f.pages, f.no_page
-            ),
+            Ok(f) => {
+                println!(
+                    "  {} cards ranked, {} commander pages, {} commanders without a page.",
+                    f.ranks, f.pages, f.no_page
+                );
+                if let Some(e) = f.first_error {
+                    println!(
+                        "  Some pages failed ({}); details in data/edhrec_log.txt",
+                        e
+                    );
+                }
+            }
             Err(e) => println!("  Couldn't download EDHREC data: {}", e),
         }
         println!("Downloading Scryfall Tagger tags for the league sets...");
@@ -1075,11 +1068,10 @@ impl App {
             Err(e) => println!("  {}", e),
         }
         self.db.attach_ratings(&self.data_dir);
-        let rated = self.db.ratings.len();
         println!(
-            "Using {} rated cards (set average win rate {:.1}%) and {} commander records.",
-            rated,
-            self.db.gih_mean * 100.0,
+            "Using {} EDHREC-ranked cards, {} EDHREC commander pages and {} Playgroup.gg commander records.",
+            self.db.edhrec.ranked_cards(),
+            self.db.edhrec.commander_count(),
             self.db.commander_stats.len()
         );
     }

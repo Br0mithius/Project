@@ -3,14 +3,14 @@
 //! commander's own strength.
 //!
 //! Each option is graded on eight parts:
-//! * **Cards**       average strength of the deck's spells (17Lands win rates when
-//!   downloaded, roles, synergy with the commander, 4-player adjustments)
+//! * **Cards**       average strength of the deck's spells (EDHREC ranks when downloaded,
+//!   roles, synergy with the commander, 4-player adjustments)
 //! * **Curve**       how close the mana curve is to the commander's plan (aggro decks want
 //!   a lower curve, big-mana decks a higher one - see `analysis::plan_for`)
 //! * **Creatures**   creature count vs. the plan's range
 //! * **Interaction** removal (board wipes count extra) and card draw vs. the plan
 //! * **Mana**        simulated opening hands: keepable hands, commander cast on time
-//! * **Commander**   the commander card itself: 17Lands, Playgroup.gg win rate in real
+//! * **Commander**   the commander card itself: Playgroup.gg win rate in real
 //!   4-player games, and its abilities (repeatable triggers, mana sinks, evasion, cost)
 //! * **Playtest**    win rate in simulated 4-player games against decks built from
 //!   simulated league pools (`playtest`)
@@ -25,7 +25,7 @@
 //! of your options.
 
 use crate::analysis::{
-    self, Archetype, autobuild, best_colors, card_power, deck_plan, simulate, stats, weakest,
+    self, Archetype, autobuild, best_colors, deck_plan, simulate, stats, weakest,
 };
 use crate::card::{COLORS, Card, ColorSet, Role};
 use crate::db::{CardDb, Collection, Rules};
@@ -199,14 +199,6 @@ pub fn commander_power(
 ) -> (f32, Vec<String>) {
     let mut score = 0.0;
     let mut why = Vec::new();
-    let (power, w, note) = card_power(cmd, db);
-    if w > 0.0 {
-        // Only the part above an average card, so commanders without data aren't punished.
-        score += (power - 1.5) * 0.5;
-        if let Some(n) = note {
-            why.push(n);
-        }
-    }
     if let Some(s) = db.commander_stat(&cmd.name) {
         // Playgroup.gg: 25% is average in 4-player pods. Shrunk toward average when the
         // sample is small, and capped - it's 100-card decks, not league pools.
@@ -774,7 +766,7 @@ pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
         rules.singleton,
         rules.players,
         rules.session,
-        db.ratings_date,
+        db.tags_date,
         db.commander_stats.len(),
         db.edhrec.fetched,
         db.edhrec.commander_count(),

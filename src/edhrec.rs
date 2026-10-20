@@ -327,19 +327,47 @@ fn collect_cardviews(v: &serde_json::Value, out: &mut BTreeMap<String, Pick>, ma
     }
 }
 
-/// Reads an EDHREC commander page (json.edhrec.com/pages/commanders/{slug}.json).
+/// The first object stored under `key` anywhere in `v`.
+fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    match v {
+        serde_json::Value::Object(map) => map
+            .get(key)
+            .or_else(|| map.values().find_map(|x| find_key(x, key))),
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_key(x, key)),
+        _ => None,
+    }
+}
+
+/// The page data embedded in an edhrec.com web page (Next.js keeps it in a
+/// `<script id="__NEXT_DATA__">` block).
+pub fn embedded_json(html: &str) -> Option<&str> {
+    let start = html.find("id=\"__NEXT_DATA__\"")?;
+    let open = start + html[start..].find('>')? + 1;
+    let close = open + html[open..].find("</script>")?;
+    Some(&html[open..close])
+}
+
+/// Reads an EDHREC commander page: the JSON from json.edhrec.com/pages/commanders/{slug}.json,
+/// or the same data embedded in the edhrec.com web page.
 pub fn parse_commander_page(json: &str, commander: &str) -> Result<CommanderPage, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    page_from_value(&v, commander)
+}
+
+fn page_from_value(v: &serde_json::Value, commander: &str) -> Result<CommanderPage, String> {
     let mut picks = BTreeMap::new();
     let mut max_pot = 0;
-    collect_cardviews(&v, &mut picks, &mut max_pot);
+    collect_cardviews(v, &mut picks, &mut max_pot);
     // The commander isn't a pick for itself.
     let me = normalize(commander);
     picks.retain(|k, _| normalize(k) != me);
     if picks.is_empty() {
         return Err("no card lists on the page".into());
     }
-    let card = &v["container"]["json_dict"]["card"];
+    let null = serde_json::Value::Null;
+    let card = find_key(v, "json_dict")
+        .map(|d| &d["card"])
+        .unwrap_or(&null);
     // Deck count: from the commander's own entry, else the largest "could include" count.
     let decks = as_u32(&card["num_decks"])
         .or_else(|| as_u32(&v["num_decks_avg"]))
@@ -357,6 +385,10 @@ pub fn parse_commander_page(json: &str, commander: &str) -> Result<CommanderPage
 
 fn edhrec_base() -> String {
     std::env::var("MSH_EDHREC_BASE").unwrap_or_else(|_| "https://json.edhrec.com".into())
+}
+
+fn edhrec_site() -> String {
+    std::env::var("MSH_EDHREC_SITE").unwrap_or_else(|_| "https://edhrec.com".into())
 }
 
 fn scryfall_api() -> String {
@@ -442,6 +474,117 @@ pub struct Fetched {
     pub pages: usize,
     pub no_page: usize,
     pub kept: usize,
+    /// The first thing that went wrong, if anything (details in data/edhrec_log.txt).
+    pub first_error: Option<String>,
+}
+
+enum PageResult {
+    Found(CommanderPage),
+    /// EDHREC has no page for this commander (yet).
+    NoPage,
+    Failed(String),
+}
+
+/// One GET; Ok(body) or Err((HTTP status if any, message)).
+fn get(url: &str, accept: &str, own_agent: bool) -> Result<String, (Option<u16>, String)> {
+    let mut req = ureq::get(url).header("Accept", accept);
+    if own_agent {
+        req = req.header("User-Agent", agent());
+    }
+    match req.call() {
+        Err(ureq::Error::StatusCode(code)) => Err((Some(code), format!("HTTP {}", code))),
+        other => read_body(other).map_err(|e| (None, e)),
+    }
+}
+
+/// Downloads one commander page. Tries, in order (starting with the form that last worked):
+/// the JSON endpoint, the JSON endpoint with the HTTP library's plain user agent (EDHREC's
+/// Cloudflare shield turns some clients away), and the edhrec.com web page, which embeds
+/// the same data. EDHREC's "redirect" answers (a commander filed under another name) are
+/// followed once. Every attempt is written to `log`.
+fn fetch_page(name: &str, working: &mut usize, log: &mut Vec<String>) -> PageResult {
+    let s = slug(name);
+    let mut last = String::from("no attempt");
+    for k in 0..3 {
+        let form = (*working + k) % 3;
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        let mut path = format!("/commanders/{}", s);
+        for _hop in 0..2 {
+            let (url, accept, own) = match form {
+                0 => (
+                    format!("{}/pages{}.json", edhrec_base(), path),
+                    "application/json",
+                    true,
+                ),
+                1 => (
+                    format!("{}/pages{}.json", edhrec_base(), path),
+                    "application/json",
+                    false,
+                ),
+                _ => (format!("{}{}", edhrec_site(), path), "text/html", true),
+            };
+            let body = match get(&url, accept, own) {
+                Ok(b) => b,
+                Err((Some(404), e)) => {
+                    log.push(format!("  {} -> {} (no page)", url, e));
+                    return PageResult::NoPage;
+                }
+                Err((_, e)) => {
+                    log.push(format!("  {} -> {}", url, e));
+                    last = e;
+                    break;
+                }
+            };
+            let json = if form == 2 {
+                match embedded_json(&body) {
+                    Some(j) => j.to_string(),
+                    None => {
+                        log.push(format!(
+                            "  {} -> {} bytes, no page data in it",
+                            url,
+                            body.len()
+                        ));
+                        last = "web page without data".into();
+                        break;
+                    }
+                }
+            } else {
+                body
+            };
+            let v: serde_json::Value = match serde_json::from_str(&json) {
+                Ok(v) => v,
+                Err(e) => {
+                    // Cloudflare's challenge page is HTML, not JSON.
+                    log.push(format!(
+                        "  {} -> not JSON ({}): {}",
+                        url,
+                        e,
+                        json.chars().take(80).collect::<String>().replace('\n', " ")
+                    ));
+                    last = "answer wasn't JSON (blocked?)".into();
+                    break;
+                }
+            };
+            if let Some(to) = v["redirect"].as_str() {
+                log.push(format!("  {} -> redirect to {}", url, to));
+                path = format!("/{}", to.trim_start_matches('/'));
+                continue;
+            }
+            return match page_from_value(&v, name) {
+                Ok(page) => {
+                    log.push(format!("  {} -> ok", url));
+                    *working = form;
+                    PageResult::Found(page)
+                }
+                Err(e) => {
+                    log.push(format!("  {} -> {}", url, e));
+                    last = e;
+                    break;
+                }
+            };
+        }
+    }
+    PageResult::Failed(last)
 }
 
 /// Downloads card ranks and the commander pages for `commanders`. Pages already saved are
@@ -467,6 +610,9 @@ pub fn fetch(
         file.missing.clear();
     }
     let mut failures = 0;
+    let mut log = vec![format!("EDHREC download {}", crate::ratings::today())];
+    // The address form that worked last, tried first for the next commander.
+    let mut working = 0;
     for name in commanders {
         if name == crate::deck::PIPER {
             continue;
@@ -478,32 +624,33 @@ pub fn fetch(
         }
         // Several failures in a row with nothing found: the site is unreachable, stop asking.
         if failures >= 3 && got.pages == 0 {
+            log.push("stopped: the first commanders all failed".into());
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        let url = format!("{}/pages/commanders/{}.json", edhrec_base(), slug(name));
-        let resp = ureq::get(&url)
-            .header("User-Agent", agent())
-            .header("Accept", "application/json")
-            .call();
-        match resp {
-            Err(ureq::Error::StatusCode(404)) => {
+        log.push(format!("{} ({})", name, slug(name)));
+        match fetch_page(name, &mut working, &mut log) {
+            PageResult::Found(page) => {
+                log.push(format!(
+                    "  ok: {} cards, {} decks",
+                    page.picks.len(),
+                    page.decks
+                ));
+                file.commanders.insert(name.clone(), page);
+                got.pages += 1;
+                failures = 0;
+            }
+            PageResult::NoPage => {
                 file.missing.push(name.clone());
                 got.no_page += 1;
             }
-            other => match read_body(other).and_then(|t| parse_commander_page(&t, name)) {
-                Ok(page) => {
-                    file.commanders.insert(name.clone(), page);
-                    got.pages += 1;
-                    failures = 0;
-                }
-                Err(e) => {
-                    failures += 1;
-                    errors.push(format!("{}: {}", name, e));
-                }
-            },
+            PageResult::Failed(e) => {
+                failures += 1;
+                errors.push(format!("{}: {}", name, e));
+            }
         }
     }
+    let _ = std::fs::write(data_dir.join("edhrec_log.txt"), log.join("\n") + "\n");
+    got.first_error = errors.first().cloned();
     if got.ranks == 0 && got.pages == 0 && got.no_page == 0 {
         return Err(errors.join("; "));
     }
@@ -557,6 +704,14 @@ mod tests {
         assert!((g.inclusion - 0.75).abs() < 1e-4 && (g.synergy - 0.71).abs() < 1e-4);
         assert!((p.picks["Bilbo Baggins, Burglar"].inclusion - 0.25).abs() < 1e-4);
         assert!(parse_commander_page("{}", "X").is_err());
+        // The same data embedded in the web page.
+        let html = format!(
+            r#"<html><script id="__NEXT_DATA__" type="application/json">{{"props":{{"pageProps":{{"data":{}}}}}}}</script></html>"#,
+            json
+        );
+        let embedded =
+            parse_commander_page(embedded_json(&html).unwrap(), "Thanos, the Mad Titan").unwrap();
+        assert_eq!((embedded.decks, embedded.picks.len()), (812, 2));
     }
 
     #[test]

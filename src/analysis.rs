@@ -355,43 +355,14 @@ fn numeric(s: &Option<String>) -> Option<f32> {
     s.as_ref().and_then(|v| v.parse::<f32>().ok())
 }
 
-/// Games of 17Lands data at which its win rate counts as much as the rarity guess.
-const RATING_TRUST_GAMES: f32 = 500.0;
-
-/// Raw strength of a card on its own. Uses its 17Lands win rate when there's data
-/// (blended with a rarity-based guess when the sample is small), otherwise rarity alone.
-/// Returns (points, how much 17Lands data counted 0-1, explanation).
-pub fn card_power(card: &Card, db: &CardDb) -> (f32, f32, Option<String>) {
-    // Without win-rate data: an average card (1.5, the same centre the data uses), nudged by
-    // rarity. Rares and mythics win only a few points more often than commons in 17Lands
-    // data, so each rarity step is worth about one percentage point (0.25).
-    let prior = match card.rarity_rank() {
+/// Base strength of a card on its own, before roles and synergy: an average card (1.5),
+/// nudged by rarity - rares and mythics are only a little stronger than commons on average,
+/// so each rarity step is worth 0.25.
+pub fn card_power(card: &Card) -> f32 {
+    match card.rarity_rank() {
         0 => 1.5, // special printings (league staples)
         r => 1.0 + 0.25 * r as f32,
-    };
-    let Some(r) = db.rating(&card.name) else {
-        return (prior, 0.0, None);
-    };
-    let Some(wr) = r.gih_wr else {
-        return (prior, 0.0, None);
-    };
-    // 1.5 points for an average card, +1 per 4 percentage points above its set's average.
-    let mean = db.set_mean(&r.set);
-    let data = (1.5 + (wr - mean) * 25.0).clamp(-1.0, 6.0);
-    let w = r.games as f32 / (r.games as f32 + RATING_TRUST_GAMES);
-    let points = w * data + (1.0 - w) * prior;
-    let note = format!(
-        "17Lands win rate {:.1}% ({} games, {} average {:.1}%)",
-        wr * 100.0,
-        r.games,
-        if r.set.is_empty() {
-            "set"
-        } else {
-            r.set.as_str()
-        },
-        mean * 100.0
-    );
-    (points, w, Some(note))
+    }
 }
 
 /// Adjustments for 3+ player games: effects that hit every opponent, board wipes, card
@@ -452,19 +423,12 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if card.is_land() {
         return (0.0, why);
     }
-    let (power, data_weight, note) = card_power(card, db);
-    let mut score = power;
-    if let Some(n) = note {
-        why.push(n);
-    }
+    let mut score = card_power(card);
     // How much Commander players play it overall, compared with its set (EDHREC).
     if let Some((pts, note)) = crate::edhrec::rank_points(&db.edhrec, &card.name) {
         score += pts;
         why.push(note);
     }
-    // When real win-rate data is in, it already reflects most of what roles add,
-    // so roles count for less.
-    let role_weight = 1.0 - 0.5 * data_weight;
     let roles = card.roles();
     let parsed = card.parsed();
     // Removal is graded by what it can actually answer (see `abilities::Parsed::removal`).
@@ -486,7 +450,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             _ => (0.0, ""),
         };
         if pts > 0.0 {
-            score += pts * role_weight;
+            score += pts;
             why.push(label.to_string());
         }
     }
@@ -498,7 +462,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if !matches!(card.main_type(), "Instant" | "Sorcery") {
         let engine = parsed.repeatable_value().min(2.0);
         if engine >= 0.5 {
-            score += 0.5 * engine * role_weight;
+            score += 0.5 * engine;
             why.push("repeatable value".into());
         }
     }
@@ -507,7 +471,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if card.is_creature() {
         if let (Some(p), Some(t)) = (numeric(&card.power), numeric(&card.toughness)) {
             let eff = (p + t) / (card.mana_value().max(1) as f32);
-            let bonus = (eff - 1.6).clamp(-1.0, 1.5) * role_weight;
+            let bonus = (eff - 1.6).clamp(-1.0, 1.5);
             score += bonus;
             if bonus >= 0.5 {
                 why.push(format!("efficient body {}/{}", p, t));
@@ -1796,35 +1760,16 @@ mod tests {
 #[cfg(test)]
 mod power_tests {
     use super::*;
-    use crate::ratings::Rating;
 
     #[test]
-    fn win_rate_moves_card_power() {
-        let card = Card {
-            name: "Test Common".into(),
-            rarity: "common".into(),
+    fn rarity_nudges_card_power() {
+        let card = |rarity: &str| Card {
+            name: "Test".into(),
+            rarity: rarity.into(),
             ..Default::default()
         };
-        let mut db = CardDb::new(vec![card.clone()]);
-        db.gih_mean = 0.56;
-        let (prior, w0, _) = card_power(&card, &db);
-        assert_eq!(w0, 0.0);
-        assert!((prior - 1.25).abs() < 1e-4);
-        db.ratings.insert(
-            "test common".into(),
-            Rating {
-                set: String::new(),
-                gih_wr: Some(0.64),
-                games: 5000,
-                alsa: None,
-                iwd: None,
-            },
-        );
-        let (strong, w, note) = card_power(&card, &db);
-        assert!(w > 0.9 && strong > 3.0, "{} {}", strong, w);
-        assert!(note.unwrap().contains("64.0%"));
-        db.ratings.get_mut("test common").unwrap().games = 50;
-        let (shrunk, _, _) = card_power(&card, &db);
-        assert!(shrunk < strong && shrunk > prior);
+        assert!((card_power(&card("common")) - 1.25).abs() < 1e-4);
+        assert!((card_power(&card("mythic")) - 2.0).abs() < 1e-4);
+        assert!((card_power(&card("special")) - 1.5).abs() < 1e-4);
     }
 }
