@@ -11,3 +11,4 @@ data/commander_stats.json
 data/ratings_downloaded.txt
 data/collection.backup.txt
 data/public_pool.txt
+.claude/worktrees/
