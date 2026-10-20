@@ -785,10 +785,16 @@ pub fn available(card: &Card, deck: &Deck, coll: &Collection, rules: &Rules) -> 
     } else {
         99
     };
-    if !rules.enforce_collection || (card.name == crate::deck::PIPER && rules.piper_free) {
+    if !rules.enforce_collection {
         return cap;
     }
-    coll.owned(&card.name).saturating_sub(used).min(cap)
+    // The Prismatic Piper is free only as a partner; copies in the main deck must be owned.
+    let counted = if card.name == crate::deck::PIPER && rules.piper_free {
+        deck.count_of(&card.name)
+    } else {
+        used
+    };
+    coll.owned(&card.name).saturating_sub(counted).min(cap)
 }
 
 /// Nonland cards you could add right now, best first.

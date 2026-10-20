@@ -67,6 +67,8 @@ enum Wipe {
 struct Effect {
     now: f32,
     per_turn: f32,
+    /// Each time the creature attacks.
+    per_attack: f32,
 }
 
 /// A card as the simulator sees it.
@@ -131,10 +133,15 @@ fn number_after(line: &str, marker: &str) -> Option<i32> {
 
 impl Profile {
     pub fn from_card(card: &Card) -> Profile {
+        Profile::in_deck(card, true)
+    }
+
+    /// Reads a card for a deck; `equipment` = whether the deck has any Equipment (for
+    /// "if it's equipped" conditions).
+    pub fn in_deck(card: &Card, equipment: bool) -> Profile {
         // Front face only for double-faced cards.
         let text = strip_reminder(&card.oracle_text).to_lowercase();
         let text = text.split("// back face").next().unwrap_or("").to_string();
-        let roles = card.roles();
         let mut p = Profile {
             mv: card.mana_value(),
             pips: card.pips(),
@@ -189,27 +196,55 @@ impl Profile {
                 continue;
             }
             // When does this line happen? Once, or every turn?
-            let repeat = if line.starts_with("at the beginning of") {
-                1.0
+            // When does this line happen? Once (cast / enters), every turn, when attacking,
+            // or never as far as the simulator is concerned (mana-cost and Power-up abilities).
+            let cost = line.split_once(':').map(|(c, _)| c).filter(|c| {
+                c.contains('{')
+                    || c.contains("sacrifice")
+                    || c.contains("discard")
+                    || c.contains("power-up")
+            });
+            let (now, per_turn, per_attack) = if line.starts_with("at the beginning of") {
+                (0.0, 1.0, 0.0)
+            } else if line.starts_with("whenever") && line.contains(" attacks") {
+                (0.0, 0.0, 1.0)
             } else if line.starts_with("whenever") {
-                0.5
-            } else if line.contains("{t}") && line.contains(':') && p.permanent {
-                if line.split(':').next().unwrap_or("").contains("{t}")
-                    && !line.contains("sacrifice")
-                {
-                    0.5
+                (0.0, 0.5, 0.0)
+            } else if let Some(c) = cost {
+                if c.trim() == "{t}" && p.permanent {
+                    (0.0, 0.5, 0.0)
                 } else {
-                    0.0
+                    (0.0, 0.0, 0.0)
                 }
             } else {
+                (1.0, 0.0, 0.0)
+            };
+            // "... if it's equipped" style conditions only sometimes hold (and never hold
+            // for Equipment in a deck without any).
+            let conditional = line.contains(" if ") || line.starts_with("if ");
+            let cond = if !conditional {
+                1.0
+            } else if line.contains("equipped") && !equipment {
                 0.0
+            } else {
+                0.5
+            };
+            // An X counted from the board ("where X is the number of ...") is usually small.
+            let owned_line;
+            let line = if line.contains("where x is") {
+                owned_line = line
+                    .split(' ')
+                    .map(|w| if w == "x" { "1" } else { w })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                owned_line.as_str()
+            } else {
+                line
             };
             let add = |e: &mut Effect, n: f32| {
-                if repeat > 0.0 {
-                    e.per_turn += n * repeat;
-                } else {
-                    e.now += n;
-                }
+                e.now += n * now * cond;
+                e.per_turn += n * per_turn * cond;
+                e.per_attack += n * per_attack * cond;
             };
             if line.contains("can't be blocked") && !line.contains("target") {
                 p.kw |= UNBLOCKABLE;
@@ -274,6 +309,29 @@ impl Profile {
                 }
             }
         }
+        // Removal only counts when it happens on its own: a spell, an "enters" trigger, or an
+        // Aura's lock. Activated and Power-up abilities (often once-only, costly, or
+        // conditional) aren't modelled - reading them as "on enter" made, e.g., a commander
+        // with a once-per-game board-wipe ability wipe the board every time it was cast.
+        let active: String = if !p.permanent {
+            text.clone()
+        } else {
+            text.lines()
+                .map(str::trim)
+                .filter(|l| {
+                    (l.starts_with("when ") && l.contains("enters"))
+                        || (card.type_line.contains("Aura") && l.starts_with("enchanted creature"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let probe = Card {
+            oracle_text: active.clone(),
+            type_line: card.type_line.clone(),
+            ..Default::default()
+        };
+        let roles = probe.roles();
+        let text = active;
         if roles.contains(&Role::Sweeper) {
             p.wipe = Some(match number_before(&text, " damage to each") {
                 Some(n) => Wipe::Damage(n),
@@ -327,11 +385,15 @@ pub struct Prepared {
 
 impl Prepared {
     pub fn new(deck: &Deck, db: &CardDb) -> Prepared {
+        let equipment = deck
+            .cards
+            .keys()
+            .any(|n| db.get(n).is_some_and(|c| c.type_line.contains("Equipment")));
         let mut cards = Vec::new();
         let mut library = Vec::new();
         for (name, n) in &deck.cards {
             if let Some(c) = db.get(name) {
-                cards.push(Profile::from_card(c));
+                cards.push(Profile::in_deck(c, equipment));
                 for _ in 0..*n {
                     library.push(cards.len() - 1);
                 }
@@ -339,7 +401,7 @@ impl Prepared {
         }
         let mut extra = |name: &Option<String>| {
             name.as_ref().and_then(|n| db.get(n)).map(|c| {
-                cards.push(Profile::from_card(c));
+                cards.push(Profile::in_deck(c, equipment));
                 cards.len() - 1
             })
         };
@@ -771,7 +833,7 @@ fn kills(source: &Perm, target: &Perm) -> bool {
         && (source.kw & DEATHTOUCH != 0 || source.power >= target.toughness - target.damage)
 }
 
-fn combat(players: &mut [Player<'_>], me: usize) {
+fn combat(players: &mut [Player<'_>], me: usize, rng: &mut Rng) {
     // Attack the opponent that's easiest to hurt: low life, few untapped blockers.
     let target = players
         .iter()
@@ -811,6 +873,17 @@ fn combat(players: &mut [Player<'_>], me: usize) {
     }
     // Biggest attackers are blocked first.
     attackers.sort_by_key(|&i| -players[me].board[i].power);
+    // "Whenever this attacks" triggers.
+    let cards = players[me].cards;
+    let triggers: Vec<usize> = attackers
+        .iter()
+        .map(|&i| players[me].board[i].card)
+        .filter(|&c| c != TOKEN)
+        .filter(|&c| {
+            let e = &cards[c];
+            e.draw.per_attack + e.tokens.per_attack + e.drain.per_attack + e.gain.per_attack > 0.0
+        })
+        .collect();
     let incoming: i32 = attackers.iter().map(|&i| players[me].board[i].power).sum();
     let lethal = incoming >= players[t].life;
     let mut used = vec![false; players[t].board.len()];
@@ -905,6 +978,14 @@ fn combat(players: &mut [Player<'_>], me: usize) {
         }
     }
     players[t].life -= damage_to_player;
+    for c in triggers {
+        let e = &cards[c];
+        let draw = chance(rng, e.draw.per_attack) as f32;
+        let tokens = chance(rng, e.tokens.per_attack) as f32;
+        let drain = chance(rng, e.drain.per_attack) as f32;
+        let gain = chance(rng, e.gain.per_attack) as f32;
+        apply_effects(players, me, draw, tokens, e.token_size, drain, gain);
+    }
     players[me].life += lifelink;
     players[t].commander_damage[me] += commander_damage;
     dead_blockers.sort_unstable();
@@ -953,7 +1034,7 @@ pub fn play_game(decks: &[&Prepared], rules: &Rules, rng: &mut Rng) -> usize {
             main_phase(&mut players, me, round);
             check_deaths(&mut players);
             if players[me].alive {
-                combat(&mut players, me);
+                combat(&mut players, me, rng);
             }
             check_deaths(&mut players);
             let alive: Vec<usize> = (0..n).filter(|&i| players[i].alive).collect();
@@ -994,8 +1075,11 @@ pub fn win_rate(
     let seats = rules.players.clamp(2, 4) as usize;
     let mut wins = 0;
     for g in 0..games {
+        // Three different opponents when there are enough (like a real pod).
+        let mut picks: Vec<usize> = (0..gauntlet.len()).collect();
+        rng.shuffle(&mut picks);
         let mut table: Vec<&Prepared> = (1..seats)
-            .map(|_| &gauntlet[(rng.next() % gauntlet.len() as u64) as usize])
+            .map(|i| &gauntlet[picks[(i - 1) % picks.len()]])
             .collect();
         // Rotate our seat so turn order evens out.
         let seat = g as usize % seats;
@@ -1007,38 +1091,35 @@ pub fn win_rate(
     wins as f32 / games.max(1) as f32
 }
 
-/// Opponent decks for playtesting: decks auto-built from simulated league pools of the
-/// same size as yours at this point of the season (`count` of them).
-pub fn gauntlet(
-    db: &CardDb,
-    rules: &Rules,
-    starter: &str,
-    count: usize,
-    seed: u64,
-) -> Vec<Prepared> {
+/// Opponent decks for playtesting: one per other player in the league, auto-built from a
+/// simulated pool of the packs that player has by this point of the season (their own
+/// Marvel / Hobbit mix from `rules.roster`).
+pub fn gauntlet(db: &CardDb, rules: &Rules, seed: u64) -> Vec<Prepared> {
     let mut rng = Rng::new(seed);
     let mut out = Vec::new();
-    let mut tries = 0;
-    while out.len() < count && tries < count * 4 {
-        tries += 1;
-        let pool = crate::packs::simulated_pool(db, starter, rules.session.max(1), &mut rng);
-        let best = db
-            .cards
-            .iter()
-            .filter(|c| {
-                c.can_be_commander() && c.name != crate::deck::PIPER && pool.owned(&c.name) > 0
-            })
-            .map(|c| {
-                let colors = crate::analysis::best_colors(c, db, &pool, rules);
-                (
-                    crate::analysis::pool_quality_for(c, colors, db, &pool, rules),
-                    c,
-                )
-            })
-            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        if let Some((_, cmd)) = best {
-            let deck = crate::analysis::autobuild(cmd, db, &pool, rules, None, None).0;
-            out.push(Prepared::new(&deck, db));
+    for player in &rules.roster.others {
+        // A pool with no legendary creature can't make a deck; reopen (rare).
+        for _ in 0..4 {
+            let pool = crate::packs::simulated_pool(db, player, rules.session.max(1), &mut rng);
+            let best = db
+                .cards
+                .iter()
+                .filter(|c| {
+                    c.can_be_commander() && c.name != crate::deck::PIPER && pool.owned(&c.name) > 0
+                })
+                .map(|c| {
+                    let colors = crate::analysis::best_colors(c, db, &pool, rules);
+                    (
+                        crate::analysis::pool_quality_for(c, colors, db, &pool, rules),
+                        c,
+                    )
+                })
+                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            if let Some((_, cmd)) = best {
+                let deck = crate::analysis::autobuild(cmd, db, &pool, rules, None, None).0;
+                out.push(Prepared::new(&deck, db));
+                break;
+            }
         }
     }
     out
@@ -1103,5 +1184,59 @@ mod tests {
             None,
         ));
         assert_eq!((maker.tokens.now, maker.token_size), (2.0, (2, 2)));
+        // A once-only Power-up wipe isn't an "on enter" wipe; an enters trigger and an
+        // Aura lock are removal.
+        let titan = Profile::from_card(&card(
+            "Titan",
+            "{2}{B}{R}",
+            "Legendary Creature — Titan",
+            "Deathtouch\nPower-up — {5}: Destroy each other creature with mana value 3.",
+            Some(("4", "4")),
+        ));
+        assert_eq!((titan.wipe, titan.kill), (None, None));
+        let hunter = Profile::from_card(&card(
+            "Hunter",
+            "{3}{B}",
+            "Creature — Assassin",
+            "When this creature enters, destroy target creature an opponent controls.",
+            Some(("2", "2")),
+        ));
+        assert_eq!(hunter.kill, Some(Kill::Any));
+        let lock = Profile::from_card(&card(
+            "Lock",
+            "{1}{W}",
+            "Enchantment — Aura",
+            "Enchant creature\nEnchanted creature can't attack or block.",
+            None,
+        ));
+        assert_eq!(lock.kill, Some(Kill::Any));
+        // Attack triggers wait for an attack; conditions count half; mana abilities don't fire.
+        let raider = Profile::from_card(&card(
+            "Raider",
+            "{2}{B}",
+            "Creature — Rogue",
+            "Whenever this creature attacks, if it's equipped, each opponent loses 2 life.\n{3}{B}: Draw a card.",
+            Some(("2", "2")),
+        ));
+        assert_eq!(
+            (
+                raider.drain.now,
+                raider.drain.per_turn,
+                raider.drain.per_attack
+            ),
+            (0.0, 0.0, 1.0)
+        );
+        assert_eq!((raider.draw.now, raider.draw.per_turn), (0.0, 0.0));
+        let whip = Profile::in_deck(
+            &card(
+                "Whip",
+                "{2}{B}",
+                "Legendary Creature — Villain",
+                "Whenever Whip attacks, if he's equipped, each opponent loses X life, where X is the number of Equipment attached to him.",
+                Some(("2", "2")),
+            ),
+            false,
+        );
+        assert_eq!(whip.drain.per_attack, 0.0);
     }
 }

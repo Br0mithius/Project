@@ -1,5 +1,5 @@
 //! Times the parts of a commander ranking: `cargo run --release --example rank_timing -- <data dir>`.
-use msh_deckbuilder::{db::*, packs, playtest, ranking};
+use msh_deckbuilder::{db::*, playtest, ranking};
 use std::time::Instant;
 
 fn main() {
@@ -8,8 +8,7 @@ fn main() {
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
     let rules = Rules::default();
     let t = Instant::now();
-    let starter = packs::starter_set(&db, &coll);
-    let g = playtest::gauntlet(&db, &rules, &starter, 6, 2026);
+    let g = playtest::gauntlet(&db, &rules, 2026);
     println!("gauntlet: {} decks in {:?}", g.len(), t.elapsed());
     let opts = ranking::candidates(&db, &coll, &rules);
     println!("{} options", opts.len());
@@ -37,7 +36,7 @@ fn main() {
         "all basics: {:.3}",
         playtest::win_rate(&lands, &g, &db, &rules, 1000, 3)
     );
-    let peers = playtest::gauntlet(&db, &rules, &starter, 7, 99);
+    let peers = playtest::gauntlet(&db, &rules, 99);
     let auto = msh_deckbuilder::analysis::autobuild(cmd, &db, &coll, &rules, None, None).0;
     println!(
         "{} vs gauntlet: {:.3}",

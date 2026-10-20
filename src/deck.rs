@@ -271,14 +271,19 @@ impl Deck {
                 ));
                 continue;
             };
-            let basic_free = (card.is_basic() && rules.unlimited_basics)
-                || (card.name == PIPER && rules.piper_free);
+            let basic_free = card.is_basic() && rules.unlimited_basics;
+            // The Prismatic Piper is free as a partner; main-deck copies must be owned.
+            let counted = if card.name == PIPER && rules.piper_free {
+                self.count_of(name)
+            } else {
+                used
+            };
             if rules.enforce_collection && !basic_free {
                 let owned = coll.owned(name);
-                if used > owned {
+                if counted > owned {
                     err(format!(
                         "{}: using {} but you only own {}.",
-                        name, used, owned
+                        name, counted, owned
                     ));
                 }
             }

@@ -55,7 +55,7 @@ cargo run --release --bin msh-cli   # the same tools as a typed command line
 
 Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
 `trade 10 rare`, `export mixer`, `import pool.txt`, `ratings`, `update-cards`, `why red hulk`, `upgrades`,
-`publicpool pool.txt`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts.
+`publicpool pool.txt`, `roster`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts.
 
 ## Files
 
@@ -119,7 +119,12 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   Equipment; it ignores counterspells, tricks and unusual abilities, so treat it as a second opinion.
 * **Upgrades / pack odds** use Play Booster contents: 7 commons, 3 uncommons, a rare or mythic (mythic about 1 in 7),
   plus a wildcard and a foil of any rarity at typical published rates. "Your table" means the card is opened at your
-  4-player draft table (so it's in your face-up draft); "league" means any of the 8 players opens it.
+  4-player draft table (so it's in your face-up draft) - you plus 3 of the other 7 players, any seating equally likely;
+  "league" means any of the 8 players opens it. Who opens Marvel or Hobbit packs comes from **League starter packs**
+  (Season & Rules tab, or `roster` in the command line), set by default to the Season 2 mix: you and one other player
+  all Marvel, one player 3 Marvel / 6 Hobbit at kickoff, five all Hobbit. That's why Hobbit cards can show up as
+  upgrades for a Marvel player: they can be drafted from a table-mate's pack. The same mix shapes the simulated
+  opponents in playtests (one deck per other player, from their own packs).
 * **Lands**: the league's 25-27 at 60 cards (scaled for 75), low end for cheap curves; basics are split by coloured pips.
 * **Simulation** shuffles the deck thousands of times to estimate opening-hand land counts, land drops by turn, and the
   odds of casting your commander on curve.

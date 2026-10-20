@@ -7,10 +7,9 @@ use crate::card::Card;
 use crate::db::{CardDb, Collection, Rules};
 use crate::deck::Deck;
 use crate::league::claim_cost;
-use crate::packs::{chance_in, chance_per_pack, season_packs};
+use crate::packs::{chance_per_pack, packs_to_come, season_packs, spread_odds};
 
-/// Players in the league, and at your draft table (§2, §6).
-pub const LEAGUE_PLAYERS: u32 = 8;
+/// Players at your draft table (§2: drafts happen within your seeded 4-player table).
 pub const TABLE_PLAYERS: u32 = 4;
 
 #[derive(Debug, Clone)]
@@ -24,7 +23,7 @@ pub enum Source {
     /// In packs still to be handed out.
     Packs {
         set_name: &'static str,
-        /// Packs of that set each player still gets.
+        /// Packs of that set you still get (0 = only other players open it).
         packs: u32,
         /// First session the card could be in your deck.
         usable_from: u32,
@@ -95,11 +94,24 @@ pub fn upgrades(
     // Judge each candidate as if it took the weakest card's slot.
     let mut without = deck.clone();
     without.remove(&worst.card.name, 1);
-    let starter = crate::packs::starter_set(db, coll);
-    let deliveries: Vec<_> = season_packs(db, &starter)
-        .into_iter()
-        .filter(|d| d.session >= next_session && !d.set.is_empty())
-        .collect();
+    // For each set still to be opened: your packs, each other player's packs, and the
+    // first session its cards could be in a deck.
+    let roster = &rules.roster;
+    let mut sets: Vec<(String, u32, Vec<u32>, u32)> = Vec::new();
+    for player in std::iter::once(&roster.me).chain(&roster.others) {
+        for d in season_packs(db, player) {
+            if d.session < next_session || d.set.is_empty() || sets.iter().any(|s| s.0 == d.set) {
+                continue;
+            }
+            let mine = packs_to_come(db, &roster.me, &d.set, next_session);
+            let others: Vec<u32> = roster
+                .others
+                .iter()
+                .map(|o| packs_to_come(db, o, &d.set, next_session))
+                .collect();
+            sets.push((d.set.clone(), mine, others, d.usable_from()));
+        }
+    }
     let mut out = Vec::new();
     for card in db.cards.iter().filter(|c| {
         !c.is_land()
@@ -118,12 +130,8 @@ pub fn upgrades(
             continue;
         }
         let in_pool = public_pool.owned(&card.name) > 0;
-        let packs: u32 = deliveries
-            .iter()
-            .filter(|d| d.set == card.set)
-            .map(|d| d.count)
-            .sum();
-        if !in_pool && packs == 0 {
+        let coming = sets.iter().find(|s| s.0 == card.set);
+        if !in_pool && coming.is_none() {
             continue;
         }
         let (score, mut reasons) = score_card(card, &without, db, rules);
@@ -149,16 +157,16 @@ pub fn upgrades(
                 floor: floor_for(card),
             });
         }
-        if packs > 0 {
+        if let Some((set, mine, others, usable_from)) = coming {
             let p = chance_per_pack(card, db);
-            let first = deliveries.iter().find(|d| d.set == card.set).unwrap();
+            let (you, table, league) = spread_odds(p, *mine, others, TABLE_PLAYERS as usize);
             push(Source::Packs {
-                set_name: first.set_name,
-                packs,
-                usable_from: first.usable_from(),
-                you: chance_in(packs, p),
-                table: chance_in(packs * TABLE_PLAYERS, p),
-                league: chance_in(packs * LEAGUE_PLAYERS, p),
+                set_name: crate::packs::set_name(set),
+                packs: *mine,
+                usable_from: *usable_from,
+                you,
+                table,
+                league,
             });
         }
     }
@@ -204,9 +212,13 @@ pub fn describe(u: &Upgrade) -> String {
             table,
             league,
         } => format!(
-            "{} ({} packs each, usable from Session {}): you open it {:.0}% · your table {:.0}% · anyone in the league {:.0}%",
+            "{} ({}, usable from Session {}): you open it {:.0}% · your table {:.0}% · anyone in the league {:.0}%",
             set_name,
-            packs,
+            if *packs == 0 {
+                "not in your packs - draft it from a table-mate".to_string()
+            } else {
+                format!("{} of your packs", packs)
+            },
             usable_from,
             you * 100.0,
             table * 100.0,

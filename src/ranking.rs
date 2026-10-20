@@ -320,11 +320,10 @@ pub struct TestBed {
 }
 
 impl TestBed {
-    /// Opponents built from simulated league pools the same size as yours.
-    pub fn new(db: &CardDb, coll: &Collection, rules: &Rules) -> TestBed {
-        let starter = crate::packs::starter_set(db, coll);
+    /// Opponents: one deck per other league player, from simulated pools of their packs.
+    pub fn new(db: &CardDb, rules: &Rules) -> TestBed {
         TestBed {
-            gauntlet: crate::playtest::gauntlet(db, rules, &starter, 6, 2026),
+            gauntlet: crate::playtest::gauntlet(db, rules, 2026),
             games: 1000,
         }
     }
@@ -476,7 +475,7 @@ pub fn rank_all(
     if options.is_empty() {
         return Vec::new();
     }
-    let bed = TestBed::new(db, coll, rules);
+    let bed = TestBed::new(db, rules);
     // Options are independent, so build and playtest them on every CPU core.
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -569,7 +568,7 @@ pub fn build_count(db: &CardDb, coll: &Collection, rules: &Rules) -> usize {
 /// Changes to any of these mean the ranking must be rebuilt.
 pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{:?}",
         coll.total(),
         coll.counts.len(),
         rules.deck_size,
@@ -577,7 +576,8 @@ pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
         rules.players,
         rules.session,
         db.ratings_date,
-        db.commander_stats.len()
+        db.commander_stats.len(),
+        rules.roster
     )
 }
 

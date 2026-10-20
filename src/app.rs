@@ -139,6 +139,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Save the Public Pool list from Mana Mixer (used by `upgrades`)",
     ),
     (
+        "roster",
+        "[player marvel-kickoff msh|hob] | reset",
+        "Who opens Marvel / Hobbit packs (pack odds, playtest opponents), e.g. `roster 2 3 hob`",
+    ),
+    (
         "trade",
         "[vp] [rare|mythic]",
         "Plan Public Pool trade-ins (default 10 VP minimum)",
@@ -313,6 +318,7 @@ impl App {
             "trade" => self.trade(rest),
             "upgrades" | "upgrade" => self.upgrades(),
             "publicpool" => self.public_pool(rest),
+            "roster" => self.roster(rest),
             "vp" => self.vp(),
             "own" => self.own(rest, 1),
             "unown" => self.own(rest, -1),
@@ -864,6 +870,54 @@ impl App {
             "{}",
             s.dim("Gain = how much better than your weakest card. Table = opened at your 4-player draft table (face-up draft, so it's in your draft); league = opened by any of the 8 players (it could be traded into the pool). Pack odds use typical Play Booster rarity rates.")
         );
+    }
+
+    fn roster(&mut self, arg: &str) {
+        let words: Vec<&str> = arg.split_whitespace().collect();
+        match words.as_slice() {
+            [] => {}
+            ["reset"] => self.rules.roster = crate::packs::Roster::default(),
+            [who, marvel, weekly] => {
+                let (Ok(i), Ok(m)) = (who.parse::<usize>(), marvel.parse::<u32>()) else {
+                    println!(
+                        "Usage: roster <player 0-7> <kickoff Marvel packs 0-9> <msh|hob> (player 0 is you)"
+                    );
+                    return;
+                };
+                let weekly = weekly.to_uppercase();
+                if m > 9
+                    || !["MSH", "HOB"].contains(&weekly.as_str())
+                    || i > self.rules.roster.others.len()
+                {
+                    println!(
+                        "Usage: roster <player 0-7> <kickoff Marvel packs 0-9> <msh|hob> (player 0 is you)"
+                    );
+                    return;
+                }
+                let r = &mut self.rules.roster;
+                let p = if i == 0 {
+                    &mut r.me
+                } else {
+                    &mut r.others[i - 1]
+                };
+                let name = p.name.clone();
+                *p = crate::packs::Starter::new(&name, m, &weekly);
+            }
+            _ => {
+                println!(
+                    "Usage: roster <player 0-7> <kickoff Marvel packs 0-9> <msh|hob>, or `roster reset`"
+                );
+                return;
+            }
+        }
+        if !words.is_empty() {
+            let _ = self.rules.save(&self.data_dir.join("rules.json"));
+        }
+        let r = &self.rules.roster;
+        println!("League starter packs (used for pack odds and playtest opponents):");
+        for (i, p) in std::iter::once(&r.me).chain(&r.others).enumerate() {
+            println!("  {}  {}", i, p.describe());
+        }
     }
 
     fn public_pool(&mut self, arg: &str) {

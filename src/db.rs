@@ -377,6 +377,10 @@ pub struct Rules {
     /// The Prismatic Piper is available without owning it (league partner rule).
     #[serde(default = "yes")]
     pub piper_free: bool,
+    /// Which starter-set packs each player in the league opens (for pack odds and the
+    /// simulated opponents in playtests).
+    #[serde(default)]
+    pub roster: crate::packs::Roster,
 }
 
 fn yes() -> bool {
@@ -401,6 +405,7 @@ impl Default for Rules {
             singleton: false,
             session: 0,
             piper_free: true,
+            roster: crate::packs::Roster::default(),
         }
     }
 }

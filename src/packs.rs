@@ -9,6 +9,80 @@
 use crate::analysis::Rng;
 use crate::card::Card;
 use crate::db::{CardDb, Collection};
+use serde::{Deserialize, Serialize};
+
+/// One player's starter-set packs (§2): how their 9 kickoff packs split between Marvel
+/// Super Heroes and The Hobbit, and which of the two their 3 drafted starter packs
+/// (Sessions 2-4) come from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Starter {
+    pub name: String,
+    pub kickoff_marvel: u32,
+    pub kickoff_hobbit: u32,
+    /// "MSH" or "HOB".
+    pub weekly: String,
+}
+
+impl Starter {
+    pub fn new(name: &str, marvel: u32, weekly: &str) -> Starter {
+        Starter {
+            name: name.into(),
+            kickoff_marvel: marvel.min(9),
+            kickoff_hobbit: 9 - marvel.min(9),
+            weekly: weekly.into(),
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        let kick = match (self.kickoff_marvel, self.kickoff_hobbit) {
+            (m, 0) => format!("{} Marvel", m),
+            (0, h) => format!("{} Hobbit", h),
+            (m, h) => format!("{} Marvel + {} Hobbit", m, h),
+        };
+        format!(
+            "{}: kickoff {}, drafted packs {}",
+            self.name,
+            kick,
+            set_name(&self.weekly)
+        )
+    }
+}
+
+/// Who opens what in the league: you and the other players (8 in all).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Roster {
+    pub me: Starter,
+    pub others: Vec<Starter>,
+}
+
+impl Default for Roster {
+    /// Season 2 as it started: you and one other player went all Marvel, one split their
+    /// kickoff 3 Marvel / 6 Hobbit, and the other five went all Hobbit.
+    fn default() -> Self {
+        let mut others = vec![
+            Starter::new("Marvel player", 9, "MSH"),
+            Starter::new("Mixed player", 3, "HOB"),
+        ];
+        for i in 1..=5 {
+            others.push(Starter::new(&format!("Hobbit player {}", i), 0, "HOB"));
+        }
+        Roster {
+            me: Starter::new("You", 9, "MSH"),
+            others,
+        }
+    }
+}
+
+pub fn set_name(code: &str) -> &'static str {
+    match code {
+        "MSH" => "Marvel Super Heroes",
+        "HOB" => "The Hobbit",
+        "FRA" => "Reality Fracture",
+        "FDN" => "Foundations",
+        _ => "Nauctis: The Sunken Realms",
+    }
+}
 
 /// Rarity order used throughout: common, uncommon, rare, mythic.
 pub const RARITIES: [&str; 4] = ["common", "uncommon", "rare", "mythic"];
@@ -131,41 +205,76 @@ impl Delivery {
     }
 }
 
-/// Every pack each player receives over the season (§2), for a starter set of `starter`.
+/// Every pack a player receives over the season (§2).
 /// Nauctis cards are only known once its set is in the card database.
-pub fn season_packs(db: &CardDb, starter: &str) -> Vec<Delivery> {
-    let starter_name = if starter == "HOB" {
-        "The Hobbit"
-    } else {
-        "Marvel Super Heroes"
+pub fn season_packs(db: &CardDb, starter: &Starter) -> Vec<Delivery> {
+    let mut out = Vec::new();
+    let mut push = |session, set: &str, count| {
+        if count > 0 {
+            out.push(Delivery {
+                session,
+                set: set.to_string(),
+                set_name: set_name(set),
+                count,
+            })
+        }
     };
-    let mut out = vec![Delivery {
-        session: 1,
-        set: starter.to_string(),
-        set_name: starter_name,
-        count: 9,
-    }];
-    let mut push = |session, set: &str, name, count| {
-        out.push(Delivery {
-            session,
-            set: set.to_string(),
-            set_name: name,
-            count,
-        })
-    };
+    push(1, "MSH", starter.kickoff_marvel);
+    push(1, "HOB", starter.kickoff_hobbit);
     for s in 2..=4 {
-        push(s, starter, starter_name, 1);
+        push(s, &starter.weekly, 1);
     }
-    push(5, "FRA", "Reality Fracture", 3);
+    push(5, "FRA", 3);
     for s in 6..=8 {
-        push(s, "FRA", "Reality Fracture", 1);
+        push(s, "FRA", 1);
     }
     let nauctis = nauctis_code(db).unwrap_or_default();
-    push(9, &nauctis, "Nauctis: The Sunken Realms", 3);
+    push(9, &nauctis, 3);
     for s in 10..=12 {
-        push(s, &nauctis, "Nauctis: The Sunken Realms", 1);
+        push(s, &nauctis, 1);
     }
     out
+}
+
+/// Packs of `set` a player still gets from session `from` on.
+pub fn packs_to_come(db: &CardDb, starter: &Starter, set: &str, from: u32) -> u32 {
+    season_packs(db, starter)
+        .iter()
+        .filter(|d| d.set == set && d.session >= from)
+        .map(|d| d.count)
+        .sum()
+}
+
+/// Chances a card (`p` = chance per pack) turns up: in your packs (`mine` of them), at
+/// your draft table (you plus `table - 1` of the others - seating isn't known ahead, so
+/// every group is equally likely), and anywhere in the league. `others` = packs of the
+/// card's set each other player still opens.
+pub fn spread_odds(p: f32, mine: u32, others: &[u32], table: usize) -> (f32, f32, f32) {
+    let miss = |n: u32| (1.0 - p).powi(n as i32);
+    let you = 1.0 - miss(mine);
+    let league = 1.0 - miss(mine + others.iter().sum::<u32>());
+    // Average over every group of table-mates of the chance none of them opens it.
+    fn groups(
+        others: &[u32],
+        k: usize,
+        start: usize,
+        acc: f32,
+        miss: &dyn Fn(u32) -> f32,
+        out: &mut Vec<f32>,
+    ) {
+        if k == 0 {
+            out.push(acc);
+            return;
+        }
+        for i in start..others.len() {
+            groups(others, k - 1, i + 1, acc * miss(others[i]), miss, out);
+        }
+    }
+    let k = (table.saturating_sub(1)).min(others.len());
+    let mut misses = Vec::new();
+    groups(others, k, 0, 1.0, &miss, &mut misses);
+    let none_at_table = misses.iter().sum::<f32>() / misses.len().max(1) as f32;
+    (you, 1.0 - miss(mine) * none_at_table, league)
 }
 
 /// The Nauctis set code, once its cards have been added (Settings > Update card database).
@@ -178,24 +287,8 @@ pub fn nauctis_code(db: &CardDb) -> Option<String> {
         .map(String::from)
 }
 
-/// Which starter set a pool came from: whichever of MSH / HOB it holds more of.
-pub fn starter_set(db: &CardDb, coll: &Collection) -> String {
-    let count = |set: &str| -> u32 {
-        coll.counts
-            .iter()
-            .filter(|(n, _)| db.get(n).is_some_and(|c| c.set == set))
-            .map(|(_, k)| k)
-            .sum()
-    };
-    if count("HOB") > count("MSH") {
-        "HOB".into()
-    } else {
-        "MSH".into()
-    }
-}
-
 /// Packs (set, count) a pool holds by the time decks are built for `session`.
-pub fn packs_by_session(db: &CardDb, starter: &str, session: u32) -> Vec<(String, u32)> {
+pub fn packs_by_session(db: &CardDb, starter: &Starter, session: u32) -> Vec<(String, u32)> {
     let mut out: Vec<(String, u32)> = Vec::new();
     for d in season_packs(db, starter) {
         if d.set.is_empty() || d.usable_from() > session {
@@ -210,7 +303,7 @@ pub fn packs_by_session(db: &CardDb, starter: &str, session: u32) -> Vec<(String
 }
 
 /// A simulated league pool: the packs a player would have for `session`.
-pub fn simulated_pool(db: &CardDb, starter: &str, session: u32, rng: &mut Rng) -> Collection {
+pub fn simulated_pool(db: &CardDb, starter: &Starter, session: u32, rng: &mut Rng) -> Collection {
     let mut counts = std::collections::BTreeMap::new();
     for (set, n) in packs_by_session(db, starter, session) {
         let contents = set_contents(db, &set);
@@ -234,5 +327,22 @@ mod tests {
         assert!((e.iter().sum::<f32>() - 13.0).abs() < 0.01);
         assert!((chance_in(1, 0.1) - 0.1).abs() < 1e-6);
         assert!((chance_in(2, 0.5) - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn table_odds() {
+        // Nobody else opens the set: your table is just you.
+        let (you, table, league) = spread_odds(0.1, 3, &[0; 7], 4);
+        assert!((you - table).abs() < 1e-6 && (you - league).abs() < 1e-6);
+        // Everyone opens 3: the table sees 12 packs, the league 24.
+        let (_, table, league) = spread_odds(0.1, 3, &[3; 7], 4);
+        assert!((table - chance_in(12, 0.1)).abs() < 1e-5);
+        assert!((league - chance_in(24, 0.1)).abs() < 1e-5);
+        // Hobbit cards for a Marvel player: none in your packs, but often at your table.
+        let (you, table, _) = spread_odds(0.1, 0, &[0, 3, 3, 3, 3, 3, 3], 4);
+        assert!(you == 0.0 && table > 0.5);
+        let r = Roster::default();
+        assert_eq!(r.others.len(), 7);
+        assert_eq!(r.others.iter().filter(|o| o.weekly == "HOB").count(), 6);
     }
 }

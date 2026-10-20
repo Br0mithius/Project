@@ -2591,9 +2591,13 @@ impl GuiApp {
                 table,
                 league,
             } => format!(
-                "{} · {} packs each, usable from Session {}\nYou open it {:.0}% · your table {:.0}% · anyone in the league {:.0}%",
+                "{} · {}, usable from Session {}\nYou open it {:.0}% · your table {:.0}% · anyone in the league {:.0}%",
                 set_name,
-                packs,
+                if *packs == 0 {
+                    "not in your packs - draft it from a table-mate".to_string()
+                } else {
+                    format!("{} of your packs", packs)
+                },
                 usable_from,
                 you * 100.0,
                 table * 100.0,
@@ -2716,8 +2720,9 @@ impl GuiApp {
             ui.label(
                 RichText::new(
                     "\"Your table\" = opened at your 4-player draft table, so it's in your face-up draft. \"League\" = opened by any of the 8 \
-                     players, who might trade it into the pool. Odds use typical Play Booster rarity rates; starter-set odds assume your \
-                     table opens the same starter set. Nauctis cards appear once it's released and added (Settings > Update card database).",
+                     players, who might trade it into the pool. Who opens Marvel or Hobbit packs comes from Season & Rules > League starter \
+                     packs; your table is you plus 3 of the other 7 (any seating equally likely). Odds use typical Play Booster rarity rates. \
+                     Nauctis cards appear once it's released and added (Settings > Update card database).",
                 )
                 .small(),
             );
@@ -2989,6 +2994,13 @@ impl GuiApp {
     // ------------------------------------------------------------------ season
 
     fn season_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        ScrollArea::vertical()
+            .id_salt("season_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.season_body(ui, acts));
+    }
+
+    fn season_body(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.heading("Season 2 schedule & rules");
         let next = league::upcoming_session().number;
         egui::Grid::new("schedule")
@@ -3041,6 +3053,51 @@ impl GuiApp {
             analysis::land_range(&self.rules).1
         ));
         ui.add_space(6.0);
+        egui::CollapsingHeader::new(RichText::new("League starter packs (who opens Marvel / Hobbit)").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(
+                        "Used for pack odds on the Upgrades tab (Hobbit cards opened at your table can be drafted) \
+                         and for the simulated opponents in commander playtests.",
+                    )
+                    .small(),
+                );
+                let mut changed = false;
+                let roster = &mut self.rules.roster;
+                egui::Grid::new("roster").striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+                    for h in ["Player", "Kickoff Marvel", "Kickoff Hobbit", "Drafted packs (Sessions 2-4)"] {
+                        ui.label(RichText::new(h).small().strong());
+                    }
+                    ui.end_row();
+                    for (i, p) in std::iter::once(&mut roster.me).chain(roster.others.iter_mut()).enumerate() {
+                        changed |= ui
+                            .add_sized(
+                                [140.0, 20.0],
+                                egui::TextEdit::singleline(&mut p.name).interactive(i > 0),
+                            )
+                            .changed();
+                        if ui.add(egui::DragValue::new(&mut p.kickoff_marvel).range(0..=9)).changed() {
+                            p.kickoff_hobbit = 9 - p.kickoff_marvel;
+                            changed = true;
+                        }
+                        ui.label(p.kickoff_hobbit.to_string());
+                        ui.horizontal(|ui| {
+                            changed |= ui.selectable_value(&mut p.weekly, "MSH".to_string(), "Marvel").changed();
+                            changed |= ui.selectable_value(&mut p.weekly, "HOB".to_string(), "Hobbit").changed();
+                        });
+                        ui.end_row();
+                    }
+                });
+                if ui.small_button("Reset to the Season 2 starting mix").clicked() {
+                    *roster = crate::packs::Roster::default();
+                    changed = true;
+                }
+                if changed {
+                    let _ = self.rules.save(&self.data_dir.join("rules.json"));
+                    self.rev += 1;
+                }
+            });
         ui.collapsing("Advanced: change rules by hand", |ui| {
             let mut changed = false;
             ui.horizontal(|ui| {

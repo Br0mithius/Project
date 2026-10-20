@@ -36,7 +36,8 @@ TABS
   Stats & Playtest Mana curve, colours, weakest cards, opening-hand simulation,
                    sample hands.
   Season & Rules   The Season 2 schedule; "Build for this" switches deck size and
-                   singleton for that session.
+                   singleton for that session. "League starter packs" records who
+                   opens Marvel or Hobbit packs (used for pack odds and playtests).
   My Pool          Import from Mana Mixer; add or remove cards; copy your pool for Mana Mixer.
 
 The session picker at the top sets the rules (60 cards, singleton from Session 6,
