@@ -1465,6 +1465,41 @@ impl GuiApp {
             if !roles.is_empty() {
                 ui.label(RichText::new(format!("Roles: {}", roles.join(", "))).small());
             }
+            let parsed = card.parsed();
+            egui::CollapsingHeader::new(RichText::new("How the app reads this card").small())
+                .id_salt(("reads", &card.name))
+                .show(ui, |ui| {
+                    for line in parsed.describe() {
+                        ui.label(RichText::new(format!("• {}", line)).small());
+                    }
+                    if let Some(r) = parsed.removal() {
+                        ui.label(
+                            RichText::new(format!(
+                                "Removal: {} ({:.1} points{}{})",
+                                r.label,
+                                r.points,
+                                if r.mass { ", board wipe" } else { "" },
+                                if r.repeatable { ", repeatable" } else { "" }
+                            ))
+                            .small()
+                            .color(Color32::from_rgb(150, 220, 150)),
+                        );
+                    }
+                    for u in &parsed.unparsed {
+                        ui.label(
+                            RichText::new(format!("? not understood: {}", u))
+                                .small()
+                                .color(Color32::from_rgb(255, 190, 110)),
+                        );
+                    }
+                });
+            if !parsed.unparsed.is_empty() {
+                ui.label(
+                    RichText::new("? Some of this card's text isn't modelled - its scores may miss part of what it does.")
+                        .small()
+                        .color(Color32::from_rgb(255, 190, 110)),
+                );
+            }
             if !card.is_verified() {
                 ui.colored_label(
                     Color32::YELLOW,

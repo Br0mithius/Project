@@ -1,5 +1,6 @@
 //! Deck statistics, card scoring, suggestions, auto-building and opening-hand simulation.
 
+use crate::abilities::{Effect as AbEffect, Event, When};
 use crate::card::{BASIC_FOR_COLOR, COLORS, Card, ColorSet, Role};
 use crate::db::{CardDb, Collection, Rules};
 use crate::deck::Deck;
@@ -401,8 +402,13 @@ fn multiplayer_adjust(card: &Card, roles: &[Role], rules: &Rules) -> (f32, Vec<S
         why.push(format!("hits all {} opponents", opponents as u32));
     }
     if roles.contains(&Role::Sweeper) {
-        score += 1.5;
-        why.push("board wipe (great with 4 players)".into());
+        let one_sided = card.parsed().removal().is_some_and(|r| r.one_sided);
+        score += if one_sided { 2.0 } else { 1.5 };
+        why.push(if one_sided {
+            "one-sided board wipe (great with 4 players)".into()
+        } else {
+            "board wipe (great with 4 players)".into()
+        });
     } else if roles.contains(&Role::Removal) {
         score -= 0.4; // a 1-for-1 only answers one of three opponents
     }
@@ -449,9 +455,15 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     // so roles count for less.
     let role_weight = 1.0 - 0.5 * data_weight;
     let roles = card.roles();
+    let parsed = card.parsed();
+    // Removal is graded by what it can actually answer (see `abilities::Parsed::removal`).
+    let removal = parsed.removal();
     for r in &roles {
         let (pts, label) = match r {
-            Role::Removal => (3.0, "removal"),
+            Role::Removal => match removal {
+                Some(rm) => (rm.points, rm.label),
+                None => (2.0, "removal"),
+            },
             Role::Counter => (1.5, "counterspell"),
             Role::Bounce => (1.0, "bounce"),
             Role::Draw => (1.5, "card advantage"),
@@ -470,6 +482,15 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let (mp, mut mp_why) = multiplayer_adjust(card, &roles, rules);
     score += mp;
     why.append(&mut mp_why);
+    // Permanents that keep producing value (each-turn triggers, repeatable abilities) are
+    // worth more in long 4-player games.
+    if !matches!(card.main_type(), "Instant" | "Sorcery") {
+        let engine = parsed.repeatable_value().min(2.0);
+        if engine >= 0.5 {
+            score += 0.5 * engine * role_weight;
+            why.push("repeatable value".into());
+        }
+    }
     let st = stats(deck, db);
     let plan = deck_plan(deck, db, rules);
     if card.is_creature() {
@@ -566,181 +587,453 @@ fn cares_about(text: &str, word: &str) -> bool {
     .any(|p| text.contains(p.as_str()))
 }
 
-/// Things a commander's text can ask for, and what in a card answers it.
-struct Want {
-    /// Any of these in the commander's text turns the want on.
-    triggers: &'static [&'static str],
-    points: f32,
+/// A mechanic a commander can reward (the payoff) and the cards that feed it (enablers).
+/// Both sides are read from the parsed abilities (see `abilities`), so "whenever a creature
+/// you control dies" pairs with sacrifice outlets and token makers, "landfall" with land
+/// fetching, "whenever you draw your second card" with card draw and looting, and so on.
+struct Mechanic {
     label: &'static str,
-    fits: fn(&Card) -> bool,
+    points: f32,
+    /// How strongly the commander rewards it (0 = not at all, 1 = a trigger built on it).
+    payoff: fn(&Card) -> f32,
+    /// How well a card feeds it (0..1).
+    enabler: fn(&Card) -> f32,
 }
 
-const WANTS: &[Want] = &[
-    Want {
-        triggers: &["noncreature spell"],
-        points: 1.5,
-        label: "noncreature spell triggers commander",
-        fits: |c| !c.is_creature() && !c.is_land(),
-    },
-    Want {
-        triggers: &[
-            "instant or sorcery",
-            "instant and sorcery",
-            "instants and sorceries",
-        ],
-        points: 1.5,
-        label: "instant/sorcery for commander",
-        fits: |c| c.main_type() == "Instant" || c.main_type() == "Sorcery",
-    },
-    Want {
-        triggers: &[
-            "another artifact",
-            "artifact you control",
-            "artifacts you control",
-            "nontoken artifact",
-            "sacrifice an artifact",
-            "artifact source",
-            "artifact enters",
-        ],
+/// The commander's triggered-ability events.
+fn events(cmd: &Card) -> Vec<crate::abilities::Event> {
+    use crate::abilities::When;
+    cmd.parsed()
+        .abilities
+        .iter()
+        .flat_map(|a| a.when.iter())
+        .filter_map(|w| match w {
+            When::Event(e) => Some(e.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_event(cmd: &Card, f: fn(&crate::abilities::Event) -> bool) -> bool {
+    events(cmd).iter().any(f)
+}
+
+/// 1.0 for a matching trigger, 0.6 for a static mention in the commander's text.
+fn payoff_by(cmd: &Card, f: fn(&crate::abilities::Event) -> bool, words: &[&str]) -> f32 {
+    if has_event(cmd, f) {
+        1.0
+    } else if words.iter().any(|w| cmd.text_lower().contains(w)) {
+        0.6
+    } else {
+        0.0
+    }
+}
+
+fn yes(b: bool) -> f32 {
+    if b { 1.0 } else { 0.0 }
+}
+
+const MECHANICS: &[Mechanic] = &[
+    Mechanic {
+        label: "token maker for a token commander",
         points: 1.25,
-        label: "artifact for commander",
-        fits: |c| c.type_line.contains("Artifact"),
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Tokens),
+                &["tokens you control", "token you control", "for each token"],
+            )
+        },
+        enabler: |c| yes(c.parsed().makes_tokens()),
     },
-    Want {
-        triggers: &["equipment", "equipped"],
+    Mechanic {
+        label: "+1/+1 counters for a counters commander",
+        points: 1.25,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Counters),
+                &[
+                    "+1/+1 counter on it",
+                    "with +1/+1 counters",
+                    "counters on each",
+                    "plus one",
+                    "+1/+1 counters you",
+                ],
+            )
+        },
+        enabler: |c| {
+            yes(c.parsed().effects().any(|(_, e)| {
+                matches!(
+                    e,
+                    AbEffect::PlusCounters { .. } | AbEffect::Proliferate | AbEffect::Amass(_)
+                )
+            }))
+        },
+    },
+    Mechanic {
+        label: "sacrifice fodder/outlet for a death commander",
+        points: 1.25,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Death | Event::Sacrifice),
+                &["morbid", "creature died", "dies this turn"],
+            )
+        },
+        enabler: |c| {
+            let p = c.parsed();
+            let outlet = p.abilities.iter().any(|a| {
+                a.when
+                    .iter()
+                    .any(|w| matches!(w, When::Activated(cost) if cost.sacrifice))
+            });
+            let dies = p.abilities.iter().any(|a| a.is(&When::Dies));
+            (yes(outlet) + 0.7 * yes(p.makes_creature_tokens()) + 0.6 * yes(dies)).min(1.0)
+        },
+    },
+    Mechanic {
+        label: "fills the graveyard",
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("threshold")
+                || t.contains("cards in your graveyard")
+                || t.contains("from your graveyard"))
+        },
+        enabler: |c| {
+            yes(c.parsed().effects().any(|(_, e)| {
+                matches!(
+                    e,
+                    AbEffect::Mill { .. } | AbEffect::Loot | AbEffect::Scry(_)
+                )
+            }))
+        },
+    },
+    Mechanic {
+        label: "instant/sorcery for a spells commander",
+        points: 1.5,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Cast(w) if w.contains("instant") || w.contains("sorcery") || w.contains("noncreature")),
+                &["instant or sorcery", "noncreature spell"],
+            )
+        },
+        enabler: |c| yes(matches!(c.main_type(), "Instant" | "Sorcery")),
+    },
+    Mechanic {
+        label: "noncreature spell for the commander",
+        points: 0.6,
+        payoff: |c| {
+            yes(has_event(
+                c,
+                |e| matches!(e, Event::Cast(w) if w.contains("noncreature")),
+            ))
+        },
+        enabler: |c| {
+            yes(!c.is_creature() && !c.is_land() && !matches!(c.main_type(), "Instant" | "Sorcery"))
+        },
+    },
+    Mechanic {
+        label: "artifact for an artifact commander",
+        points: 1.25,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Cast(w) | Event::OtherEnters(w) if w.contains("artifact")),
+                &[
+                    "artifact you control",
+                    "artifacts you control",
+                    "improvise",
+                    "affinity for artifacts",
+                    "sacrifice an artifact",
+                ],
+            )
+        },
+        enabler: |c| {
+            (yes(c.type_line.contains("Artifact"))
+                + 0.6
+                    * yes(c
+                        .parsed()
+                        .effects()
+                        .any(|(_, e)| matches!(e, AbEffect::ItemTokens { .. }))))
+            .min(1.0)
+        },
+    },
+    Mechanic {
+        label: "Equipment for an equipped commander",
         points: 2.0,
-        label: "Equipment for commander",
-        fits: |c| c.type_line.contains("Equipment"),
-    },
-    Want {
-        triggers: &["vehicle", "crew"],
-        points: 1.5,
-        label: "Vehicle for commander",
-        fits: |c| c.type_line.contains("Vehicle"),
-    },
-    Want {
-        triggers: &[
-            "enchantment you control",
-            "enchantments you control",
-            "non-aura enchantment",
-        ],
-        points: 1.0,
-        label: "enchantment for commander",
-        fits: |c| c.type_line.contains("Enchantment"),
-    },
-    Want {
-        triggers: &["plan card", "plan counter"],
-        points: 1.5,
-        label: "Plan for commander",
-        fits: |c| c.type_line.contains("Plan"),
-    },
-    Want {
-        triggers: &[
-            "counter on each",
-            "+1/+1 counters you",
-            "kind of counter",
-            "put that many plus one",
-            "remove a counter",
-            "counter on another",
-        ],
-        points: 1.0,
-        label: "+1/+1 counters synergy",
-        fits: |c| c.text_lower().contains("+1/+1 counter") || c.text_lower().contains("power-up"),
-    },
-    Want {
-        triggers: &[
-            "tokens you control",
-            "token you control",
-            "whenever a token",
-            "one or more tokens",
-        ],
-        points: 1.0,
-        label: "token synergy",
-        fits: |c| c.has_role(Role::Tokens),
-    },
-    Want {
-        triggers: &["is dealt damage", "enrage"],
-        points: 1.25,
-        label: "makes your Enrage creature take damage",
-        fits: |c| {
+        payoff: |c| {
             let t = c.text_lower();
-            t.contains("fight")
-                || t.contains("damage to each creature")
-                || t.contains("deals damage equal to its power")
+            yes(t.contains("equipped") || t.contains("equipment"))
+        },
+        enabler: |c| {
+            yes(c.type_line.contains("Equipment"))
+                + 0.3
+                    * yes(c
+                        .parsed()
+                        .effects()
+                        .any(|(_, e)| matches!(e, AbEffect::Attach)))
         },
     },
-    Want {
-        triggers: &["noncombat damage"],
+    Mechanic {
+        label: "Vehicle for a crew commander",
         points: 1.5,
-        label: "burn boosted by commander",
-        fits: |c| !c.is_creature() && c.text_lower().contains("damage"),
-    },
-    Want {
-        triggers: &["second card each turn", "draw your second card"],
-        points: 1.5,
-        label: "draws the 2nd card each turn",
-        fits: |c| c.has_role(Role::Draw),
-    },
-    Want {
-        triggers: &[
-            "whenever you discard",
-            "discard a nonland card",
-            "or discard a card",
-            "discard a card:",
-        ],
-        points: 1.25,
-        label: "discard/loot synergy",
-        fits: |c| {
+        payoff: |c| {
             let t = c.text_lower();
-            t.contains("discard a card") || t.contains("connive") || t.contains("discard")
+            yes(t.contains("vehicle") || t.contains("crew"))
         },
+        enabler: |c| yes(c.type_line.contains("Vehicle")),
     },
-    Want {
-        triggers: &["targets one or more creatures"],
-        points: 1.5,
-        label: "targets a creature (commander trigger)",
-        fits: |c| !c.is_creature() && c.text_lower().contains("target creature"),
-    },
-    Want {
-        triggers: &["becomes a copy", "copy of that artifact", "copy of it"],
+    Mechanic {
+        label: "enchantment for an enchantment commander",
         points: 1.0,
-        label: "worth copying",
-        fits: |c| {
-            (c.type_line.contains("Artifact") || c.type_line.contains("Enchantment"))
-                && !c.is_creature()
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Cast(w) | Event::OtherEnters(w) if w.contains("enchantment")),
+                &[
+                    "enchantments you control",
+                    "enchantment you control",
+                    "non-aura enchantment",
+                ],
+            )
         },
+        enabler: |c| yes(c.type_line.contains("Enchantment")),
     },
-    Want {
-        triggers: &[
-            "landfall",
-            "land you control enters",
-            "play lands from the top",
-        ],
-        points: 0.75,
+    Mechanic {
+        label: "Plan for a Plan commander",
+        points: 1.5,
+        payoff: |c| yes(c.text_lower().contains("plan")),
+        enabler: |c| yes(c.type_line.contains("Plan") && !c.type_line.contains("Planeswalker")),
+    },
+    Mechanic {
         label: "extra lands for landfall",
-        fits: |c| {
-            c.text_lower()
-                .contains("search your library for a basic land")
-                || c.text_lower().contains("landcycling")
+        points: 1.0,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Landfall),
+                &["landfall", "lands you control"],
+            )
+        },
+        enabler: |c| {
+            yes(c
+                .parsed()
+                .effects()
+                .any(|(_, e)| matches!(e, AbEffect::FetchLand { .. }))
+                || c.text_lower().contains("additional land"))
         },
     },
-    Want {
-        triggers: &["power-up"],
-        points: 0.5,
-        label: "mana for the commander's power-up",
-        fits: |c| c.has_role(Role::Ramp),
+    Mechanic {
+        label: "life gain for a life-gain commander",
+        points: 1.0,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::GainLife),
+                &["gain life", "gained life"],
+            )
+        },
+        enabler: |c| yes(c.parsed().gains_life()),
     },
-    Want {
-        triggers: &["whenever you gain life", "lifelink"],
-        points: 0.5,
-        label: "life gain synergy",
-        fits: |c| c.has_role(Role::Lifegain),
+    Mechanic {
+        label: "extra card draw for a draw commander",
+        points: 1.5,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Draw),
+                &["draw your second card", "second card each turn"],
+            )
+        },
+        enabler: |c| {
+            let p = c.parsed();
+            yes(p.draws()
+                || p.effects()
+                    .any(|(_, e)| matches!(e, AbEffect::Dig | AbEffect::Loot)))
+        },
+    },
+    Mechanic {
+        label: "discard outlet for a discard commander",
+        points: 1.25,
+        payoff: |c| {
+            payoff_by(
+                c,
+                |e| matches!(e, Event::Discard),
+                &["whenever you discard", "discard a nonland card"],
+            )
+        },
+        enabler: |c| {
+            let p = c.parsed();
+            yes(p.effects().any(|(_, e)| matches!(e, AbEffect::Loot))
+                || p.abilities.iter().any(|a| {
+                    a.when
+                        .iter()
+                        .any(|w| matches!(w, When::Activated(cost) if cost.discard))
+                }))
+        },
+    },
+    Mechanic {
+        label: "helps attacks for an attack commander",
+        points: 0.8,
+        payoff: |c| {
+            let p = c.parsed();
+            if p.abilities
+                .iter()
+                .any(|a| a.is(&When::Attacks) || a.is(&When::CombatDamage))
+                || has_event(c, |e| matches!(e, Event::OthersAttack))
+            {
+                1.0
+            } else {
+                0.0
+            }
+        },
+        enabler: |c| {
+            let p = c.parsed();
+            let evasive_creature = c.is_creature() && p.evasive();
+            let haste = c.is_creature() && p.has_keyword("haste");
+            let team = p.effects().any(|(_, e)| {
+                matches!(e, AbEffect::Pump { to, .. } | AbEffect::Grant { to, .. } if to.mass && to.whose == crate::abilities::Whose::Yours)
+                    || matches!(e, AbEffect::ExtraCombat)
+            });
+            (0.7 * yes(evasive_creature) + 0.5 * yes(haste) + yes(team)).min(1.0)
+        },
+    },
+    Mechanic {
+        label: "enters-the-battlefield value for an ETB commander",
+        points: 0.8,
+        payoff: |c| {
+            yes(has_event(
+                c,
+                |e| matches!(e, Event::OtherEnters(w) if w.contains("creature") || w.contains("another") || w.contains("nontoken")),
+            ))
+        },
+        enabler: |c| {
+            let p = c.parsed();
+            yes(c.is_creature()
+                && p.abilities
+                    .iter()
+                    .any(|a| a.is(&When::Enters) && !a.effects.is_empty()))
+            .max(yes(p.effects().any(|(_, e)| matches!(e, AbEffect::Blink))))
+        },
+    },
+    Mechanic {
+        label: "legendary/artifact for a Storied commander",
+        points: 1.0,
+        payoff: |c| {
+            let p = c.parsed();
+            yes(p.has_keyword("storied")
+                || c.text_lower().contains("enduring story")
+                || c.text_lower().contains("legendary spell"))
+        },
+        enabler: |c| {
+            yes(c.is_legendary()
+                || c.type_line.contains("Artifact")
+                || c.type_line.contains("Saga"))
+        },
+    },
+    Mechanic {
+        label: "empowers Jace for a planeswalker commander",
+        points: 1.25,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("planeswalker") || t.contains("loyalty") || t.contains("empower"))
+        },
+        enabler: |c| {
+            yes(c.type_line.contains("Planeswalker")
+                || c.parsed()
+                    .effects()
+                    .any(|(_, e)| matches!(e, AbEffect::Empower(_))))
+        },
+    },
+    Mechanic {
+        label: "teamwork spell (taps your creatures)",
+        points: 0.6,
+        payoff: |c| {
+            // Commanders with big bodies or that make creatures pay teamwork costs easily.
+            let power: i32 = c.power.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+            (yes(power >= 4)
+                + yes(c.parsed().makes_creature_tokens())
+                + yes(c.text_lower().contains("teamwork")))
+            .min(1.0)
+        },
+        enabler: |c| yes(c.parsed().has_keyword("teamwork")),
+    },
+    Mechanic {
+        label: "damage effect boosted by the commander",
+        points: 1.5,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("noncombat damage")
+                || c.parsed()
+                    .effects()
+                    .any(|(_, e)| matches!(e, AbEffect::Doubler(k) if k == "damage")))
+        },
+        enabler: |c| {
+            yes(!c.is_creature()
+                && c.parsed()
+                    .effects()
+                    .any(|(_, e)| matches!(e, AbEffect::Damage { .. } | AbEffect::Drain { .. })))
+        },
+    },
+    Mechanic {
+        label: "big creature for a big-creature commander",
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("power 4 or greater")
+                || t.contains("greatest power")
+                || t.contains("mana value 5 or greater")
+                || t.contains("mana value 4 or greater"))
+        },
+        enabler: |c| {
+            let power: i32 = c.power.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+            yes(c.is_creature() && (power >= 4 || c.mana_value() >= 5))
+        },
+    },
+    Mechanic {
+        label: "mana for the commander's expensive abilities",
+        points: 0.6,
+        payoff: |c| {
+            let p = c.parsed();
+            yes(p.abilities.iter().any(|a| {
+                a.when.iter().any(
+                    |w| matches!(w, When::PowerUp(cost) | When::Activated(cost) if cost.mana >= 4),
+                )
+            }) || c.mana_cost.contains("{X}"))
+        },
+        enabler: |c| yes(c.parsed().ramps()),
+    },
+    Mechanic {
+        label: "damages your creatures for an Enrage commander",
+        points: 1.25,
+        payoff: |c| yes(has_event(c, |e| matches!(e, Event::Damaged))),
+        enabler: |c| {
+            yes(c.parsed().effects().any(|(_, e)| {
+                matches!(e, AbEffect::Fight(_)) || matches!(e, AbEffect::Damage { to, .. } if to.mass && to.whose != crate::abilities::Whose::Theirs)
+            }))
+        },
+    },
+    Mechanic {
+        label: "grows your Army",
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("army") || t.contains("amass"))
+        },
+        enabler: |c| {
+            yes(c
+                .parsed()
+                .effects()
+                .any(|(_, e)| matches!(e, AbEffect::Amass(_))))
+        },
     },
 ];
 
-/// Bonus for cards that play into what the commander's text asks for: creature types it
-/// cares about (Villain spells, other Heroes...), card types (artifacts, Equipment,
-/// Plans...) and mechanics (counters, discard, Enrage, noncombat damage...).
+/// Bonus for cards that play into what the commander rewards: creature types it cares
+/// about (Villain spells, other Heroes...) and the mechanics in `MECHANICS`.
 pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
     let ct = cmd.text_lower();
     let mut score: f32 = 0.0;
@@ -758,10 +1051,17 @@ pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
             why.push(format!("{} (mentioned by commander)", sub));
         }
     }
-    for want in WANTS {
-        if want.triggers.iter().any(|t| ct.contains(t)) && (want.fits)(card) {
-            score += want.points;
-            why.push(want.label.to_string());
+    if card.name != cmd.name {
+        for m in MECHANICS {
+            let pay = (m.payoff)(cmd);
+            if pay <= 0.0 {
+                continue;
+            }
+            let feed = (m.enabler)(card).min(1.0);
+            if feed > 0.0 {
+                score += m.points * pay * feed;
+                why.push(m.label.to_string());
+            }
         }
     }
     for tribe in ["Hero", "Villain"] {

@@ -169,21 +169,48 @@ pub fn commander_power(cmd: &Card, db: &CardDb) -> (f32, Vec<String>) {
             pts
         ));
     }
-    let t = cmd.text_lower();
-    if t.contains("whenever") || t.contains("at the beginning of") {
-        score += 0.6;
-        why.push("repeatable trigger".into());
+    // Abilities, read by the parser (see `abilities`).
+    let parsed = cmd.parsed();
+    use crate::abilities::{Effect, When};
+    let engine = parsed
+        .abilities
+        .iter()
+        .filter(|a| !a.effects.is_empty() && a.rate() > 0.0)
+        .filter(|a| !a.effects.iter().all(|e| matches!(e, Effect::AddMana(_))))
+        .map(|a| a.rate())
+        .sum::<f32>();
+    if engine > 0.0 {
+        let pts = (0.4 + 0.4 * engine).min(1.2);
+        score += pts;
+        why.push(format!("repeatable abilities ({:+.1})", pts));
     }
-    if t.contains("power-up") || t.contains(": transform") {
+    if parsed
+        .abilities
+        .iter()
+        .any(|a| a.when.iter().any(|w| matches!(w, When::PowerUp(_))))
+    {
         score += 0.3;
-        why.push("mana sink (power-up / transform)".into());
+        why.push("power-up (cheap to use the turn it's cast)".into());
+    } else if parsed.abilities.iter().any(|a| {
+        a.when
+            .iter()
+            .any(|w| matches!(w, When::Activated(c) if c.mana > 0))
+    }) {
+        score += 0.3;
+        why.push("mana sink".into());
     }
-    let activated = t
-        .lines()
-        .any(|l| l.contains(':') && !l.starts_with("power-up") && !l.contains('—'));
-    if activated {
+    if let Some(r) = parsed.removal() {
+        if r.repeatable {
+            score += 0.8;
+            why.push(format!("repeatable removal ({})", r.label));
+        } else {
+            score += 0.3;
+            why.push(format!("removal when it arrives ({})", r.label));
+        }
+    }
+    if parsed.each_opponent() {
         score += 0.3;
-        why.push("activated ability".into());
+        why.push("hits every opponent".into());
     }
     let keywords = [
         "flying",
@@ -194,12 +221,13 @@ pub fn commander_power(cmd: &Card, db: &CardDb) -> (f32, Vec<String>) {
         "hexproof",
         "indestructible",
         "ward",
-        "can't be blocked",
         "vigilance",
         "first strike",
+        "double strike",
         "reach",
+        "haste",
     ];
-    let k = keywords.iter().filter(|k| t.contains(*k)).count() as f32;
+    let k = keywords.iter().filter(|k| parsed.has_keyword(k)).count() as f32;
     if k > 0.0 {
         score += (k * 0.15).min(0.6);
     }

@@ -39,6 +39,8 @@ pub struct Card {
     pub roles_cache: std::sync::OnceLock<Vec<Role>>,
     #[serde(skip)]
     pub text_cache: std::sync::OnceLock<String>,
+    #[serde(skip)]
+    pub parsed_cache: std::sync::OnceLock<crate::abilities::Parsed>,
 }
 
 /// A set of colours stored as a bitmask in WUBRG order.
@@ -341,13 +343,87 @@ impl Card {
             .clone()
     }
 
+    /// The rules text read into keywords and abilities (worked out once).
+    pub fn parsed(&self) -> &crate::abilities::Parsed {
+        self.parsed_cache
+            .get_or_init(|| crate::abilities::parse(self))
+    }
+
     /// Rules text without reminder text, lower-cased (worked out once).
     pub fn text_lower(&self) -> &str {
         self.text_cache
             .get_or_init(|| strip_reminder(&self.oracle_text).to_lowercase())
     }
 
+    /// Roles from the parsed abilities (see `abilities`), with a few text checks for
+    /// things the parser doesn't model as effects.
     fn compute_roles(&self) -> Vec<Role> {
+        use crate::abilities::{Effect, Event, When};
+        let p = self.parsed();
+        let t = self.text_lower();
+        let mut roles = Vec::new();
+        let removal = p.removal();
+        // Bounce and tap effects are their own (weaker) things, not removal.
+        if removal.is_some_and(|r| r.label != "bounce" && r.label != "tap effect") {
+            roles.push(Role::Removal);
+        }
+        let any = |f: &dyn Fn(&Effect) -> bool| p.effects().any(|(_, e)| f(e));
+        if any(&|e| matches!(e, Effect::Bounce(t) if t.hits_their_creatures())) {
+            roles.push(Role::Bounce);
+        }
+        if any(&|e| matches!(e, Effect::CounterSpell)) {
+            roles.push(Role::Counter);
+        }
+        if p.draws() || any(&|e| matches!(e, Effect::Dig)) {
+            roles.push(Role::Draw);
+        }
+        if p.ramps() && !self.is_land() {
+            roles.push(Role::Ramp);
+        }
+        if p.makes_tokens() {
+            roles.push(Role::Tokens);
+        }
+        let ty = self.type_lower();
+        if ty.contains("instant")
+            && any(
+                &|e| matches!(e, Effect::Pump { to, until_eot: true, .. } | Effect::Grant { to, until_eot: true, .. } if !to.mass),
+            )
+        {
+            roles.push(Role::Trick);
+        }
+        if p.evasive() {
+            roles.push(Role::Evasion);
+        }
+        if p.protected() {
+            roles.push(Role::Protection);
+        }
+        if p.gains_life() {
+            roles.push(Role::Lifegain);
+        }
+        if p.has_keyword("teamwork") {
+            roles.push(Role::Teamwork);
+        }
+        if p.abilities
+            .iter()
+            .any(|a| a.when.contains(&When::Event(Event::Damaged)))
+            || t.contains("enrage")
+        {
+            roles.push(Role::Enrage);
+        }
+        if p.sweeper() {
+            roles.push(Role::Sweeper);
+            if !roles.contains(&Role::Removal) {
+                roles.push(Role::Removal);
+            }
+        }
+        if p.each_opponent() {
+            roles.push(Role::EachOpponent);
+        }
+        roles
+    }
+
+    /// The text-pattern role guesses used before the ability parser (kept for comparison).
+    pub fn legacy_roles(&self) -> Vec<Role> {
         let t = self.text_lower();
         let has = |s: &str| t.contains(s);
         let mut roles = Vec::new();

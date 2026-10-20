@@ -9,8 +9,9 @@
 //! (creatures) or does nothing (other spells). It's a rough second opinion, not a rules
 //! engine.
 
+use crate::abilities;
 use crate::analysis::Rng;
-use crate::card::{Card, Role, strip_reminder};
+use crate::card::Card;
 use crate::db::{CardDb, Rules};
 use crate::deck::Deck;
 
@@ -48,8 +49,10 @@ const KEYWORDS: [(&str, u16); 14] = [
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Kill {
-    /// Destroy or exile any creature.
-    Any,
+    /// Destroy (indestructible creatures survive).
+    Destroy,
+    /// Exile, -X/-X to death, lock down or steal: indestructible doesn't help (CR 702.12b).
+    Exile,
     /// Damage to one creature (kills toughness up to N).
     Damage(i32),
     /// Return a creature to its owner's hand.
@@ -57,9 +60,13 @@ enum Kill {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Wipe {
-    All,
-    Damage(i32),
+struct Wipe {
+    /// None = destroy/exile everything; Some(n) = damage or -N/-N to each creature.
+    damage: Option<i32>,
+    /// Only opponents' creatures.
+    one_sided: bool,
+    /// Exile (or -X/-X): indestructible doesn't save them.
+    exile: bool,
 }
 
 /// How often an effect happens: once (cast / enters), or every turn while it's in play.
@@ -69,6 +76,40 @@ struct Effect {
     per_turn: f32,
     /// Each time the creature attacks.
     per_attack: f32,
+}
+
+impl Effect {
+    fn add(&mut self, when: Timing, n: f32) {
+        match when {
+            Timing::Now(w) => self.now += n * w,
+            Timing::PerTurn(r) => self.per_turn += n * r,
+            Timing::PerAttack(r) => self.per_attack += n * r,
+            Timing::Static | Timing::Never => {}
+        }
+    }
+}
+
+/// When a parsed ability does its thing, for the simulator (weights already applied).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Timing {
+    Now(f32),
+    PerTurn(f32),
+    PerAttack(f32),
+    Static,
+    Never,
+}
+
+/// MSH Power-up (CR 702.193): an activated ability usable once, its cost reduced by the
+/// permanent's mana cost on the turn it entered.
+#[derive(Debug, Clone, Default)]
+struct PowerUp {
+    cost: u32,
+    grow: i32,
+    kill: Option<Kill>,
+    wipe: Option<Wipe>,
+    draw: f32,
+    tokens: f32,
+    kw: u16,
 }
 
 /// A card as the simulator sees it.
@@ -87,48 +128,104 @@ pub struct Profile {
     kw: u16,
     kill: Option<Kill>,
     wipe: Option<Wipe>,
+    /// Removal it keeps doing (activated or triggered), per turn.
+    kill_rate: f32,
+    kill_repeat: Option<Kill>,
+    /// Each opponent sacrifices a creature.
+    edict: Effect,
     draw: Effect,
     tokens: Effect,
     token_size: (i32, i32),
     drain: Effect,
     gain: Effect,
+    /// +1/+1 counters on itself.
+    grow: Effect,
     anthem: i32,
     equip: (i32, i32),
+    power_up: Option<PowerUp>,
 }
 
-fn number_word(w: &str) -> Option<i32> {
-    Some(match w.trim_matches(|c: char| !c.is_alphanumeric()) {
-        "a" | "an" | "one" => 1,
-        "two" => 2,
-        "three" => 3,
-        "four" => 4,
-        "five" => 5,
-        "six" => 6,
-        "x" => 3,
-        n => n.parse().ok()?,
+fn keyword_bits(words: &[String]) -> u16 {
+    let mut bits = 0;
+    for w in words {
+        if w.starts_with("ward") || w.starts_with("hexproof") {
+            bits |= HEXPROOF;
+        }
+        if w == "unblockable" {
+            bits |= UNBLOCKABLE;
+        }
+        for (k, bit) in KEYWORDS {
+            if w == k {
+                bits |= bit;
+            }
+        }
+    }
+    bits
+}
+
+/// The simulator's version of a removal effect, if it hits opponents' creatures.
+fn kill_of(e: &abilities::Effect) -> Option<Result<Kill, Wipe>> {
+    use abilities::Effect as E;
+    let mass = |t: &abilities::Target, damage: Option<i32>, exile: bool| {
+        Err(Wipe {
+            damage,
+            one_sided: t.whose == abilities::Whose::Theirs,
+            exile,
+        })
+    };
+    Some(match e {
+        E::Destroy(t) if t.hits_their_creatures() => {
+            if t.mass {
+                mass(t, None, false)
+            } else {
+                Ok(Kill::Destroy)
+            }
+        }
+        E::Exile { target: t, .. } if t.hits_their_creatures() => {
+            if t.mass {
+                mass(t, None, true)
+            } else {
+                Ok(Kill::Exile)
+            }
+        }
+        E::Damage { amount, to } if to.hits_their_creatures() => {
+            if to.mass {
+                mass(to, Some(amount.n), false)
+            } else {
+                Ok(Kill::Damage(amount.n))
+            }
+        }
+        E::Shrink { amount, to, .. } if to.hits_their_creatures() => {
+            if to.mass {
+                mass(to, Some(amount.n), true)
+            } else {
+                Ok(Kill::Damage(amount.n))
+            }
+        }
+        E::Fight(t) if t.hits_their_creatures() => Ok(Kill::Damage(3)),
+        E::Bounce(t) if t.hits_their_creatures() => {
+            if t.mass {
+                mass(t, None, true)
+            } else {
+                Ok(Kill::Bounce)
+            }
+        }
+        E::Lock {
+            target,
+            lasting: true,
+        } if target.hits_their_creatures() => Ok(Kill::Exile),
+        E::GainControl(t) if t.hits_their_creatures() => Ok(Kill::Exile),
+        _ => return None,
     })
 }
 
-/// "+2/+1" or "3/3" at the start of `s`.
-fn pt_at(s: &str) -> Option<(i32, i32)> {
-    let word = s.split_whitespace().next()?;
-    let (p, t) = word.trim_end_matches([',', '.']).split_once('/')?;
-    Some((
-        p.trim_start_matches('+').parse().ok()?,
-        t.trim_start_matches('+').parse().ok()?,
-    ))
-}
-
-/// The number right before `marker` in `line` ("deals 3 damage" -> 3).
-fn number_before(line: &str, marker: &str) -> Option<i32> {
-    let i = line.find(marker)?;
-    number_word(line[..i].split_whitespace().last()?)
-}
-
-/// The number right after `marker` in `line` ("loses 2 life" with marker "loses " -> 2).
-fn number_after(line: &str, marker: &str) -> Option<i32> {
-    let i = line.find(marker)?;
-    number_word(line[i + marker.len()..].split_whitespace().next()?)
+fn kill_value(k: Kill) -> i32 {
+    match k {
+        Kill::Exile => 10,
+        Kill::Destroy => 9,
+        Kill::Damage(n) => n.min(8),
+        Kill::Bounce => 1,
+    }
 }
 
 impl Profile {
@@ -136,12 +233,11 @@ impl Profile {
         Profile::in_deck(card, true)
     }
 
-    /// Reads a card for a deck; `equipment` = whether the deck has any Equipment (for
-    /// "if it's equipped" conditions).
+    /// Reads a card (via the ability parser) for a deck; `equipment` = whether the deck has
+    /// any Equipment (for "if it's equipped" conditions).
     pub fn in_deck(card: &Card, equipment: bool) -> Profile {
-        // Front face only for double-faced cards.
-        let text = strip_reminder(&card.oracle_text).to_lowercase();
-        let text = text.split("// back face").next().unwrap_or("").to_string();
+        use abilities::{Effect as E, When};
+        let parsed = card.parsed();
         let mut p = Profile {
             mv: card.mana_value(),
             pips: card.pips(),
@@ -161,16 +257,21 @@ impl Profile {
                 .as_deref()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
-            kw: 0,
+            kw: keyword_bits(&parsed.keywords),
             kill: None,
             wipe: None,
+            kill_rate: 0.0,
+            kill_repeat: None,
+            edict: Effect::default(),
             draw: Effect::default(),
             tokens: Effect::default(),
             token_size: (1, 1),
             drain: Effect::default(),
             gain: Effect::default(),
+            grow: Effect::default(),
             anthem: 0,
             equip: (0, 0),
+            power_up: None,
         };
         if p.land {
             if p.produces == 0 {
@@ -178,181 +279,185 @@ impl Profile {
             }
             return p;
         }
-        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-            // Keyword lines: "Flying, vigilance", "Ward {2}".
-            let words: Vec<&str> = line.trim_end_matches('.').split(", ").collect();
-            let is_kw = |w: &str| KEYWORDS.iter().any(|(k, _)| *k == w) || w.starts_with("ward");
-            if words.iter().all(|w| is_kw(w)) {
-                for w in words {
-                    if w.starts_with("ward") {
-                        p.kw |= HEXPROOF;
-                    }
-                    for (k, bit) in KEYWORDS {
-                        if w == k {
-                            p.kw |= bit;
-                        }
-                    }
-                }
-                continue;
+        let loyalty_count = parsed
+            .abilities
+            .iter()
+            .filter(|a| a.when.iter().any(|w| matches!(w, When::Loyalty(_))))
+            .count()
+            .max(1) as f32;
+        // The front face, plus an Adventure / prepare spell on the back (cast once, extra value).
+        let mut abilities: Vec<(&abilities::Ability, f32)> =
+            parsed.abilities.iter().map(|a| (a, 1.0)).collect();
+        if let Some(back) = &parsed.back {
+            let castable = back
+                .abilities
+                .iter()
+                .all(|a| a.when.iter().all(|w| *w == When::Spell));
+            if castable && !back.abilities.is_empty() {
+                abilities.extend(back.abilities.iter().map(|a| (a, 0.8)));
             }
-            // When does this line happen? Once, or every turn?
-            // When does this line happen? Once (cast / enters), every turn, when attacking,
-            // or never as far as the simulator is concerned (mana-cost and Power-up abilities).
-            let cost = line.split_once(':').map(|(c, _)| c).filter(|c| {
-                c.contains('{')
-                    || c.contains("sacrifice")
-                    || c.contains("discard")
-                    || c.contains("power-up")
-            });
-            let (now, per_turn, per_attack) = if line.starts_with("at the beginning of") {
-                (0.0, 1.0, 0.0)
-            } else if line.starts_with("whenever") && line.contains(" attacks") {
-                (0.0, 0.0, 1.0)
-            } else if line.starts_with("whenever") {
-                (0.0, 0.5, 0.0)
-            } else if let Some(c) = cost {
-                if c.trim() == "{t}" && p.permanent {
-                    (0.0, 0.5, 0.0)
-                } else {
-                    (0.0, 0.0, 0.0)
-                }
-            } else {
-                (1.0, 0.0, 0.0)
-            };
-            // "... if it's equipped" style conditions only sometimes hold (and never hold
-            // for Equipment in a deck without any).
-            let conditional = line.contains(" if ") || line.starts_with("if ");
-            let cond = if !conditional {
+        }
+        for (a, base) in abilities {
+            // Conditions: "if it's equipped" never holds without Equipment; others half the time.
+            let cond = if !a.conditional {
                 1.0
-            } else if line.contains("equipped") && !equipment {
+            } else if a.text.contains("equipped") && !equipment {
                 0.0
             } else {
                 0.5
             };
-            // An X counted from the board ("where X is the number of ...") is usually small.
-            let owned_line;
-            let line = if line.contains("where x is") {
-                owned_line = line
-                    .split(' ')
-                    .map(|w| if w == "x" { "1" } else { w })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                owned_line.as_str()
-            } else {
-                line
-            };
-            let add = |e: &mut Effect, n: f32| {
-                e.now += n * now * cond;
-                e.per_turn += n * per_turn * cond;
-                e.per_attack += n * per_attack * cond;
-            };
-            if line.contains("can't be blocked") && !line.contains("target") {
-                p.kw |= UNBLOCKABLE;
-            }
-            if p.permanent && line.contains("{t}: add") {
-                // Mana rocks and mana creatures alike add one mana a turn.
-                p.rock = true;
-            }
-            if line.contains("search your library for a basic land")
-                || (line.contains("land card") && line.contains("onto the battlefield"))
-            {
-                p.fetch = true;
-            }
-            if line.contains("draw ") && !line.contains("then discard") {
-                let n = if line.contains("draw two") {
-                    2.0
-                } else if line.contains("draw three") {
-                    3.0
-                } else {
-                    1.0
-                };
-                add(&mut p.draw, n);
-            }
-            if line.contains("create") && line.contains("token") && line.contains("creature") {
-                let n = number_after(line, "create ").unwrap_or(1) as f32;
-                if let Some(i) = line.find("create ") {
-                    if let Some(sz) = line[i..].split_whitespace().find_map(pt_at) {
-                        p.token_size = sz;
+            let w = base * cond;
+            let timing = match a.when.first() {
+                _ if w == 0.0 => Timing::Never,
+                Some(When::Spell | When::Enters | When::Chapter(1)) => Timing::Now(w),
+                Some(When::Chapter(_)) => Timing::Now(0.8 * w),
+                Some(When::Reflexive) => Timing::Now(0.5 * w),
+                Some(When::Dies) => Timing::Now(0.4 * w),
+                Some(When::EachTurn) => Timing::PerTurn(w),
+                Some(When::Event(_)) => Timing::PerTurn(a.rate() * w),
+                Some(When::Attacks) => Timing::PerAttack(w),
+                Some(When::CombatDamage) => Timing::PerAttack(0.6 * w),
+                Some(When::Activated(c)) => {
+                    if a.rate() > 0.0 {
+                        // Mana-costed abilities compete with casting spells for mana.
+                        let share = if c.mana > 0 { 0.5 } else { 1.0 };
+                        Timing::PerTurn(a.rate() * share * w)
+                    } else if c.sacrifice {
+                        Timing::Now(0.4 * w)
+                    } else {
+                        Timing::Never
                     }
                 }
-                add(&mut p.tokens, n);
-            }
-            if line.contains("each opponent loses") {
-                add(
-                    &mut p.drain,
-                    number_after(line, "loses ").unwrap_or(1) as f32,
-                );
-            } else if line.contains("damage to each opponent") {
-                add(
-                    &mut p.drain,
-                    number_before(line, " damage").unwrap_or(1) as f32,
-                );
-            }
-            if line.contains("you gain") {
-                add(
-                    &mut p.gain,
-                    number_after(line, "you gain ").unwrap_or(2) as f32,
-                );
-            }
-            if line.contains("creatures you control get +") {
-                if let Some(i) = line.find("get +") {
-                    p.anthem += pt_at(&line[i + 4..]).map(|x| x.0).unwrap_or(1);
+                Some(When::Loyalty(n)) => {
+                    if *n >= 0 {
+                        Timing::PerTurn(w / loyalty_count)
+                    } else {
+                        Timing::Now(0.5 * w)
+                    }
                 }
+                Some(When::PowerUp(_)) => Timing::Never, // handled below
+                // An Aura's "enchanted creature can't attack or block" works from the
+                // moment it's cast - it's removal.
+                Some(When::Static)
+                    if card.type_line.contains("Aura")
+                        && a.text.starts_with("enchanted creature")
+                        && a.effects.iter().any(|e| kill_of(e).is_some()) =>
+                {
+                    Timing::Now(w)
+                }
+                Some(When::Static) | None => Timing::Static,
+            };
+            // Mana abilities: {T}: Add... on a permanent is a mana rock (or mana creature).
+            if matches!(a.when.first(), Some(When::Activated(c)) if c.tap && c.mana == 0 && !c.sacrifice)
+                && a.effects.iter().any(|e| matches!(e, E::AddMana(_)))
+            {
+                p.rock = true;
+                continue;
             }
-            for marker in ["equipped creature gets ", "enchanted creature gets "] {
-                if let Some(i) = line.find(marker) {
-                    if let Some(b) = pt_at(&line[i + marker.len()..]) {
-                        if b.0 > 0 || b.1 > 0 {
-                            p.equip = (p.equip.0 + b.0, p.equip.1 + b.1);
+            if let Some(When::PowerUp(c)) = a.when.first() {
+                let mut pu = PowerUp {
+                    cost: c.mana,
+                    ..Default::default()
+                };
+                for e in &a.effects {
+                    match e {
+                        E::PlusCounters { amount, to } if to.kind == abilities::Kind::It => {
+                            pu.grow += amount.n
+                        }
+                        E::Draw { amount, you: true } => pu.draw += amount.value(),
+                        E::Tokens {
+                            amount,
+                            power,
+                            toughness,
+                            ..
+                        } => {
+                            pu.tokens += amount.value();
+                            p.token_size = (*power, *toughness);
+                        }
+                        E::Grant { keywords, to, .. } if to.kind == abilities::Kind::It => {
+                            pu.kw |= keyword_bits(keywords)
+                        }
+                        _ => match kill_of(e) {
+                            Some(Ok(k)) => pu.kill = Some(k),
+                            Some(Err(wipe)) => pu.wipe = Some(wipe),
+                            None => {}
+                        },
+                    }
+                }
+                p.power_up = Some(pu);
+                continue;
+            }
+            for e in &a.effects {
+                match e {
+                    E::Draw { amount, you: true } => p.draw.add(timing, amount.value()),
+                    E::Dig => p.draw.add(timing, 0.7),
+                    E::Empower(n) => p.draw.add(timing, n.value() / 3.0),
+                    E::ItemTokens { kind, .. } if kind == "clue" => p.draw.add(timing, 0.5),
+                    E::Tokens {
+                        amount,
+                        power,
+                        toughness,
+                        ..
+                    } => {
+                        p.tokens.add(timing, amount.value());
+                        p.token_size = (*power, *toughness);
+                    }
+                    E::Amass(n) => {
+                        p.tokens.add(timing, 1.0);
+                        p.token_size = (n.n.max(1), n.n.max(1));
+                    }
+                    E::PlusCounters { amount, to } if to.kind == abilities::Kind::It => {
+                        match timing {
+                            Timing::Now(w) if p.creature => {
+                                p.power += (amount.n as f32 * w).round() as i32;
+                                p.toughness += (amount.n as f32 * w).round() as i32;
+                            }
+                            _ => p.grow.add(timing, amount.value()),
                         }
                     }
+                    E::Drain { amount, each } => p
+                        .drain
+                        .add(timing, amount.value() * if *each { 1.0 } else { 0.4 }),
+                    E::GainLife(n) => p.gain.add(timing, n.value()),
+                    E::Edict { .. } => p.edict.add(timing, 1.0),
+                    E::FetchLand { battlefield: true } if matches!(timing, Timing::Now(_)) => {
+                        p.fetch = true
+                    }
+                    E::Pump {
+                        power,
+                        toughness,
+                        to,
+                        until_eot: false,
+                    } if timing == Timing::Static => {
+                        if to.mass && to.whose == abilities::Whose::Yours {
+                            p.anthem += power;
+                        } else if a.text.starts_with("equipped") || a.text.starts_with("enchanted")
+                        {
+                            p.equip = (p.equip.0 + power, p.equip.1 + toughness);
+                        }
+                    }
+                    E::Grant {
+                        keywords,
+                        to,
+                        until_eot: false,
+                    } if timing == Timing::Static && to.kind == abilities::Kind::It => {
+                        p.kw |= keyword_bits(keywords);
+                    }
+                    _ => match (kill_of(e), timing) {
+                        (Some(Ok(k)), Timing::Now(_)) => {
+                            if p.kill.is_none_or(|old| kill_value(k) > kill_value(old)) {
+                                p.kill = Some(k);
+                            }
+                        }
+                        (Some(Err(wipe)), Timing::Now(_)) => p.wipe = Some(wipe),
+                        (Some(Ok(k)), Timing::PerTurn(r) | Timing::PerAttack(r)) => {
+                            p.kill_rate += r;
+                            p.kill_repeat = Some(k);
+                        }
+                        _ => {}
+                    },
                 }
             }
-        }
-        // Removal only counts when it happens on its own: a spell, an "enters" trigger, or an
-        // Aura's lock. Activated and Power-up abilities (often once-only, costly, or
-        // conditional) aren't modelled - reading them as "on enter" made, e.g., a commander
-        // with a once-per-game board-wipe ability wipe the board every time it was cast.
-        let active: String = if !p.permanent {
-            text.clone()
-        } else {
-            text.lines()
-                .map(str::trim)
-                .filter(|l| {
-                    (l.starts_with("when ") && l.contains("enters"))
-                        || (card.type_line.contains("Aura") && l.starts_with("enchanted creature"))
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let probe = Card {
-            oracle_text: active.clone(),
-            type_line: card.type_line.clone(),
-            ..Default::default()
-        };
-        let roles = probe.roles();
-        let text = active;
-        if roles.contains(&Role::Sweeper) {
-            p.wipe = Some(match number_before(&text, " damage to each") {
-                Some(n) => Wipe::Damage(n),
-                None => Wipe::All,
-            });
-        } else if roles.contains(&Role::Removal) {
-            p.kill = Some(
-                if text.contains("destroy target") || text.contains("exile target") {
-                    Kill::Any
-                } else if let Some(n) = number_before(&text, " damage to") {
-                    Kill::Damage(n)
-                } else if text.contains("fight") || text.contains("damage equal to") {
-                    Kill::Damage(3)
-                } else if text.contains("gets -") {
-                    Kill::Damage(number_after(&text, "gets -").unwrap_or(2))
-                } else {
-                    Kill::Any
-                },
-            );
-        } else if roles.contains(&Role::Bounce) && text.contains("target") {
-            p.kill = Some(Kill::Bounce);
         }
         p
     }
@@ -369,6 +474,10 @@ struct Perm {
     token: bool,
     commander: bool,
     damage: i32,
+    /// Its power-up has been used.
+    powered: bool,
+    /// Round it entered (power-up is cheaper that round).
+    born: u32,
 }
 
 /// `Perm::card` for creature tokens (they have no card behind them).
@@ -509,10 +618,13 @@ fn best_target(players: &[Player<'_>], me: usize, kill: Kill) -> Option<(usize, 
             if c.kw & HEXPROOF != 0 {
                 continue;
             }
+            if c.toughness == 0 && c.power == 0 {
+                continue; // engine placeholders, not creatures
+            }
             let ok = match kill {
-                Kill::Any => c.kw & INDESTRUCTIBLE == 0,
+                Kill::Destroy => c.kw & INDESTRUCTIBLE == 0,
+                Kill::Exile | Kill::Bounce => true,
                 Kill::Damage(n) => c.toughness - c.damage <= n && c.kw & INDESTRUCTIBLE == 0,
-                Kill::Bounce => true,
             };
             if !ok {
                 continue;
@@ -539,35 +651,71 @@ fn remove(players: &mut [Player<'_>], pi: usize, ci: usize, to_hand: bool) {
     }
 }
 
-fn enter(players: &mut [Player<'_>], me: usize, c: usize, commander: bool) {
+fn kill_one(players: &mut [Player<'_>], me: usize, kill: Kill) {
+    if let Some((pi, ci)) = best_target(players, me, kill) {
+        remove(players, pi, ci, kill == Kill::Bounce);
+    }
+}
+
+fn wipe_board(players: &mut [Player<'_>], me: usize, wipe: Wipe) {
+    for (pi, p) in players.iter_mut().enumerate() {
+        if wipe.one_sided && pi == me {
+            continue;
+        }
+        let mut i = 0;
+        while i < p.board.len() {
+            let c = &p.board[i];
+            let placeholder = c.toughness == 0 && c.power == 0;
+            let survives_destroy = c.kw & INDESTRUCTIBLE != 0 && !wipe.exile;
+            let dies = !placeholder
+                && !survives_destroy
+                && match wipe.damage {
+                    None => true,
+                    Some(n) => c.toughness - c.damage <= n,
+                };
+            if dies {
+                let perm = p.board.remove(i);
+                if perm.commander {
+                    p.commander_home = true;
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+}
+
+/// Each opponent sacrifices their weakest creature (edicts ignore hexproof, CR 701.21a).
+fn edict(players: &mut [Player<'_>], me: usize) {
+    for pi in 0..players.len() {
+        if pi == me || !players[pi].alive {
+            continue;
+        }
+        let weakest = players[pi]
+            .board
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !(c.toughness == 0 && c.power == 0))
+            .min_by_key(|(_, c)| c.power + c.toughness)
+            .map(|(i, _)| i);
+        if let Some(i) = weakest {
+            remove(players, pi, i, false);
+        }
+    }
+}
+
+fn enter(players: &mut [Player<'_>], me: usize, c: usize, commander: bool, turn: u32) {
     let cards = players[me].cards;
     let prof = &cards[c];
     // One-shot effects.
     if let Some(kill) = prof.kill {
-        if let Some((pi, ci)) = best_target(players, me, kill) {
-            remove(players, pi, ci, kill == Kill::Bounce);
-        }
+        kill_one(players, me, kill);
     }
     if let Some(wipe) = prof.wipe {
-        for p in players.iter_mut() {
-            let mut i = 0;
-            while i < p.board.len() {
-                let c = &p.board[i];
-                let dies = c.kw & INDESTRUCTIBLE == 0
-                    && match wipe {
-                        Wipe::All => true,
-                        Wipe::Damage(n) => c.toughness - c.damage <= n,
-                    };
-                if dies {
-                    let perm = p.board.remove(i);
-                    if perm.commander {
-                        p.commander_home = true;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-        }
+        wipe_board(players, me, wipe);
+    }
+    if prof.edict.now >= 0.5 {
+        edict(players, me);
     }
     apply_effects(
         players,
@@ -590,6 +738,8 @@ fn enter(players: &mut [Player<'_>], me: usize, c: usize, commander: bool) {
             token: false,
             commander,
             damage: 0,
+            powered: false,
+            born: turn,
         });
     } else if prof.permanent && (prof.anthem != 0 || prof.equip != (0, 0)) {
         let p = &mut players[me];
@@ -609,7 +759,11 @@ fn enter(players: &mut [Player<'_>], me: usize, c: usize, commander: bool) {
     }
     if prof.permanent
         && !prof.creature
-        && (prof.draw.per_turn > 0.0 || prof.tokens.per_turn > 0.0 || prof.drain.per_turn > 0.0)
+        && (prof.draw.per_turn > 0.0
+            || prof.tokens.per_turn > 0.0
+            || prof.drain.per_turn > 0.0
+            || prof.kill_rate > 0.0
+            || prof.edict.per_turn > 0.0)
     {
         // Non-creature engines: remember them as zero-power "permanents".
         players[me].board.push(Perm {
@@ -622,6 +776,8 @@ fn enter(players: &mut [Player<'_>], me: usize, c: usize, commander: bool) {
             token: true,
             commander: false,
             damage: 0,
+            powered: false,
+            born: 0,
         });
     }
 }
@@ -654,6 +810,8 @@ fn apply_effects(
             token: true,
             commander: false,
             damage: 0,
+            powered: false,
+            born: 0,
         });
     }
     let drain = drain.round() as i32;
@@ -678,6 +836,21 @@ fn upkeep(players: &mut [Player<'_>], me: usize, rng: &mut Rng) {
         .collect();
     for c in engines {
         let prof = &cards[c];
+        if let Some(k) = prof.kill_repeat {
+            if chance(rng, prof.kill_rate.min(1.0)) > 0 {
+                kill_one(players, me, k);
+            }
+        }
+        if chance(rng, prof.edict.per_turn.min(1.0)) > 0 {
+            edict(players, me);
+        }
+        let grow = chance(rng, prof.grow.per_turn) as i32;
+        if grow > 0 {
+            if let Some(x) = players[me].board.iter_mut().find(|x| x.card == c) {
+                x.power += grow;
+                x.toughness += grow;
+            }
+        }
         if prof.draw.per_turn + prof.tokens.per_turn + prof.drain.per_turn + prof.gain.per_turn
             == 0.0
         {
@@ -712,9 +885,11 @@ fn priority(players: &[Player<'_>], me: usize, c: usize, turn: u32) -> Option<f3
             .map(|(_, q)| q.board_power())
             .sum::<i32>()
             / 2;
-        let mine = p.board_power();
+        let mine = if wipe.one_sided { 0 } else { p.board_power() };
         // A damage wipe that can't kill much isn't worth holding for.
-        let floor = if matches!(wipe, Wipe::Damage(n) if n <= 2) {
+        let floor = if wipe.one_sided {
+            2
+        } else if matches!(wipe.damage, Some(n) if n <= 2) {
             3
         } else {
             5
@@ -760,6 +935,7 @@ fn main_phase(players: &mut [Player<'_>], me: usize, turn: u32) {
             }
         }
         let Some((_, hand_index, c)) = best else {
+            power_ups(players, me, mana, turn);
             return;
         };
         let cost = players[me].cards[c].mv;
@@ -785,7 +961,58 @@ fn main_phase(players: &mut [Player<'_>], me: usize, turn: u32) {
             players[me].lands += 1;
             players[me].sources = players[me].sources.map(|s| s + 1);
         }
-        enter(players, me, c, commander);
+        enter(players, me, c, commander, turn);
+    }
+}
+
+/// Spends leftover mana on power-up abilities (CR 702.193: once each, cheaper by the
+/// permanent's mana cost on the turn it entered).
+fn power_ups(players: &mut [Player<'_>], me: usize, mut mana: u32, turn: u32) {
+    let cards = players[me].cards;
+    loop {
+        let pick = players[me]
+            .board
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.card != TOKEN && !x.powered)
+            .filter_map(|(i, x)| {
+                let prof = &cards[x.card];
+                let pu = prof.power_up.as_ref()?;
+                let cost = if x.born == turn {
+                    pu.cost.saturating_sub(prof.mv)
+                } else {
+                    pu.cost
+                };
+                (cost <= mana).then_some((i, cost))
+            })
+            .next();
+        let Some((i, cost)) = pick else { return };
+        mana -= cost;
+        players[me].board[i].powered = true;
+        let pu = cards[players[me].board[i].card]
+            .power_up
+            .clone()
+            .unwrap_or_default();
+        {
+            let x = &mut players[me].board[i];
+            x.power += pu.grow;
+            x.toughness += pu.grow;
+            x.kw |= pu.kw;
+        }
+        if let Some(k) = pu.kill {
+            kill_one(players, me, k);
+        }
+        if let Some(w) = pu.wipe {
+            wipe_board(players, me, w);
+        }
+        let size = cards[players[me]
+            .board
+            .get(i)
+            .map(|x| x.card)
+            .unwrap_or(0)
+            .min(cards.len() - 1)]
+        .token_size;
+        apply_effects(players, me, pu.draw, pu.tokens, size, 0.0, 0.0);
     }
 }
 
@@ -881,9 +1108,22 @@ fn combat(players: &mut [Player<'_>], me: usize, rng: &mut Rng) {
         .filter(|&c| c != TOKEN)
         .filter(|&c| {
             let e = &cards[c];
-            e.draw.per_attack + e.tokens.per_attack + e.drain.per_attack + e.gain.per_attack > 0.0
+            e.draw.per_attack
+                + e.tokens.per_attack
+                + e.drain.per_attack
+                + e.gain.per_attack
+                + e.grow.per_attack
+                > 0.0
         })
         .collect();
+    for &i in &attackers {
+        let c = players[me].board[i].card;
+        if c != TOKEN {
+            let g = cards[c].grow.per_attack.round() as i32;
+            players[me].board[i].power += g;
+            players[me].board[i].toughness += g;
+        }
+    }
     let incoming: i32 = attackers.iter().map(|&i| players[me].board[i].power).sum();
     let lethal = incoming >= players[t].life;
     let mut used = vec![false; players[t].board.len()];
@@ -1175,7 +1415,14 @@ mod tests {
             "Destroy all creatures.",
             None,
         ));
-        assert_eq!(wipe.wipe, Some(Wipe::All));
+        assert_eq!(
+            wipe.wipe,
+            Some(Wipe {
+                damage: None,
+                one_sided: false,
+                exile: false
+            })
+        );
         let maker = Profile::from_card(&card(
             "Maker",
             "{3}{W}",
@@ -1201,7 +1448,7 @@ mod tests {
             "When this creature enters, destroy target creature an opponent controls.",
             Some(("2", "2")),
         ));
-        assert_eq!(hunter.kill, Some(Kill::Any));
+        assert_eq!(hunter.kill, Some(Kill::Destroy));
         let lock = Profile::from_card(&card(
             "Lock",
             "{1}{W}",
@@ -1209,7 +1456,7 @@ mod tests {
             "Enchant creature\nEnchanted creature can't attack or block.",
             None,
         ));
-        assert_eq!(lock.kill, Some(Kill::Any));
+        assert_eq!(lock.kill, Some(Kill::Exile));
         // Attack triggers wait for an attack; conditions count half; mana abilities don't fire.
         let raider = Profile::from_card(&card(
             "Raider",
@@ -1226,7 +1473,8 @@ mod tests {
             ),
             (0.0, 0.0, 1.0)
         );
-        assert_eq!((raider.draw.now, raider.draw.per_turn), (0.0, 0.0));
+        // "{3}{B}: Draw a card" is used now and then, not on arrival.
+        assert!(raider.draw.now == 0.0 && raider.draw.per_turn > 0.0 && raider.draw.per_turn < 0.3);
         let whip = Profile::in_deck(
             &card(
                 "Whip",

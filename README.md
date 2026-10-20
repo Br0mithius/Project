@@ -99,10 +99,28 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
 
 ## How the advice works
 
+* **Card reading** (`src/abilities.rs`): every card's rules text is read into structured abilities following the
+  Comprehensive Rules' ability types - keywords (702), static (604), triggered "when/whenever/at" with intervening
+  "if" clauses (603), activated "[cost]: [effect]" (602), loyalty abilities, Saga chapters, modal "choose" spells, and
+  the league sets' mechanics: Power-up (702.193 - once, cheaper the turn it enters), Teamwork (702.194), Plans,
+  Storied (702.195), Recruit, Amass, Empower Jace, prepared (722) and Adventures. Each ability records when it
+  happens, what it does and what it can hit, so removal is graded by what it actually answers (unconditional exile >
+  conditional > damage-based > fight > lockdown > bounce; "for each opponent" removal counts extra), board wipes are
+  told apart from single-target spells, once-only and sacrifice abilities aren't counted as repeatable, and tokens
+  given to an opponent (Beast Within) aren't counted as yours. About 98% of all rules lines in the card database are
+  read; the card inspector's "How the app reads this card" (and `show <card>`) shows the reading and marks anything it
+  couldn't read with "?". `cargo run --release --example parse_report -- data` reports coverage (`--card "Name"`,
+  `--removal`, `--roles`, `--synergy "Commander"` for details).
+
 * **Card strength** blends a rarity guess with the card's 17Lands win rate compared with its set's average; the more
-  games 17Lands has recorded, the more the real data counts. Roles found in the rules text (removal, card draw, board
-  wipes, "each opponent" effects that are better with 4 players...), creature stats for the cost, curve fit and synergy
-  with your commander (what its abilities care about) are added on top.
+  games 17Lands has recorded, the more the real data counts. Roles from the card reading (graded removal, card draw,
+  board wipes, "each opponent" effects that are better with 4 players, repeatable engines...), creature stats for the
+  cost, curve fit and synergy with your commander are added on top.
+* **Synergy** pairs what a commander rewards with what a card provides, about 25 mechanics read from both cards:
+  tokens, +1/+1 counters, deaths and sacrifice, graveyard, instants/sorceries, artifacts, Equipment, Vehicles, Plans,
+  landfall, life gain, drawing a second card, discard, attacking, enters-the-battlefield, Storied, planeswalkers/Jace,
+  Teamwork, noncombat damage, big creatures, mana for expensive abilities, Enrage and Armies - plus the creature types
+  the commander cares about.
 * **Deck plans**: each commander's cost, body and rules text decide what kind of deck it wants - aggro (cheap
   attackers, combat triggers: lower curve, 18-24 creatures), midrange, big mana (expensive payoffs: higher curve, fewer
   small creatures) or spells (instant/sorcery payoffs: 9-14 creatures, more removal and draw). Auto-build, the

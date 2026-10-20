@@ -575,6 +575,23 @@ impl App {
                 );
             }
         }
+        let parsed = c.parsed();
+        let reading = parsed.describe();
+        if !reading.is_empty() || !parsed.unparsed.is_empty() {
+            println!("  {}", s.dim("How the app reads it:"));
+            for line in reading {
+                println!("    {}", s.dim(&line));
+            }
+            if let Some(r) = parsed.removal() {
+                println!(
+                    "    {}",
+                    s.dim(&format!("Removal: {} ({:.1} points)", r.label, r.points))
+                );
+            }
+            for u in &parsed.unparsed {
+                println!("    ? not understood: {}", u);
+            }
+        }
         if c.can_be_commander() {
             if let Some(st) = self.db.commander_stat(&c.name) {
                 println!(
