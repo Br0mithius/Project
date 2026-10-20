@@ -575,6 +575,9 @@ impl App {
                 );
             }
         }
+        if !c.tags.is_empty() {
+            println!("  Scryfall tags: {}", c.tags.join(", "));
+        }
         for line in crate::edhrec::card_summary(&self.db.edhrec, &c.name, &self.deck.commanders()) {
             println!("  {}", line);
         }
@@ -1065,6 +1068,11 @@ impl App {
                 f.ranks, f.pages, f.no_page
             ),
             Err(e) => println!("  Couldn't download EDHREC data: {}", e),
+        }
+        println!("Downloading Scryfall Tagger tags for the league sets...");
+        match crate::tags::fetch(&self.data_dir, &self.db) {
+            Ok((cards, tags)) => println!("  {} cards tagged across {} tags.", cards, tags),
+            Err(e) => println!("  {}", e),
         }
         self.db.attach_ratings(&self.data_dir);
         let rated = self.db.ratings.len();

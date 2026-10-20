@@ -635,6 +635,17 @@ struct Mechanic {
     enabler: fn(&Card) -> f32,
 }
 
+/// How well a card feeds a mechanic (0..1): the rules-text reading, or a Scryfall Tagger tag
+/// saying it does (a tag alone counts a bit less than a clear reading).
+fn feed(m: &Mechanic, card: &Card) -> f32 {
+    let read = (m.enabler)(card).min(1.0);
+    if read < 0.7 && crate::tags::feeds(&card.tags, m.need) {
+        0.7
+    } else {
+        read
+    }
+}
+
 /// The commander's triggered-ability events.
 fn events(cmd: &Card) -> Vec<crate::abilities::Event> {
     use crate::abilities::When;
@@ -1168,7 +1179,7 @@ pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
             if pay <= 0.0 {
                 continue;
             }
-            let feed = (m.enabler)(card).min(1.0);
+            let feed = feed(m, card);
             if feed > 0.0 {
                 score += m.points * pay * feed;
                 why.push(m.label.to_string());
@@ -1220,10 +1231,7 @@ pub fn commander_support(cmd: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
         if payoff <= 0.0 {
             continue;
         }
-        let have: f32 = cards
-            .iter()
-            .map(|(c, n)| (m.enabler)(c).min(1.0) * *n as f32)
-            .sum();
+        let have: f32 = cards.iter().map(|(c, n)| feed(m, c) * *n as f32).sum();
         out.push(Support {
             need: m.need.to_string(),
             payoff,
@@ -1268,13 +1276,13 @@ fn payoff_penalty(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     }
     let scale = rules.deck_size as f32 / 60.0;
     for m in MECHANICS.iter().filter(|m| m.gates) {
-        if (m.payoff)(card) < 1.0 || (m.enabler)(card) > 0.0 {
+        if (m.payoff)(card) < 1.0 || feed(m, card) > 0.0 {
             continue;
         }
         let have: f32 = resolved(deck, db)
             .iter()
             .filter(|(c, _)| c.name != card.name)
-            .map(|(c, n)| (m.enabler)(c).min(1.0) * *n as f32)
+            .map(|(c, n)| feed(m, c) * *n as f32)
             .sum();
         let ratio = (have / (m.wanted * scale).max(1.0)).min(1.0);
         if ratio < 1.0 {

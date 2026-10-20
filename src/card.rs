@@ -35,6 +35,9 @@ pub struct Card {
     pub confidence: String,
     #[serde(default)]
     pub note: String,
+    /// Scryfall Tagger tags (see `tags`), attached after loading.
+    #[serde(skip)]
+    pub tags: Vec<String>,
     #[serde(skip)]
     pub roles_cache: std::sync::OnceLock<Vec<Role>>,
     #[serde(skip)]
@@ -435,6 +438,18 @@ impl Card {
         }
         if p.each_opponent() {
             roles.push(Role::EachOpponent);
+        }
+        // Scryfall Tagger tags add roles the reading missed. A "removal" tag on a card the
+        // reader sees as bounce or tapping stays bounce (Tagger files those under removal).
+        for r in crate::tags::roles(&self.tags) {
+            let weaker = r == Role::Removal
+                && removal.is_some_and(|x| x.label == "bounce" || x.label == "tap effect");
+            if !roles.contains(&r) && !weaker {
+                roles.push(r);
+            }
+            if r == Role::Sweeper && !roles.contains(&Role::Removal) {
+                roles.push(Role::Removal);
+            }
         }
         roles
     }

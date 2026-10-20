@@ -973,6 +973,9 @@ impl GuiApp {
                     })
                     .small(),
                 );
+                if !self.db.tags_date.is_empty() {
+                    ui.label(RichText::new(format!("Scryfall Tagger tags from {}.", self.db.tags_date)).small());
+                }
                 ui.label(
                     RichText::new("Downloaded once and saved; re-downloaded only when you press a button below.")
                         .small()
@@ -1411,6 +1414,10 @@ impl GuiApp {
                         .color(if diff >= 0.0 { Color32::from_rgb(140, 220, 140) } else { Color32::from_rgb(255, 170, 120) }),
                     );
                 }
+            }
+            if !card.tags.is_empty() {
+                ui.label(RichText::new(format!("Scryfall tags: {}", card.tags.join(", "))).small())
+                    .on_hover_text("Community Tagger tags from Scryfall - used to confirm roles and synergy");
             }
             for line in crate::edhrec::card_summary(&self.db.edhrec, &card.name, &self.deck.commanders()) {
                 ui.label(RichText::new(line).small());
@@ -2078,6 +2085,14 @@ impl GuiApp {
                 Err(_) => "EDHREC unavailable (offline?)".to_string(),
             };
             parts.push(c);
+            let d = match CardDb::load(&dir.join("cards.json"))
+                .map_err(|e| e.to_string())
+                .and_then(|db| crate::tags::fetch(&dir, &db))
+            {
+                Ok((cards, tags)) => format!("Scryfall tags: {} cards, {} tags", cards, tags),
+                Err(_) => "Scryfall tags unavailable (offline?)".to_string(),
+            };
+            parts.push(d);
             let _ = tx.send(format!("Updated - {}.", parts.join("; ")));
         });
         self.data_job = Some(rx);

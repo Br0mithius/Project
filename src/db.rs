@@ -35,6 +35,8 @@ pub struct CardDb {
     pub commander_stats: HashMap<String, crate::ratings::CommanderStat>,
     /// EDHREC card ranks and commander pages (empty until downloaded).
     pub edhrec: crate::edhrec::Edhrec,
+    /// When the Scryfall Tagger tags were downloaded ("" = never).
+    pub tags_date: String,
     /// Normalised name -> position in `cards`, so lookups don't scan the whole set.
     index: HashMap<String, usize>,
     /// Normalised name of each card, same order as `cards` (for searching).
@@ -71,6 +73,7 @@ impl CardDb {
             ratings_date: String::new(),
             commander_stats: HashMap::new(),
             edhrec: Default::default(),
+            tags_date: String::new(),
             index: HashMap::new(),
             norm: Vec::new(),
         };
@@ -116,6 +119,21 @@ impl CardDb {
             .collect();
         let edhrec = crate::edhrec::Edhrec::new(crate::edhrec::load_file(data_dir), self);
         self.edhrec = edhrec;
+        let tags = crate::tags::load_file(data_dir);
+        self.tags_date = tags.fetched.clone();
+        let tags: HashMap<String, Vec<String>> = tags
+            .cards
+            .into_iter()
+            .map(|(k, v)| (normalize(&k), v))
+            .collect();
+        for (card, key) in self.cards.iter_mut().zip(&self.norm) {
+            let new = tags.get(key).cloned().unwrap_or_default();
+            if card.tags != new {
+                card.tags = new;
+                // Roles include tag roles, so work them out again.
+                card.roles_cache = Default::default();
+            }
+        }
     }
 
     pub fn rating(&self, name: &str) -> Option<&crate::ratings::Rating> {

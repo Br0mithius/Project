@@ -16,5 +16,6 @@ pub mod playtest;
 pub mod ranking;
 pub mod ratings;
 pub mod setdata;
+pub mod tags;
 pub mod ui;
 pub mod upgrades;
