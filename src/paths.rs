@@ -17,6 +17,7 @@ pub fn data_dir(args: &[String]) -> PathBuf {
     }
     let local = PathBuf::from("data");
     if local.join("cards.json").exists() {
+        ensure_collection(&local);
         return local;
     }
     let beside_exe = std::env::current_exe()
@@ -25,9 +26,7 @@ pub fn data_dir(args: &[String]) -> PathBuf {
     if let Some(d) = &beside_exe {
         if d.join("cards.json").exists() {
             refresh_card_database(d);
-            if !d.join("collection.txt").exists() {
-                let _ = std::fs::write(d.join("collection.txt"), DEFAULT_COLLECTION);
-            }
+            ensure_collection(d);
             return d.clone();
         }
     }
@@ -39,10 +38,15 @@ pub fn data_dir(args: &[String]) -> PathBuf {
     let target = beside_exe.unwrap_or(local);
     let _ = std::fs::create_dir_all(&target);
     let _ = std::fs::write(target.join("cards.json"), DEFAULT_CARDS);
-    if !target.join("collection.txt").exists() {
-        let _ = std::fs::write(target.join("collection.txt"), DEFAULT_COLLECTION);
-    }
+    ensure_collection(&target);
     target
+}
+
+/// Writes the empty starter pool (with its how-to header) if there isn't one yet.
+fn ensure_collection(dir: &Path) {
+    if !dir.join("collection.txt").exists() {
+        let _ = std::fs::write(dir.join("collection.txt"), DEFAULT_COLLECTION);
+    }
 }
 
 /// A newer program version may ship more cards than the copy on disk; add any it lacks

@@ -11,8 +11,9 @@ MSH DECKBUILDER (Windows)
    never downloaded again, so it works offline. Images for your pool start downloading
    as soon as the app opens; before a draft, use Settings > "Download images for the
    whole set".
-4. Your pool starts empty. Open the My Pool tab, paste your Mana Mixer export into
-   "Import from Mana Mixer" and press "Add to my pool" (or "Replace my pool").
+4. Your pool starts empty. Drag your Mana Mixer export file onto the app window (or
+   paste it into the My Pool tab's import box with Ctrl+V), then press "Add to my pool"
+   (or "Replace my pool").
 5. Rest the mouse on any card to see a big, readable copy of it (Settings lets you
    change the zoom size or turn it off).
 

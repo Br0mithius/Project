@@ -746,7 +746,7 @@ impl App {
             );
             return;
         }
-        let text = match fs::read_to_string(path.trim_matches('"')) {
+        let text = match fs::read(path.trim_matches('"')).map(|b| league::decode_text(&b)) {
             Ok(t) => t,
             Err(e) => {
                 println!("Couldn't read {}: {}", path, e);

@@ -25,7 +25,8 @@ pub fn run(data_dir: PathBuf) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_title("MSH Deckbuilder")
             .with_inner_size([1500.0, 920.0])
-            .with_min_inner_size([1000.0, 640.0]),
+            .with_min_inner_size([1000.0, 640.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
     eframe::run_native(
@@ -329,7 +330,7 @@ impl GuiApp {
         app.refresh_saved_decks();
         if app.coll.total() == 0 {
             app.tab = Tab::Collection;
-            app.status = "Your pool is empty - paste your Mana Mixer export on the right-hand box to import it, or add cards one by one.".into();
+            app.status = "Your pool is empty - drag your Mana Mixer file onto this window or paste it into the import box (Ctrl+V), or add cards one by one.".into();
         }
         // Ratings are downloaded once, on first launch; after that only when you ask
         // (Settings > Update ratings), so the sites aren't hit repeatedly.
@@ -2898,22 +2899,13 @@ impl GuiApp {
                 ui.label(RichText::new("Import from Mana Mixer").strong());
                 ui.label(
                     RichText::new(
-                        "Paste your Mana Mixer (or ManaBox) collection export below - lines like \"1 Red Hulk (MSH) 149\" or a CSV with Name and Quantity columns.",
+                        "Drag your Mana Mixer (or ManaBox) export file onto this window, or paste it below with Ctrl+V - lines like \"1 Red Hulk (MSH) 149\" or a CSV with Name and Quantity columns.",
                     )
                     .small(),
                 );
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.import_text)
-                        .hint_text("1 Red Hulk (MSH) 149\n2 Web Up (MSH) 41\n...")
-                        .desired_rows(8)
-                        .desired_width(370.0)
-                        .font(egui::TextStyle::Monospace),
-                );
+                // Buttons above the box, so a long list can't push them off the screen.
                 let parsed = league::parse_import(&self.import_text);
                 let total: u32 = parsed.iter().map(|l| l.count).sum();
-                if !parsed.is_empty() {
-                    ui.label(RichText::new(format!("{} cards ({} different) ready to import.", total, parsed.len())).small());
-                }
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(!parsed.is_empty(), egui::Button::new("Add to my pool"))
@@ -2929,7 +2921,32 @@ impl GuiApp {
                     {
                         acts.push(Action::Import(self.import_text.clone(), true));
                     }
+                    if ui
+                        .add_enabled(!self.import_text.is_empty(), egui::Button::new("Clear"))
+                        .clicked()
+                    {
+                        self.import_text.clear();
+                    }
                 });
+                if !parsed.is_empty() {
+                    ui.label(
+                        RichText::new(format!("{} cards ({} different) ready to import.", total, parsed.len()))
+                            .small()
+                            .color(Color32::from_rgb(150, 220, 150)),
+                    );
+                }
+                ScrollArea::vertical()
+                    .id_salt("import_scroll")
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.import_text)
+                                .hint_text("1 Red Hulk (MSH) 149\n2 Web Up (MSH) 41\n...")
+                                .desired_rows(8)
+                                .desired_width(370.0)
+                                .font(egui::TextStyle::Monospace),
+                        );
+                    });
             });
             ui.separator();
             let mut rows: Vec<(String, u32)> = self
@@ -2991,12 +3008,72 @@ impl GuiApp {
     }
 }
 
+impl GuiApp {
+    /// A card list dragged onto the window goes into the My Pool import box, ready to check
+    /// and import; while a file hovers over the window, a hint says where it will go.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let (hovering, dropped) =
+            ctx.input(|i| (!i.raw.hovered_files.is_empty(), i.raw.dropped_files.clone()));
+        if hovering {
+            let screen = ctx.content_rect();
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("drop_hint"),
+            ));
+            painter.rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(190));
+            painter.text(
+                screen.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop your Mana Mixer file to import your pool",
+                FontId::proportional(28.0),
+                Color32::WHITE,
+            );
+        }
+        if dropped.is_empty() {
+            return;
+        }
+        let mut text = String::new();
+        let mut names = Vec::new();
+        for f in &dropped {
+            let label = f
+                .path()
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| f.path().display().to_string());
+            match f.bytes() {
+                Ok(b) => {
+                    text += &league::decode_text(&b);
+                    text.push('\n');
+                    names.push(label);
+                }
+                Err(e) => self.status = format!("Couldn't read {}: {}", label, e),
+            }
+        }
+        let parsed = league::parse_import(&text);
+        if parsed.is_empty() {
+            if !names.is_empty() {
+                self.status = format!("No card list found in {}.", names.join(", "));
+            }
+            return;
+        }
+        let total: u32 = parsed.iter().map(|l| l.count).sum();
+        self.import_text = text;
+        self.tab = Tab::Collection;
+        self.status = format!(
+            "Loaded {} cards from {} - press \"Add to my pool\" or \"Replace my pool\" to import them.",
+            total,
+            names.join(", ")
+        );
+    }
+}
+
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let frame_start = std::time::Instant::now();
         self.images.poll(&ctx);
         self.poll_jobs(&ctx);
+        self.handle_dropped_files(&ctx);
         if self.memo.rev != self.rev {
             self.memo = Memo {
                 rev: self.rev,

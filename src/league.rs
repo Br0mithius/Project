@@ -521,8 +521,36 @@ pub struct ImportLine {
     pub name: String,
 }
 
+/// Turns a dropped or opened file into text: UTF-8 (with or without a byte-order mark) or
+/// UTF-16, which Windows Notepad and Excel sometimes save.
+pub fn decode_text(bytes: &[u8]) -> String {
+    let utf16 = |be: bool| {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| {
+                if be {
+                    u16::from_be_bytes([c[0], c[1]])
+                } else {
+                    u16::from_le_bytes([c[0], c[1]])
+                }
+            })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 /// Splits a CSV line, honouring quoted fields ("Ka-Zar, of the..." stays one field).
 fn csv_fields(line: &str) -> Vec<String> {
+    csv_fields_by(line, ',')
+}
+
+fn csv_fields_by(line: &str, sep: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quoted = false;
@@ -534,7 +562,7 @@ fn csv_fields(line: &str) -> Vec<String> {
                 chars.next();
             }
             '"' => quoted = !quoted,
-            ',' if !quoted => out.push(std::mem::take(&mut cur)),
+            c if c == sep && !quoted => out.push(std::mem::take(&mut cur)),
             c => cur.push(c),
         }
     }
@@ -545,6 +573,10 @@ fn csv_fields(line: &str) -> Vec<String> {
 /// Reads a Mana Mixer / ManaBox export: text lines like "1 Red Hulk (MSH) 149",
 /// "2x Web Up", "Web Up", or a CSV with Name and Quantity columns. Repeated cards are summed.
 pub fn parse_import(text: &str) -> Vec<ImportLine> {
+    let text = text
+        .trim_start_matches('\u{feff}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     let mut lines = text.lines().filter(|l| !l.trim().is_empty()).peekable();
     let mut out: Vec<ImportLine> = Vec::new();
     let mut push = |count: u32, name: String| {
@@ -559,14 +591,24 @@ pub fn parse_import(text: &str) -> Vec<ImportLine> {
     };
     // CSV with a header row?
     if let Some(first) = lines.peek() {
-        let header: Vec<String> = csv_fields(&first.to_lowercase());
+        // Comma, semicolon (European Excel) or tab (copied from a spreadsheet or web table).
+        let sep = [',', ';', '\t']
+            .into_iter()
+            .max_by_key(|c| first.matches(*c).count())
+            .unwrap_or(',');
+        let header: Vec<String> = csv_fields_by(&first.to_lowercase(), sep)
+            .into_iter()
+            .map(|h| h.replace(['_', '-'], " "))
+            .collect();
         let col = |names: &[&str]| header.iter().position(|h| names.contains(&h.as_str()));
-        if let Some(name_col) = col(&["name", "card name", "card"]) {
-            if first.contains(',') {
-                let qty_col = col(&["quantity", "qty", "count", "amount"]);
+        if let Some(name_col) = col(&["name", "card name", "cardname", "card"]) {
+            if first.contains(sep) {
+                let qty_col = col(&[
+                    "quantity", "qty", "count", "amount", "copies", "owned", "have",
+                ]);
                 lines.next();
                 for l in lines {
-                    let f = csv_fields(l);
+                    let f = csv_fields_by(l, sep);
                     let n = qty_col
                         .and_then(|q| f.get(q))
                         .and_then(|q| q.parse().ok())
@@ -593,10 +635,23 @@ pub fn parse_import(text: &str) -> Vec<ImportLine> {
         };
         // Drop " (MSH) 149", foil markers like "*F*", and trailing set codes.
         let mut name = rest.as_str();
-        if let Some(i) = name.find(" (") {
-            name = &name[..i];
+        for mark in [" (", " [", "\t"] {
+            if let Some(i) = name.find(mark) {
+                name = &name[..i];
+            }
         }
         let name = name.trim_end_matches("*F*").trim_end_matches("*E*").trim();
+        // "Red Hulk x2" puts the count at the end.
+        if n == 1 {
+            if let Some((front, count)) = name.rsplit_once(' ') {
+                if let Ok(c) = count.trim_start_matches(['x', 'X']).parse::<u32>() {
+                    if count.starts_with(['x', 'X']) && !front.is_empty() {
+                        push(c, front.to_string());
+                        continue;
+                    }
+                }
+            }
+        }
         push(n, name.to_string());
     }
     out
@@ -635,6 +690,29 @@ mod import_tests {
             }
         );
         assert_eq!(r[1].count, 1);
+    }
+
+    #[test]
+    fn reads_other_export_shapes() {
+        // Byte-order mark, Windows line endings, semicolons.
+        let r = parse_import("\u{feff}Card Name;Set;Qty\r\nRed Hulk;MSH;2\r\nWeb Up;MSH;1\r\n");
+        assert_eq!(
+            (r.len(), r[0].count, r[0].name.as_str()),
+            (2, 2, "Red Hulk")
+        );
+        // Tab-separated, as copied from a spreadsheet.
+        let r = parse_import("Quantity\tName\tSet\n3\tWeb Up\tMSH\n");
+        assert_eq!((r[0].count, r[0].name.as_str()), (3, "Web Up"));
+        // Bracketed set codes and trailing counts.
+        let r = parse_import("1x Red Hulk [MSH] 149\nWeb Up x2\n");
+        assert_eq!(
+            (r[0].name.as_str(), r[1].name.as_str(), r[1].count),
+            ("Red Hulk", "Web Up", 2)
+        );
+        // UTF-16 file from Notepad.
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend("2 Web Up\r\n".encode_utf16().flat_map(|u| u.to_le_bytes()));
+        assert_eq!(parse_import(&decode_text(&bytes))[0].count, 2);
     }
 }
 

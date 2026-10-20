@@ -6,8 +6,8 @@ every set in the Season 2 rules: **Marvel Super Heroes**, **The Hobbit**, **Real
 Public Pool starter kit), the league staples and Shop cards, and **Nauctis: The Sunken Realms** once it is released
 (Settings > "Update card database").
 
-The repository ships with an **empty pool**. Import yours from Mana Mixer on the My Pool tab (paste the export and press
-"Add to my pool" or "Replace my pool"), or with `import <file> [replace]` in the command-line app. Lines like
+The repository ships with an **empty pool**. Import yours from Mana Mixer: drag the export file onto the app window, or paste it into the
+My Pool tab's import box with Ctrl+V, then press "Add to my pool" or "Replace my pool", or with `import <file> [replace]` in the command-line app. Lines like
 `1 Red Hulk (MSH) 149`, `2x Web Up`, and CSV files with Name and Quantity columns are understood; "replace" keeps a
 copy of the old pool in `data/collection.backup.txt`.
 
