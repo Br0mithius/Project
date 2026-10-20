@@ -607,6 +607,7 @@ pub fn scry(g: &mut Game, p: usize, k: usize, surveil: bool) {
             g.players[p].library.insert(0, c);
         }
     }
+    g.emit(Ev::Scry, p, None);
 }
 
 /// Look at the top N, take the best, the rest go to the bottom.
@@ -882,6 +883,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         subject: None,
         text,
         until_eot: false,
+        overload: false,
     };
     let opp_value = |t: &crate::abilities::Target, kill: &dyn Fn(&Perm) -> bool| -> f32 {
         let cands = g.candidates(&ctx, t, true);
@@ -1172,7 +1174,10 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
         }
         for a in c.abilities.iter().filter(|a| a.trig == Trig::Enters) {
             if g.cond_holds(&a.cond, p, None)
-                || matches!(a.cond, Cond::Teamwork | Cond::Gift | Cond::Chance(_))
+                || matches!(
+                    a.cond,
+                    Cond::Teamwork | Cond::Gift | Cond::Kicked | Cond::Chance(_)
+                )
             {
                 v += ability_now(g, p, a, None);
             }
@@ -1191,6 +1196,9 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
                     .is_some_and(|n| !teamwork_tappers(g, p, n as i16).is_empty()),
                 Cond::Gift => c.gift,
                 Cond::CastFromGraveyard => false,
+                Cond::Kicked => c
+                    .kicker
+                    .is_some_and(|k| g.mana_available(p) >= c.cost.total() + k.total()),
                 other => g.cond_holds(other, p, None),
             };
             if ok {
@@ -1293,6 +1301,22 @@ fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     if (c.convoke || c.improvise) && post {
         o.convoke = true;
     }
+    let mana = g.mana_available(p);
+    if let Some(k) = c.kicker {
+        if mana >= c.cost.total() + k.total() {
+            o.kicker = true;
+        }
+    }
+    if let Some(ov) = c.overload {
+        if mana >= ov.total() {
+            o.overload = true;
+        }
+    }
+    if let Some(sn) = c.sneak {
+        if post && g.players[p].attacked_this_turn && sn.total() < c.cost.total() {
+            o.sneak = true;
+        }
+    }
     o
 }
 
@@ -1348,14 +1372,19 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             push_cast(&mut out, Src::Hand(h), idx, true, false);
         }
         // Cycling a dead card.
-        if let Some((cost, land)) = c.cycling {
-            let dead = if land {
-                lands_total(g, p) < 4
+        if let Some((cost, find)) = &c.cycling {
+            let lands = lands_total(g, p);
+            let land_kind = find == "land"
+                || ["plains", "island", "swamp", "mountain", "forest"].contains(&find.as_str());
+            // Cycle when the card is dead now: short on lands (land-finders), or too expensive early.
+            let dead = if land_kind {
+                lands < 4 && !c.is(T_LAND) || c.is(T_LAND) && lands >= 6
             } else {
                 c.mv as usize > lands_in_play(g, p) + 3 && g.round <= 4
+                    || c.is(T_LAND) && lands >= 6
             };
-            if dead && g.can_pay(p, &Mana::generic(cost as u32)) {
-                out.push((1.2, cost as u32, Act::Cycle(h)));
+            if dead && g.can_pay(p, &Mana::generic(*cost as u32)) {
+                out.push((1.2, *cost as u32, Act::Cycle(h)));
             }
         }
     }
@@ -1366,7 +1395,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         push_cast(&mut out, Src::Adventure(k), idx, false, false);
     }
     for (k, &idx) in pl.graveyard.iter().enumerate() {
-        if pl.recast.contains(&idx) {
+        if pl.recast.contains(&idx) || pl.cards[idx as usize].flashback.is_some() {
             push_cast(&mut out, Src::Graveyard(k), idx, false, false);
         }
     }
@@ -1719,6 +1748,8 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
                     teamwork: false,
                     gift: false,
                     from_graveyard: false,
+                    kicked: false,
+                    overloaded: false,
                 });
             }
         }
@@ -1940,7 +1971,7 @@ pub fn crew_for_combat(g: &mut Game, a: usize) {
 // ------------------------------------------------------------ combat
 
 /// (attacker dies, blocker dies) if `a` attacks into `b` (no tricks).
-fn fight(a: &Perm, b: &Perm) -> (bool, bool) {
+pub(crate) fn fight(a: &Perm, b: &Perm) -> (bool, bool) {
     let a_first = a.has(FIRST_STRIKE | DOUBLE_STRIKE) && !b.has(FIRST_STRIKE | DOUBLE_STRIKE);
     let b_first = b.has(FIRST_STRIKE | DOUBLE_STRIKE) && !a.has(FIRST_STRIKE | DOUBLE_STRIKE);
     let kills = |s: &Perm, t: &Perm| {

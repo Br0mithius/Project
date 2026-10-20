@@ -83,6 +83,10 @@ pub struct CastOpts {
     pub gift: bool,
     pub offspring: bool,
     pub convoke: bool,
+    pub kicker: bool,
+    pub overload: bool,
+    /// MSH Sneak's alternative cost (after attacking this turn).
+    pub sneak: bool,
 }
 
 impl<'a> Game<'a> {
@@ -178,7 +182,7 @@ impl<'a> Game<'a> {
             return None;
         }
         if let Src::Graveyard(_) = src {
-            if !self.players[p].recast.contains(&idx) {
+            if !self.players[p].recast.contains(&idx) && c.flashback.is_none() {
                 return None;
             }
         }
@@ -188,6 +192,14 @@ impl<'a> Game<'a> {
                 return None;
             }
             (b.cost, b.types, &c.subtypes)
+        } else if let (Src::Graveyard(_), Some(fb), false) =
+            (src, c.flashback, self.players[p].recast.contains(&idx))
+        {
+            (fb, c.types, &c.subtypes)
+        } else if opts.overload && c.overload.is_some() {
+            (c.overload.unwrap(), c.types, &c.subtypes)
+        } else if opts.sneak && c.sneak.is_some() && self.players[p].attacked_this_turn {
+            (c.sneak.unwrap(), c.types, &c.subtypes)
         } else {
             (c.cost, c.types, &c.subtypes)
         };
@@ -232,6 +244,14 @@ impl<'a> Game<'a> {
         cost = cost.minus_generic(less);
         if opts.offspring {
             cost = cost.plus_generic(c.offspring.unwrap_or(0) as u32);
+        }
+        if opts.kicker {
+            if let Some(k) = c.kicker {
+                cost.generic = cost.generic.saturating_add(k.generic);
+                for i in 0..5 {
+                    cost.pips[i] += k.pips[i];
+                }
+            }
         }
         Some(cost)
     }
@@ -295,6 +315,8 @@ impl<'a> Game<'a> {
             return false;
         }
         // Teamwork: tap creatures with enough total power as an extra cost.
+        let kicked = opts.kicker && c.kicker.is_some();
+        let overloaded = opts.overload && c.overload.is_some();
         let mut teamwork = false;
         if opts.teamwork {
             if let Some(n) = c.teamwork {
@@ -326,6 +348,7 @@ impl<'a> Game<'a> {
             Src::Graveyard(k) => {
                 self.players[p].graveyard.remove(k);
                 self.players[p].recast.retain(|&x| x != idx);
+                self.emit(Ev::LeavesGraveyard, p, None);
             }
             Src::Adventure(k) => {
                 self.players[p].adventure.remove(k);
@@ -388,6 +411,7 @@ impl<'a> Game<'a> {
             for pend in self.pending.iter_mut().filter(|x| x.source == Some(id)) {
                 pend.teamwork = teamwork;
                 pend.gift = gift;
+                pend.kicked = kicked;
             }
             // Auras attach as they enter.
             if c.is(T_AURA) {
@@ -428,6 +452,8 @@ impl<'a> Game<'a> {
                         teamwork,
                         gift,
                         from_graveyard,
+                        kicked,
+                        overloaded,
                     });
                 }
             }
@@ -560,7 +586,13 @@ impl<'a> Game<'a> {
             } => {
                 if *tap {
                     self.perms[i].tapped = true;
+                    self.emit(Ev::Tapped, p, Some(id));
                 }
+                let Some(i) = self.idx(id) else { return false };
+                if self.perms[i].is_creature() {
+                    self.emit(Ev::AbilityActivated, p, Some(id));
+                }
+                let Some(i) = self.idx(id) else { return false };
                 self.perms[i].activations += 1;
                 if ab.once {
                     self.perms[i].powered = true;
@@ -587,6 +619,7 @@ impl<'a> Game<'a> {
             Trig::Loyalty(n) => {
                 self.perms[i].loyalty += *n as i16;
                 self.perms[i].loyalty_used = true;
+                self.emit(Ev::LoyaltyActivated, p, Some(id));
             }
             _ => return false,
         }
@@ -605,6 +638,8 @@ impl<'a> Game<'a> {
             teamwork: false,
             gift: false,
             from_graveyard: false,
+            kicked: false,
+            overloaded: false,
         });
         self.run_pending();
         self.sba();
@@ -656,7 +691,7 @@ impl<'a> Game<'a> {
 
     pub fn cycle(&mut self, p: usize, h: usize) -> bool {
         let c = &self.players[p].cards[self.players[p].hand[h] as usize];
-        let Some((cost, land)) = c.cycling else {
+        let Some((cost, find)) = c.cycling.clone() else {
             return false;
         };
         if !self.pay(p, &Mana::generic(cost as u32)) {
@@ -665,13 +700,23 @@ impl<'a> Game<'a> {
         let card = self.players[p].hand.remove(h);
         self.players[p].graveyard.push(card);
         self.emit(Ev::Discard, p, None);
-        if land {
-            if let Some(k) = ai::land_to_fetch(self, p, true) {
+        if find.is_empty() {
+            self.draw(p, 1);
+        } else {
+            // Landcycling / typecycling: search for a basic land, a land type or a creature type.
+            let pl = &self.players[p];
+            let k = if find == "land" {
+                ai::land_to_fetch(self, p, true)
+            } else {
+                (0..pl.library.len()).find(|&k| {
+                    let lc = &pl.cards[pl.library[k] as usize];
+                    lc.has_subtype(&find) || lc.name.to_lowercase() == find
+                })
+            };
+            if let Some(k) = k {
                 let l = self.players[p].library.remove(k);
                 self.players[p].hand.push(l);
             }
-        } else {
-            self.draw(p, 1);
         }
         self.run_pending();
         true
@@ -707,6 +752,8 @@ impl<'a> Game<'a> {
                             teamwork: false,
                             gift: false,
                             from_graveyard: false,
+                            kicked: false,
+                            overloaded: false,
                         });
                     }
                 }
@@ -740,6 +787,12 @@ impl<'a> Game<'a> {
             x.fired = 0;
         }
         // Untap.
+        let untapping: Vec<u32> = self
+            .perms
+            .iter()
+            .filter(|x| x.ctrl as usize == a && x.tapped && x.stun == 0)
+            .map(|x| x.id)
+            .collect();
         for x in self.perms.iter_mut().filter(|x| x.ctrl as usize == a) {
             if x.stun > 0 && x.tapped {
                 x.stun -= 1;
@@ -751,6 +804,9 @@ impl<'a> Game<'a> {
             x.activations = 0;
         }
         self.recalc();
+        for id in untapping {
+            self.emit(Ev::Untapped, a, Some(id));
+        }
         let hijacked = std::mem::take(&mut self.players[a].hijacked);
         self.phase_triggers(a, Phase::Upkeep);
         if !first_turn {
@@ -855,6 +911,178 @@ impl<'a> Game<'a> {
         self.players[p].life as f32 + 0.5 * board - 3.0 * self.players[p].poison as f32
     }
 }
+
+/// How the simulator plays an effect: "exact" (as the rules say, within the game model),
+/// "approximated" (the main part, simplified) or "no effect" - with a short note.
+pub fn effect_handling(e: &crate::abilities::Effect) -> (&'static str, &'static str) {
+    use crate::abilities::Effect as E;
+    match e {
+        E::Destroy(_) => (
+            "exact",
+            "destroy; indestructible and shield counters stop it",
+        ),
+        E::Exile { .. } => ("exact", "exile; \"until ~ leaves\" cards come back"),
+        E::Damage { .. } => (
+            "exact",
+            "damage to creatures, planeswalkers or players (AI picks)",
+        ),
+        E::Fight(_) => ("exact", "your best creature fights the target"),
+        E::Shrink { .. } => ("exact", "-N/-N until end of turn or as counters"),
+        E::Bounce(_) => ("exact", "returns to hand; tokens cease to exist"),
+        E::Lock { .. } => (
+            "approximated",
+            "can't attack or block (abilities kept); short locks tap and stun",
+        ),
+        E::Edict { .. } => (
+            "exact",
+            "each opponent / target opponent sacrifices their worst",
+        ),
+        E::CounterSpell => (
+            "exact",
+            "cast in response by opponents holding it, with \"unless pays\"",
+        ),
+        E::Draw { .. } => (
+            "exact",
+            "draw (X counted from the board where the text says how)",
+        ),
+        E::Loot => (
+            "exact",
+            "draw then discard the worst card; Recruit makes its 1/1",
+        ),
+        E::Discard { .. } => (
+            "exact",
+            "discard (their worst; \"you choose\" takes their best)",
+        ),
+        E::Mill { .. } => ("exact", "mill yourself or opponents"),
+        E::Scry(_) => ("exact", "scry / surveil keep what the next turns need"),
+        E::Tokens { .. } => ("exact", "creature tokens with size, keywords and types"),
+        E::ItemTokens { .. } => (
+            "exact",
+            "Treasure, Food, Clue, Map, Blood with their abilities; other kinds have none",
+        ),
+        E::PlusCounters { .. } => ("exact", "+1/+1 counters (doublers apply)"),
+        E::Pump { .. } => (
+            "exact",
+            "until end of turn, static anthems and Equipment/Aura bonuses",
+        ),
+        E::Grant { .. } => ("exact", "keywords until end of turn or static"),
+        E::GainLife(_) => ("exact", "life gain (\"players can't gain life\" respected)"),
+        E::Drain { .. } => (
+            "exact",
+            "life loss or damage to each / target opponent, gain if the text says",
+        ),
+        E::AddMana(_) => (
+            "exact",
+            "mana abilities are mana sources; one-off mana goes to the pool",
+        ),
+        E::FetchLand { .. } => (
+            "exact",
+            "searches for a land of a needed colour (tapped if the text says)",
+        ),
+        E::Reanimate => ("exact", "best creature from your (or any) graveyard"),
+        E::Regrowth => ("exact", "best card back to hand"),
+        E::Untap(_) => ("exact", "untaps a land or creature"),
+        E::GainControl(_) => (
+            "exact",
+            "steal; \"until end of turn\" returns it and grants haste",
+        ),
+        E::Copy => (
+            "approximated",
+            "token copy of a creature; spell copies repeat your last instant/sorcery; \"becomes a copy\" takes size and keywords",
+        ),
+        E::Empower(_) => ("exact", "Jace token with [-1] surveil 1 / [-3] draw"),
+        E::Amass(_) => ("exact", "Army token with counters"),
+        E::Goad => ("exact", "must attack someone else until your next turn"),
+        E::Proliferate => ("exact", "your counters, loyalty, and opponents' poison"),
+        E::ExtraCombat => ("exact", "another combat this turn"),
+        E::Blink => ("exact", "exile and return: enters triggers fire again"),
+        E::Tutor => ("exact", "best matching card to hand, top or battlefield"),
+        E::FreeSpell => (
+            "approximated",
+            "casts the best affordable card from hand, or the top card, for free",
+        ),
+        E::Prepared => (
+            "exact",
+            "the creature becomes prepared; its spell copy can be cast",
+        ),
+        E::Attach => ("exact", "attaches Equipment / Auras to the best creature"),
+        E::Doubler(_) => (
+            "approximated",
+            "doubles tokens, counters or damage (no stacking order)",
+        ),
+        E::Fog => ("exact", "prevents combat damage this turn"),
+        E::Dig => (
+            "approximated",
+            "look at the top N (3 if unnamed), take the best",
+        ),
+        E::OtherCounters(_) => (
+            "approximated",
+            "shield, stun, loyalty, keyword counters exact; others (plan, lore, hone...) counted for counter goals",
+        ),
+        E::Recast => (
+            "exact",
+            "the best instant/sorcery in your graveyard may be cast again (then exiled)",
+        ),
+        E::Rule(label) => {
+            if resolve::RULES_MODELLED.contains(&label.as_str()) {
+                ("approximated", "special rule acted on")
+            } else {
+                (
+                    "no effect",
+                    "special rule named, no effect in a simplified game",
+                )
+            }
+        }
+    }
+}
+
+/// Keywords the simulator plays (all of the parser's list).
+pub const KEYWORDS_PLAYED: &[&str] = &[
+    "flying",
+    "reach",
+    "trample",
+    "menace",
+    "deathtouch",
+    "lifelink",
+    "haste",
+    "first strike",
+    "double strike",
+    "vigilance",
+    "indestructible",
+    "hexproof",
+    "shroud",
+    "defender",
+    "flash",
+    "prowess",
+    "ward",
+    "protection",
+    "storied",
+    "teamwork",
+    "equip",
+    "crew",
+    "partner",
+    "convoke",
+    "improvise",
+    "affinity",
+    "extort",
+    "changeling",
+    "landcycling",
+    "basic landcycling",
+    "cycling",
+    "enchant",
+    "living weapon",
+    "offspring",
+    "flanking",
+    "fear",
+    "intimidate",
+    "skulk",
+    "toxic",
+    "gift",
+    "flashback",
+    "kicker",
+    "overload",
+    "sneak",
+];
 
 /// Rounds before a game is called on life and board.
 pub const MAX_ROUNDS: u32 = 25;

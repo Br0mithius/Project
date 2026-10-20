@@ -148,6 +148,17 @@ pub enum Ev {
     OthersAttack,
     TeamworkTapped,
     LoseLife,
+    Scry,
+    LoyaltyActivated,
+    AbilityActivated,
+    Tapped,
+    Untapped,
+    /// Any creature dealing combat damage to a player (not just the card itself).
+    CombatDamageAny,
+    NoncombatDamage,
+    LeavesGraveyard,
+    Bounced,
+    Blocks,
     Other,
 }
 
@@ -229,6 +240,18 @@ pub enum Cond {
     MyTurn,
     NotPrepared,
     CastFromGraveyard,
+    Kicked,
+    /// The source isn't a token.
+    NotToken,
+    /// You haven't cast a spell this turn.
+    NoSpellsThisTurn,
+    /// The source has at least N +1/+1 counters.
+    CountersAtLeast(i16),
+    /// The source's power is N or less.
+    PowerAtMost(i16),
+    HasShield,
+    /// You control at least N Treasures.
+    Treasures(u8),
     /// Can't be checked: happens this often.
     Chance(f32),
 }
@@ -295,7 +318,14 @@ pub struct SimCard {
     pub enters_tapped: bool,
     pub equip: Option<u8>,
     pub crew: Option<u8>,
-    pub cycling: Option<(u8, bool)>,
+    /// Cycling cost and what it finds: "" = draws a card, "land" = a basic land, or a
+    /// land type / creature type ("mountain", "halfling").
+    pub cycling: Option<(u8, String)>,
+    pub flashback: Option<Mana>,
+    pub kicker: Option<Mana>,
+    pub overload: Option<Mana>,
+    /// MSH Sneak: an alternative cost when you attacked this turn.
+    pub sneak: Option<Mana>,
     pub teamwork: Option<u8>,
     pub offspring: Option<u8>,
     pub gift: bool,
@@ -465,8 +495,47 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("gift was promised") {
         return Cond::Gift;
     }
+    if t.contains("was kicked") {
+        return Cond::Kicked;
+    }
     if !conditional {
         return Cond::Always;
+    }
+    // Wordings that hold whenever the ability comes up in a game.
+    for always in [
+        "if you cast it",
+        "if you cast him",
+        "if you cast her",
+        "if you cast them",
+        "attacks each combat if able",
+        "fewer than ten cards in hand",
+        "if it wasn't a",
+        "if they were a creature",
+        "if it's a creature",
+        "if it's a planeswalker",
+        "if it had a revival counter",
+    ] {
+        if t.contains(always) {
+            return Cond::Always;
+        }
+    }
+    if t.contains("isn't a token") || t.contains("not a token") {
+        return Cond::NotToken;
+    }
+    if t.contains("didn't cast a spell this turn") {
+        return Cond::NoSpellsThisTurn;
+    }
+    if t.contains("shield counter on") {
+        return Cond::HasShield;
+    }
+    if t.contains("or more +1/+1 counters on") {
+        return Cond::CountersAtLeast(number_before(t, " or more +1/+1").unwrap_or(3) as i16);
+    }
+    if t.contains("power is") && t.contains("or less") {
+        return Cond::PowerAtMost(number_after(t, "power is").unwrap_or(1) as i16);
+    }
+    if t.contains("or more treasures") {
+        return Cond::Treasures(number_before(t, " or more treasures").unwrap_or(4));
     }
     if t.contains("equipped") {
         return Cond::Equipped;
@@ -575,24 +644,69 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 Event::Targeted => (Ev::Targeted, "~"),
                 Event::OthersAttack => (Ev::OthersAttack, "you"),
                 Event::Other(what) => {
-                    if what.contains("teamwork") {
-                        (Ev::TeamworkTapped, "~")
+                    let k = if what.contains("teamwork") {
+                        Ev::TeamworkTapped
                     } else if what.contains("loses life") || what.contains("lose life") {
-                        (Ev::LoseLife, what.as_str())
+                        Ev::LoseLife
+                    } else if t.contains("scry or surveil") {
+                        Ev::Scry
+                    } else if t.contains("loyalty ability") {
+                        Ev::LoyaltyActivated
+                    } else if t.contains("activate an ability") {
+                        Ev::AbilityActivated
+                    } else if t.contains("becomes untapped") || t.contains("become untapped") {
+                        Ev::Untapped
+                    } else if t.contains("becomes tapped") || t.contains("become tapped") {
+                        Ev::Tapped
+                    } else if t.contains("noncombat damage") {
+                        Ev::NoncombatDamage
+                    } else if t.contains("combat damage") || t.contains("deal damage to a player") {
+                        Ev::CombatDamageAny
+                    } else if t.contains("leaves your graveyard") {
+                        Ev::LeavesGraveyard
+                    } else if t.contains("owner's hand") {
+                        Ev::Bounced
+                    } else if t.contains(" blocks") {
+                        Ev::Blocks
+                    } else if t.contains("targets ~") {
+                        Ev::Targeted
+                    } else if t.contains(" casts") || t.contains(" cast ") {
+                        Ev::Cast
+                    } else if t.contains(" dies") || t.contains(" die,") {
+                        Ev::Death
                     } else {
-                        (Ev::Other, what.as_str())
-                    }
+                        Ev::Other
+                    };
+                    (k, what.as_str())
                 }
             };
             let mut f = filter_of(what);
             if matches!(
                 kind,
-                Ev::Cast | Ev::GainLife | Ev::Draw | Ev::Tokens | Ev::OthersAttack | Ev::Landfall
+                Ev::Cast
+                    | Ev::GainLife
+                    | Ev::Draw
+                    | Ev::Tokens
+                    | Ev::OthersAttack
+                    | Ev::Landfall
+                    | Ev::Scry
+                    | Ev::LoyaltyActivated
+                    | Ev::AbilityActivated
+                    | Ev::CombatDamageAny
+                    | Ev::LeavesGraveyard
             ) && f.yours.is_none()
                 && !what.contains("player")
                 && !what.contains("opponent")
             {
                 f.yours = Some(true);
+            }
+            if kind == Ev::NoncombatDamage {
+                // "an opponent is dealt noncombat damage": the event is about the opponent.
+                f.yours = Some(false);
+                f.types = 0;
+            }
+            if matches!(kind, Ev::Cast | Ev::LoyaltyActivated) && what.contains("opponent") {
+                f.yours = Some(false);
             }
             Trig::Event(kind, f)
         }
@@ -669,6 +783,14 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
         }
     }
     out
+}
+
+/// The cost after a keyword ("flashback {2}{b}{b}", "kicker—{1}{w}").
+fn keyword_cost(words: &[String], key: &str) -> Option<Mana> {
+    let k = words.iter().find(|w| w.starts_with(key))?;
+    let rest = k[key.len()..].trim_start_matches(['—', ' ']);
+    let cost = rest.split(',').next().unwrap_or(rest);
+    Some(Mana::parse(cost))
 }
 
 /// Keyword bits in a list of keyword words.
@@ -884,8 +1006,18 @@ pub fn compile(card: &Card) -> SimCard {
             .then(|| kw_num("crew").unwrap_or(2)),
         cycling: kw_words.iter().find(|k| k.contains("cycling")).map(|k| {
             let digits: String = k.chars().filter(|c| c.is_ascii_digit()).collect();
-            (digits.parse().unwrap_or(2), k.contains("landcycling"))
+            let kind = k.split("cycling").next().unwrap_or("").trim();
+            let find = if kind.ends_with("land") || kind == "basic land" {
+                "land".to_string()
+            } else {
+                kind.to_string()
+            };
+            (digits.parse().unwrap_or(2), find)
         }),
+        flashback: keyword_cost(kw_words, "flashback"),
+        kicker: keyword_cost(kw_words, "kicker"),
+        overload: keyword_cost(kw_words, "overload"),
+        sneak: keyword_cost(kw_words, "sneak"),
         teamwork: kw_words
             .iter()
             .any(|k| k.starts_with("teamwork"))

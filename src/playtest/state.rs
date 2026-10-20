@@ -151,6 +151,9 @@ pub struct Pending {
     pub teamwork: bool,
     pub gift: bool,
     pub from_graveyard: bool,
+    pub kicked: bool,
+    /// Cast for its overload cost: "target" means "each".
+    pub overloaded: bool,
 }
 
 /// Context for resolving a spell's own abilities.
@@ -190,6 +193,13 @@ pub struct Game<'a> {
 }
 
 pub const NO_CARD: u16 = u16::MAX;
+
+/// Creature types the league's cards care about (what a changeling counts as).
+pub const CHANGELING_TYPES: &[&str] = &[
+    "hero", "villain", "robot", "human", "dwarf", "elf", "goblin", "hobbit", "halfling", "wizard",
+    "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant", "avenger",
+    "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
+];
 
 fn token_abilities(tok: Tok) -> &'static [SimAbility] {
     static TABLE: OnceLock<Vec<(Tok, Vec<SimAbility>)>> = OnceLock::new();
@@ -483,7 +493,7 @@ impl<'a> Game<'a> {
                     .iter()
                     .any(|x| x.is(T_EQUIPMENT) && x.attached == Some(id))
             }),
-            Cond::Teamwork | Cond::Gift | Cond::CastFromGraveyard => false,
+            Cond::Teamwork | Cond::Gift | Cond::CastFromGraveyard | Cond::Kicked => false,
             Cond::Storied => pl.enduring_story,
             Cond::AttackedThisTurn => pl.attacked_this_turn,
             Cond::CreatureDiedThisTurn => self.died_this_turn > 0,
@@ -528,6 +538,12 @@ impl<'a> Game<'a> {
             Cond::GainedLife => pl.gained_life_turn,
             Cond::MyTurn => self.active == p,
             Cond::NotPrepared => src.is_some_and(|s| !self.perms[s].prepared),
+            Cond::NotToken => src.is_none_or(|s| !self.perms[s].is_token()),
+            Cond::NoSpellsThisTurn => pl.spells_this_turn == 0,
+            Cond::CountersAtLeast(n) => src.is_some_and(|s| self.perms[s].counters >= *n),
+            Cond::PowerAtMost(n) => src.is_some_and(|s| self.perms[s].p <= *n),
+            Cond::HasShield => src.is_some_and(|s| self.perms[s].shield > 0),
+            Cond::Treasures(n) => mine().filter(|x| x.tok == Tok::Treasure).count() >= *n as usize,
             // Can't be checked: decided once per check, deterministically from the round.
             Cond::Chance(f) => {
                 ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f
@@ -761,6 +777,8 @@ impl<'a> Game<'a> {
                             teamwork: false,
                             gift: false,
                             from_graveyard: false,
+                            kicked: false,
+                            overloaded: false,
                         });
                     }
                 }
@@ -768,6 +786,9 @@ impl<'a> Game<'a> {
         }
         if creature && to_gy {
             self.emit_about(Ev::Death, perm.ctrl as usize, &perm);
+        }
+        if matches!(to, Zone::Hand) {
+            self.emit_about(Ev::Bounced, perm.ctrl as usize, &perm);
         }
         // The card goes to its zone.
         if let (Some(r), Tok::None) = (perm.card, perm.tok) {
@@ -858,14 +879,13 @@ impl<'a> Game<'a> {
         let (types, subtypes, colors, p, t, kw) = match card {
             Some(r) if tok == Tok::None || tok == Tok::Creature || tok == Tok::Other => {
                 let c = self.card(r);
-                (
-                    c.types,
-                    c.subtypes.clone(),
-                    c.colors,
-                    c.power,
-                    c.toughness,
-                    c.kw,
-                )
+                // Changelings are every creature type.
+                let subtypes = if c.changeling {
+                    CHANGELING_TYPES.iter().map(|s| s.to_string()).collect()
+                } else {
+                    c.subtypes.clone()
+                };
+                (c.types, subtypes, c.colors, c.power, c.toughness, c.kw)
             }
             _ => (T_ARTIFACT, Vec::new(), 0, 0, 0, 0),
         };
@@ -993,6 +1013,8 @@ impl<'a> Game<'a> {
                         teamwork: false,
                         gift: false,
                         from_graveyard: false,
+                        kicked: false,
+                        overloaded: false,
                     });
                 }
             }
@@ -1064,10 +1086,25 @@ impl<'a> Game<'a> {
                     // Self-referential events ("whenever ~ is dealt damage", "becomes the target").
                     let about_self =
                         a.text.contains("whenever ~") && !a.text.contains("whenever ~ or");
-                    if matches!(ev, Ev::Damaged | Ev::Targeted | Ev::TeamworkTapped)
-                        && about_self
+                    if matches!(
+                        ev,
+                        Ev::Damaged
+                            | Ev::Targeted
+                            | Ev::TeamworkTapped
+                            | Ev::Tapped
+                            | Ev::Untapped
+                            | Ev::Blocks
+                            | Ev::Bounced
+                    ) && about_self
                         && s.id != src.id
                     {
+                        continue;
+                    }
+                    // "Whenever equipped creature ...": only the creature this is attached to.
+                    if a.text.contains("equipped creature") && src.attached != Some(s.id) {
+                        continue;
+                    }
+                    if a.text.contains("with deathtouch") && !s.has(DEATHTOUCH) {
                         continue;
                     }
                     if f.other && s.id == src.id {
@@ -1112,6 +1149,8 @@ impl<'a> Game<'a> {
                     teamwork: false,
                     gift: false,
                     from_graveyard: false,
+                    kicked: false,
+                    overloaded: false,
                 });
             }
         }

@@ -76,7 +76,9 @@ impl<'a> Game<'a> {
             }
             if !self.perms[i].has(VIGILANCE) {
                 self.perms[i].tapped = true;
+                self.emit(Ev::Tapped, a, Some(id));
             }
+            let Some(i) = self.idx(id) else { continue };
             if let Some(d) = self.def_player(def) {
                 let pw = self.perms[i].p.max(1) as f32;
                 self.players[d].grudge[a] += pw;
@@ -113,6 +115,8 @@ impl<'a> Game<'a> {
                         teamwork: false,
                         gift: false,
                         from_graveyard: false,
+                        kicked: false,
+                        overloaded: false,
                     });
                 }
             }
@@ -158,6 +162,17 @@ impl<'a> Game<'a> {
                 if let Some(at) = attacks.iter_mut().find(|x| x.attacker == at_id) {
                     at.blockers.push(b);
                 }
+            }
+        }
+        // "Whenever ~ blocks" and "whenever a creature blocks".
+        let blockers: Vec<u32> = attacks
+            .iter()
+            .flat_map(|at| at.blockers.iter().copied())
+            .collect();
+        for b in blockers {
+            if let Some(bi) = self.idx(b) {
+                let snap = self.perms[bi].clone();
+                self.emit_about(Ev::Blocks, snap.ctrl as usize, &snap);
             }
         }
         // Menace needs two or more blockers.
@@ -206,7 +221,7 @@ impl<'a> Game<'a> {
     }
 
     /// One combat damage step (`first` = the first-strike step).
-    fn damage_step(&mut self, a: usize, attacks: &[Attack], first: bool) {
+    pub(crate) fn damage_step(&mut self, a: usize, attacks: &[Attack], first: bool) {
         let strikes = |x: &Perm| {
             let fs = x.has(FIRST_STRIKE | DOUBLE_STRIKE);
             if first {
@@ -331,6 +346,7 @@ impl<'a> Game<'a> {
         for id in dealt {
             let Some(i) = self.idx(id) else { continue };
             let x = self.perms[i].clone();
+            self.emit_about(Ev::CombatDamageAny, x.ctrl as usize, &x);
             for (k, ab) in self.abilities_of(&x).iter().enumerate() {
                 if ab.trig == Trig::CombatDamage {
                     self.pending.push(Pending {
@@ -344,6 +360,8 @@ impl<'a> Game<'a> {
                         teamwork: false,
                         gift: false,
                         from_graveyard: false,
+                        kicked: false,
+                        overloaded: false,
                     });
                 }
             }

@@ -19,6 +19,8 @@ pub struct Ctx<'a> {
     pub subject: Option<u32>,
     pub text: &'a str,
     pub until_eot: bool,
+    /// Cast with overload: "target" means "each" (of the opponents' things).
+    pub overload: bool,
 }
 
 /// Labels of `Effect::Rule` the simulator acts on; the rest change nothing in its games.
@@ -41,6 +43,14 @@ pub const RULES_MODELLED: &[&str] = &[
     "turns a permanent into a creature",
     "sets base power/toughness",
     "adds to noncombat damage",
+    "everyone draws an extra card",
+    "exiles itself",
+    "mills opponents",
+    "reshuffles the graveyard",
+    "returns to the top of the library",
+    "untaps your creatures",
+    "steals the enchanted permanent",
+    "fetches a card from outside the game",
 ];
 
 impl<'a> Game<'a> {
@@ -223,6 +233,12 @@ impl<'a> Game<'a> {
     /// Picks targets and handles targeting side effects (ward is paid, "becomes the target"
     /// triggers, the owner may respond with protection). Returns perm ids still valid.
     fn choose(&mut self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<u32> {
+        let over = Target {
+            mass: true,
+            whose: if harmful { Whose::Theirs } else { t.whose },
+            ..*t
+        };
+        let t = if ctx.overload && !t.mass { &over } else { t };
         let cands = self.candidates(ctx, t, harmful);
         if t.mass {
             return cands.iter().map(|&i| self.perms[i].id).collect();
@@ -299,6 +315,7 @@ impl<'a> Game<'a> {
             Cond::Teamwork => pend.teamwork,
             Cond::Gift => pend.gift,
             Cond::CastFromGraveyard => pend.from_graveyard,
+            Cond::Kicked => pend.kicked,
             c => self.cond_holds(c, me, src_idx),
         };
         if !holds {
@@ -313,6 +330,7 @@ impl<'a> Game<'a> {
             subject: pend.subject,
             text: &ab.text,
             until_eot: ab.until_eot,
+            overload: pend.overloaded,
         };
         if ab.optional && !ai::wants_optional(self, &ctx, ab) {
             return;
@@ -335,6 +353,18 @@ impl<'a> Game<'a> {
                 return;
             }
             self.apply(&ctx, &ab.effects[k]);
+        }
+        // "When you do, ..." right after this ability (not the counter-goal kind).
+        if let Some(next) = abilities.get(pend.ability as usize + 1) {
+            if next.trig == Trig::Reflexive && next.counter_goal.is_none() {
+                self.pending.insert(
+                    0,
+                    Pending {
+                        ability: pend.ability + 1,
+                        ..pend.clone()
+                    },
+                );
+            }
         }
     }
 
@@ -393,6 +423,8 @@ impl<'a> Game<'a> {
                             teamwork: false,
                             gift: false,
                             from_graveyard: false,
+                            kicked: false,
+                            overloaded: false,
                         });
                         if sac {
                             if let Some(j) = self.idx(x.id) {
@@ -418,6 +450,8 @@ impl<'a> Game<'a> {
                                 teamwork: false,
                                 gift: false,
                                 from_graveyard: false,
+                                kicked: false,
+                                overloaded: false,
                             });
                         }
                     }
@@ -527,6 +561,9 @@ impl<'a> Game<'a> {
             n
         };
         self.damage_player(ctx.ctrl, o, n, 0);
+        if n > 0 && o != ctx.ctrl {
+            self.emit(Ev::NoncombatDamage, o, None);
+        }
         if self
             .src_perm(ctx)
             .is_some_and(|s| s.has(LIFELINK) && s.is_creature())
@@ -953,6 +990,7 @@ impl<'a> Game<'a> {
                     || text.contains("all graveyards");
                 if let Some((o, k)) = ai::reanimate_choice(self, me, any) {
                     let c = self.players[o].graveyard.remove(k);
+                    self.emit(Ev::LeavesGraveyard, o, None);
                     if let Some(i) = self.enter_card(o, c, me, false) {
                         if text.contains("tapped") {
                             self.perms[i].tapped = true;
@@ -971,6 +1009,7 @@ impl<'a> Game<'a> {
                 if let Some(k) = pick {
                     let c = self.players[me].graveyard.remove(k);
                     self.players[me].hand.push(c);
+                    self.emit(Ev::LeavesGraveyard, me, None);
                 }
             }
             Effect::Untap(t) => {
@@ -1053,6 +1092,8 @@ impl<'a> Game<'a> {
                                     teamwork: false,
                                     gift: false,
                                     from_graveyard: false,
+                                    kicked: false,
+                                    overloaded: false,
                                 });
                             }
                         }
@@ -1083,6 +1124,8 @@ impl<'a> Game<'a> {
                                     teamwork: false,
                                     gift: false,
                                     from_graveyard: false,
+                                    kicked: false,
+                                    overloaded: false,
                                 });
                             }
                         }
@@ -1144,11 +1187,16 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Proliferate => {
-                for i in 0..self.perms.len() {
+                // By id: plan counters can fire abilities that change the board.
+                let ids: Vec<u32> = self
+                    .perms
+                    .iter()
+                    .filter(|x| x.ctrl as usize == me)
+                    .map(|x| x.id)
+                    .collect();
+                for id in ids {
+                    let Some(i) = self.idx(id) else { continue };
                     let x = &mut self.perms[i];
-                    if x.ctrl as usize != me {
-                        continue;
-                    }
                     if x.counters > 0 {
                         x.counters += 1;
                     }
@@ -1455,6 +1503,55 @@ impl<'a> Game<'a> {
                 }
             }
             "adds to noncombat damage" => {}
+            "everyone draws an extra card" => {
+                for p in 0..self.players.len() {
+                    if self.players[p].alive {
+                        self.draw(p, 1);
+                    }
+                }
+            }
+            "exiles itself" => {
+                if let Some(i) = self.src_idx(ctx) {
+                    self.leave(i, Zone::Exile, false);
+                }
+            }
+            "mills opponents" => {
+                for o in self.opponents(me) {
+                    self.mill(o, 3);
+                }
+            }
+            "reshuffles the graveyard" => {
+                let gy = std::mem::take(&mut self.players[me].graveyard);
+                self.players[me].library.extend(gy);
+                let mut lib = std::mem::take(&mut self.players[me].library);
+                self.rng.shuffle(&mut lib);
+                self.players[me].library = lib;
+            }
+            "returns to the top of the library" => {
+                if let Some(i) = self.src_idx(ctx) {
+                    self.leave(i, Zone::Library(true), false);
+                }
+            }
+            "untaps your creatures" => {
+                for x in self
+                    .perms
+                    .iter_mut()
+                    .filter(|x| x.ctrl as usize == me && x.is_creature())
+                {
+                    x.tapped = false;
+                }
+            }
+            "steals the enchanted permanent" => {
+                if let Some(a) = self
+                    .src_perm(ctx)
+                    .and_then(|s| s.attached)
+                    .and_then(|id| self.idx(id))
+                {
+                    self.perms[a].ctrl = me as u8;
+                }
+            }
+            // A wish: close enough to drawing the right card.
+            "fetches a card from outside the game" => self.draw(me, 1),
             // "can't stay in a graveyard", "exiles cards instead of the graveyard": the cards
             // simply don't come back; the simulator's recursion only uses what's left there.
             "can't stay in a graveyard" | "exiles cards instead of the graveyard" => {}
