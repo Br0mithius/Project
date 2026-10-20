@@ -88,7 +88,12 @@ fn main() {
                         d.split([' ', '(', '{']).next().unwrap_or(&d).to_string()
                     }
                 };
-                effects.entry(name).or_insert((how, note, 0)).2 += 1;
+                let (how_row, note_row) = if name.starts_with("Rule") {
+                    ("mixed", "special rules: each listed below")
+                } else {
+                    (how, note)
+                };
+                effects.entry(name).or_insert((how_row, note_row, 0)).2 += 1;
                 *totals.entry(how).or_default() += 1;
             }
         }
