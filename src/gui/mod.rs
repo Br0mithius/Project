@@ -127,6 +127,8 @@ enum Action {
     NewHand,
     Draw,
     RulesChanged,
+    /// Mana Mixer import: (list text, replace the whole pool?).
+    Import(String, bool),
 }
 
 /// A commander ranking being built on a background thread.
@@ -178,6 +180,9 @@ pub struct GuiApp {
     draft_query: String,
     draft_pack: Vec<String>,
     coll_query: String,
+    /// Pool browser set filter ("" = all sets).
+    set_filter: String,
+    import_text: String,
     trade_target: u32,
     trade_need: usize,
     sim: Option<SimResult>,
@@ -187,6 +192,8 @@ pub struct GuiApp {
     ranking_key: String,
     rank_job: Option<RankJob>,
     data_job: Option<std::sync::mpsc::Receiver<String>>,
+    /// Next background update also re-checks Scryfall for new league cards.
+    force_card_update: bool,
     error: Option<String>,
     /// Bumped whenever the deck, pool or rules change; invalidates `memo`.
     rev: u64,
@@ -302,6 +309,8 @@ impl GuiApp {
             draft_query: String::new(),
             draft_pack: Vec::new(),
             coll_query: String::new(),
+            set_filter: String::new(),
+            import_text: String::new(),
             trade_target: 10,
             trade_need: 0,
             sim: None,
@@ -311,14 +320,22 @@ impl GuiApp {
             ranking_key: String::new(),
             rank_job: None,
             data_job: None,
+            force_card_update: false,
             error,
             rev: 1,
             memo: Memo::default(),
         };
         app.deck.name = app.deck_name.clone();
         app.refresh_saved_decks();
-        // Ratings are refreshed in the background when missing or older than 3 days.
-        if app.db.ratings_date.is_empty() || crate::ratings::age_days(&app.db.ratings_date) > 3 {
+        if app.coll.total() == 0 {
+            app.tab = Tab::Collection;
+            app.status = "Your pool is empty - paste your Mana Mixer export on the right-hand box to import it, or add cards one by one.".into();
+        }
+        // Ratings are downloaded once, on first launch; after that only when you ask
+        // (Settings > Update ratings), so the sites aren't hit repeatedly.
+        let stamp = app.data_dir.join("ratings_downloaded.txt");
+        if app.db.ratings_date.is_empty() && !stamp.exists() {
+            let _ = std::fs::write(&stamp, crate::ratings::today());
             app.start_data_download();
         }
         if app.settings.real_images {
@@ -647,6 +664,28 @@ impl GuiApp {
                     }
                     Err(e) => self.status = e,
                 },
+                Action::Import(text, replace) => {
+                    match league::import_pool(&text, replace, &self.db, &mut self.coll) {
+                        Ok(r) => {
+                            self.status = format!(
+                                "{} {} cards ({} different).{}",
+                                if replace { "Your pool is now" } else { "Added" },
+                                r.cards,
+                                r.distinct,
+                                if r.unknown.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        " Not in the card database (kept; try Settings > Update card database): {}",
+                                        r.unknown.join(", ")
+                                    )
+                                }
+                            );
+                            self.import_text.clear();
+                        }
+                        Err(e) => self.status = e,
+                    }
+                }
                 Action::DraftAdd(n) => {
                     self.draft_pack.push(n);
                     self.draft_query.clear();
@@ -846,6 +885,11 @@ impl GuiApp {
                 }
             });
             ui.menu_button("Settings", |ui| {
+                if ui.button("Import my pool from Mana Mixer...").clicked() {
+                    self.tab = Tab::Collection;
+                    ui.close();
+                }
+                ui.separator();
                 if ui
                     .checkbox(&mut self.settings.real_images, "Show official card images (full art, from Scryfall)")
                     .changed()
@@ -906,7 +950,21 @@ impl GuiApp {
                     })
                     .small(),
                 );
+                ui.label(
+                    RichText::new("Downloaded once and saved; re-downloaded only when you press a button below.")
+                        .small()
+                        .weak(),
+                );
                 if ui.add_enabled(self.data_job.is_none(), egui::Button::new("Update ratings now")).clicked() {
+                    self.start_data_download();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(self.data_job.is_none(), egui::Button::new("Update card database (all league sets)"))
+                    .on_hover_text("Adds new cards from Marvel Super Heroes, The Hobbit, Reality Fracture, Nauctis and Foundations via Scryfall")
+                    .clicked()
+                {
+                    self.force_card_update = true;
                     self.start_data_download();
                     ui.close();
                 }
@@ -1029,6 +1087,7 @@ impl GuiApp {
             .filter(|c| self.mv_max >= 7 || c.mana_value() <= self.mv_max)
             .filter(|c| !self.fits_only || identity.is_none_or(|id| c.identity().is_subset_of(id)))
             .filter(|c| !self.avail_only || self.available(c) > 0)
+            .filter(|c| self.set_filter.is_empty() || c.set == self.set_filter)
             .collect();
         match self.sort {
             SortBy::Name => cards.sort_by(|a, b| a.name.cmp(&b.name)),
@@ -1068,7 +1127,7 @@ impl GuiApp {
     fn pool_panel(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.horizontal(|ui| {
             ui.heading(if self.whole_set {
-                "Whole set"
+                "All league cards"
             } else {
                 "Your pool"
             });
@@ -1142,7 +1201,28 @@ impl GuiApp {
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut self.fits_only, "Fits commander");
             ui.checkbox(&mut self.avail_only, "Not used up");
-            ui.checkbox(&mut self.whole_set, "Show whole set");
+            ui.checkbox(&mut self.whole_set, "Show all league cards");
+            let label = |code: &str| match code {
+                "" => "All sets".to_string(),
+                "MSH" => "Marvel Super Heroes".to_string(),
+                "HOB" => "The Hobbit".to_string(),
+                "FRA" => "Reality Fracture".to_string(),
+                "FDN" => "Foundations".to_string(),
+                "LEAGUE" => "Skill Tree & Shop".to_string(),
+                other => other.to_string(),
+            };
+            let mut sets = vec![String::new()];
+            sets.extend(self.db.rated_sets());
+            sets.push("LEAGUE".into());
+            egui::ComboBox::from_id_salt("setfilter")
+                .selected_text(label(&self.set_filter))
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    for s in sets {
+                        let text = label(&s);
+                        ui.selectable_value(&mut self.set_filter, s, text);
+                    }
+                });
             egui::ComboBox::from_id_salt("sort")
                 .selected_text(match self.sort {
                     SortBy::Type => "Sort: type",
@@ -1861,7 +1941,13 @@ impl GuiApp {
         if let Some(rx) = &self.data_job {
             match rx.try_recv() {
                 Ok(msg) => {
-                    self.db.attach_ratings(&self.data_dir);
+                    // The card list may have grown; reload it with the new ratings.
+                    if let Ok(mut db) = CardDb::load(&self.data_dir.join("cards.json")) {
+                        db.attach_ratings(&self.data_dir);
+                        self.db = db;
+                    } else {
+                        self.db.attach_ratings(&self.data_dir);
+                    }
                     self.rev += 1;
                     self.status = msg;
                     self.data_job = None;
@@ -1887,17 +1973,39 @@ impl GuiApp {
             .filter(|c| c.can_be_commander() && self.coll.owned(&c.name) > 0)
             .map(|c| c.name.clone())
             .collect();
+        let force_cards = self.force_card_update;
+        self.force_card_update = false;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let a = match crate::ratings::fetch_17lands(&dir) {
+            // New league cards from Scryfall (e.g. Nauctis once released) - only on request.
+            let mut parts = Vec::new();
+            if force_cards {
+                match crate::setdata::update_cards(&dir) {
+                    Ok((added, _, missing)) => {
+                        parts.push(format!("{} new cards", added));
+                        if !missing.is_empty() {
+                            parts.push(format!("not released yet: {}", missing.join(", ")));
+                        }
+                    }
+                    Err(_) => parts.push(
+                        "Scryfall unavailable (offline?) - card database not updated".to_string(),
+                    ),
+                }
+            }
+            let sets = CardDb::load(&dir.join("cards.json"))
+                .map(|db| db.rated_sets())
+                .unwrap_or_else(|_| vec!["MSH".into()]);
+            let a = match crate::ratings::fetch_17lands(&dir, &sets) {
                 Ok(n) => format!("17Lands: {} cards rated", n),
-                Err(e) => format!("17Lands unavailable ({})", e),
+                Err(_) => "17Lands unavailable (offline?)".to_string(),
             };
+            parts.push(a);
             let b = match crate::ratings::fetch_playgroup(&dir, &names) {
                 Ok(n) => format!("Playgroup.gg: {} commanders", n),
                 Err(_) => "Playgroup.gg unavailable".to_string(),
             };
-            let _ = tx.send(format!("Ratings updated - {}; {}.", a, b));
+            parts.push(b);
+            let _ = tx.send(format!("Updated - {}.", parts.join("; ")));
         });
         self.data_job = Some(rx);
         self.status = "Downloading card ratings in the background...".into();
@@ -2183,7 +2291,11 @@ impl GuiApp {
                             .color(cards::lighten_for_text(cards::frame_color(c))),
                     );
                     cost_widget(ui, &c.mana_cost, 14.0);
-                    ui.label(RichText::new(&c.rarity).small().weak());
+                    ui.label(
+                        RichText::new(format!("{} · {}", c.set, c.rarity))
+                            .small()
+                            .weak(),
+                    );
                 });
             }
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -2781,6 +2893,43 @@ impl GuiApp {
                     acts.push(Action::Own(n, 1));
                 }
                 self.coll_query = q;
+                ui.add_space(14.0);
+                ui.separator();
+                ui.label(RichText::new("Import from Mana Mixer").strong());
+                ui.label(
+                    RichText::new(
+                        "Paste your Mana Mixer (or ManaBox) collection export below - lines like \"1 Red Hulk (MSH) 149\" or a CSV with Name and Quantity columns.",
+                    )
+                    .small(),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.import_text)
+                        .hint_text("1 Red Hulk (MSH) 149\n2 Web Up (MSH) 41\n...")
+                        .desired_rows(8)
+                        .desired_width(370.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+                let parsed = league::parse_import(&self.import_text);
+                let total: u32 = parsed.iter().map(|l| l.count).sum();
+                if !parsed.is_empty() {
+                    ui.label(RichText::new(format!("{} cards ({} different) ready to import.", total, parsed.len())).small());
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!parsed.is_empty(), egui::Button::new("Add to my pool"))
+                        .on_hover_text("Adds these cards to what you already have")
+                        .clicked()
+                    {
+                        acts.push(Action::Import(self.import_text.clone(), false));
+                    }
+                    if ui
+                        .add_enabled(!parsed.is_empty(), egui::Button::new("Replace my pool"))
+                        .on_hover_text("Your pool becomes exactly this list (the old one is saved as data/collection.backup.txt)")
+                        .clicked()
+                    {
+                        acts.push(Action::Import(self.import_text.clone(), true));
+                    }
+                });
             });
             ui.separator();
             let mut rows: Vec<(String, u32)> = self

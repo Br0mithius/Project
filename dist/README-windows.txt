@@ -11,14 +11,17 @@ MSH DECKBUILDER (Windows)
    never downloaded again, so it works offline. Images for your pool start downloading
    as soon as the app opens; before a draft, use Settings > "Download images for the
    whole set".
-4. Rest the mouse on any card to see a big, readable copy of it (Settings lets you
+4. Your pool starts empty. Open the My Pool tab, paste your Mana Mixer export into
+   "Import from Mana Mixer" and press "Add to my pool" (or "Replace my pool").
+5. Rest the mouse on any card to see a big, readable copy of it (Settings lets you
    change the zoom size or turn it off).
 
 TABS
   Deck Builder     Your pool on the left (click = inspect, double-click = add,
                    right-click = more), the deck in the middle, card details on the right.
                    Auto-build, basic land +/- buttons, suggestions along the bottom.
-  Commanders       Every legendary creature you own, ranked. "Build" makes a full deck.
+  Commanders       Every legendary creature you own, ranked by the deck your pool gives
+                   it. Sliders set how much each part counts. "Build" makes the deck.
                    Mono-colour commanders can add a colour with The Prismatic Piper.
   Draft Helper     Type the cards in a draft pack; it ranks them for your deck.
                    "I took it" adds the card to your pool.
@@ -28,14 +31,23 @@ TABS
                    sample hands.
   Season & Rules   The Season 2 schedule; "Build for this" switches deck size and
                    singleton for that session.
-  My Pool          Add or remove cards you own; copy your pool for Mana Mixer.
+  My Pool          Import from Mana Mixer; add or remove cards; copy your pool for Mana Mixer.
 
 The session picker at the top sets the rules (60 cards, singleton from Session 6,
 75 cards from Session 10). Export copies a deck list for Moxfield/Archidekt or Mana Mixer.
 
+ONLINE DATA (downloaded once, then only when you ask)
+  Card ratings from 17Lands and commander win rates from Playgroup.gg are downloaded
+  the first time the app starts and saved in the data folder. They are only downloaded
+  again when you press Settings > "Update ratings now". New league cards (for example
+  Nauctis: The Sunken Realms when it comes out) are added with Settings > "Update card
+  database". Sets covered: Marvel Super Heroes, The Hobbit, Reality Fracture,
+  Foundations, plus the league staples and Shop cards.
+
 YOUR FILES (keep these when you update the program)
   data\collection.txt   your league pool ("count name" per line).
-  data\cards.json       card database (the whole Marvel Super Heroes set).
+  data\cards.json       card database (every league set).
+  data\ratings_17lands.json, data\commander_stats.json   saved ranking data.
   images\               card images (downloaded once, reused forever).
   decks\                saved decks (plain text).
 

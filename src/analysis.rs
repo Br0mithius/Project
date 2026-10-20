@@ -192,15 +192,21 @@ pub fn card_power(card: &Card, db: &CardDb) -> (f32, f32, Option<String>) {
     let Some(wr) = r.gih_wr else {
         return (prior, 0.0, None);
     };
-    // 1.5 points for an average card, +1 per 4 percentage points above the set average.
-    let data = (1.5 + (wr - db.gih_mean) * 25.0).clamp(-1.0, 6.0);
+    // 1.5 points for an average card, +1 per 4 percentage points above its set's average.
+    let mean = db.set_mean(&r.set);
+    let data = (1.5 + (wr - mean) * 25.0).clamp(-1.0, 6.0);
     let w = r.games as f32 / (r.games as f32 + RATING_TRUST_GAMES);
     let points = w * data + (1.0 - w) * prior;
     let note = format!(
-        "17Lands win rate {:.1}% ({} games, set avg {:.1}%)",
+        "17Lands win rate {:.1}% ({} games, {} average {:.1}%)",
         wr * 100.0,
         r.games,
-        db.gih_mean * 100.0
+        if r.set.is_empty() {
+            "set"
+        } else {
+            r.set.as_str()
+        },
+        mean * 100.0
     );
     (points, w, Some(note))
 }
@@ -1090,6 +1096,7 @@ mod power_tests {
         db.ratings.insert(
             "test common".into(),
             Rating {
+                set: String::new(),
                 gih_wr: Some(0.64),
                 games: 5000,
                 alsa: None,

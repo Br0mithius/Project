@@ -22,8 +22,10 @@ pub struct CardDb {
     pub cards: Vec<Card>,
     /// 17Lands ratings by normalised name (empty until downloaded).
     pub ratings: HashMap<String, crate::ratings::Rating>,
-    /// Game-weighted average 17Lands win rate across the set (the "average card" line).
+    /// Game-weighted average 17Lands win rate across all rated cards.
     pub gih_mean: f32,
+    /// The same average per set, so each card is compared with its own set.
+    pub gih_means: HashMap<String, f32>,
     /// When the ratings were downloaded ("" = never).
     pub ratings_date: String,
     /// Playgroup.gg commander win rates by normalised name.
@@ -60,6 +62,7 @@ impl CardDb {
             cards,
             ratings: HashMap::new(),
             gih_mean: 0.56,
+            gih_means: HashMap::new(),
             ratings_date: String::new(),
             commander_stats: HashMap::new(),
             index: HashMap::new(),
@@ -86,6 +89,19 @@ impl CardDb {
             if n > 0.0 {
                 self.gih_mean = sum / n;
             }
+            let mut per: HashMap<String, (f32, f32)> = HashMap::new();
+            for r in self.ratings.values() {
+                if let Some(w) = r.gih_wr {
+                    let e = per.entry(r.set.clone()).or_insert((0.0, 0.0));
+                    e.0 += w * r.games as f32;
+                    e.1 += r.games as f32;
+                }
+            }
+            self.gih_means = per
+                .into_iter()
+                .filter(|(_, (_, n))| *n > 0.0)
+                .map(|(k, (s, n))| (k, s / n))
+                .collect();
         }
         self.commander_stats = crate::ratings::load_commander_stats(data_dir)
             .commanders
@@ -96,6 +112,24 @@ impl CardDb {
 
     pub fn rating(&self, name: &str) -> Option<&crate::ratings::Rating> {
         self.ratings.get(&normalize(name))
+    }
+
+    /// Average 17Lands win rate of the set a rating came from.
+    pub fn set_mean(&self, set: &str) -> f32 {
+        *self.gih_means.get(set).unwrap_or(&self.gih_mean)
+    }
+
+    /// Set codes in the database that 17Lands could rate (not staples or promos).
+    pub fn rated_sets(&self) -> Vec<String> {
+        let mut sets: Vec<String> = Vec::new();
+        for c in &self.cards {
+            if !c.set.is_empty() && c.set != "LEAGUE" && c.set != "CMR" && !sets.contains(&c.set) {
+                sets.push(c.set.clone());
+            }
+        }
+        // The league's starter set first, so its ratings win for reprints.
+        sets.sort_by_key(|s| if s == "MSH" { 0 } else { 1 });
+        sets
     }
 
     pub fn commander_stat(&self, name: &str) -> Option<&crate::ratings::CommanderStat> {
@@ -248,6 +282,30 @@ impl Collection {
 
     pub fn total(&self) -> u32 {
         self.counts.values().sum()
+    }
+
+    /// Replaces the whole pool (e.g. from a Mana Mixer import), saving the old file as
+    /// collection.backup.txt first.
+    pub fn replace_all(
+        &mut self,
+        counts: BTreeMap<String, u32>,
+        header: &str,
+    ) -> Result<(), String> {
+        if self.path.exists() {
+            let _ = fs::copy(
+                &self.path,
+                self.path.with_file_name("collection.backup.txt"),
+            );
+        }
+        let mut text = String::from(header);
+        for (name, n) in &counts {
+            text.push_str(&format!("{} {}\n", n, name));
+        }
+        fs::write(&self.path, text)
+            .map_err(|e| format!("could not write {}: {}", self.path.display(), e))?;
+        self.counts = counts;
+        self.reindex();
+        Ok(())
     }
 
     /// Adjusts a count (negative removes) and rewrites the file, keeping comment lines.

@@ -13,11 +13,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Marvel Super Heroes release date - the start of 17Lands' data window.
-const SET_RELEASE: &str = "2026-06-26";
+/// Release dates of the league sets - the start of 17Lands' data window for each.
+const SET_RELEASES: [(&str, &str); 4] = [
+    ("MSH", "2026-06-26"),
+    ("HOB", "2026-08-14"),
+    ("FRA", "2026-10-02"),
+    ("FDN", "2024-11-15"),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Rating {
+    /// Set code the rating is from (cards are compared with their own set's average).
+    #[serde(default)]
+    pub set: String,
     /// Win rate of games where the card was drawn or in the opening hand (0-1).
     pub gih_wr: Option<f32>,
     /// Games behind `gih_wr`.
@@ -157,7 +165,7 @@ fn num(v: &serde_json::Value) -> Option<f32> {
 }
 
 /// Reads 17Lands' card_ratings JSON (a list of cards with `ever_drawn_win_rate` etc.).
-pub fn parse_17lands(json: &str) -> Result<BTreeMap<String, Rating>, String> {
+pub fn parse_17lands(json: &str, set: &str) -> Result<BTreeMap<String, Rating>, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = v
         .as_array()
@@ -170,6 +178,7 @@ pub fn parse_17lands(json: &str) -> Result<BTreeMap<String, Rating>, String> {
         // Double-faced cards are listed as "Front // Back"; the app uses the front name.
         let name = name.split(" // ").next().unwrap_or(name).to_string();
         let r = Rating {
+            set: set.to_string(),
             gih_wr: num(&card["ever_drawn_win_rate"]),
             games: card["ever_drawn_game_count"].as_u64().unwrap_or(0) as u32,
             alsa: num(&card["avg_seen"]),
@@ -183,16 +192,39 @@ pub fn parse_17lands(json: &str) -> Result<BTreeMap<String, Rating>, String> {
     Ok(out)
 }
 
-/// Downloads the latest 17Lands ratings for the set and saves them. Returns the card count.
-pub fn fetch_17lands(data_dir: &Path) -> Result<usize, String> {
-    let url = std::env::var("MSH_17LANDS_URL").unwrap_or_else(|_| {
-        format!(
-            "https://www.17lands.com/card_ratings/data?expansion=MSH&format=PremierDraft&start_date={}&end_date={}",
-            SET_RELEASE,
-            today()
-        )
-    });
-    let cards = parse_17lands(&get_text(&url)?)?;
+/// Downloads the latest 17Lands ratings for each set code and saves them together.
+/// Returns the number of cards rated; sets without data are skipped.
+pub fn fetch_17lands(data_dir: &Path, sets: &[String]) -> Result<usize, String> {
+    let mut cards = BTreeMap::new();
+    let mut errors = Vec::new();
+    for set in sets {
+        let start = SET_RELEASES
+            .iter()
+            .find(|(c, _)| c == set)
+            .map(|(_, d)| d.to_string())
+            .unwrap_or_else(|| "2026-01-01".into());
+        let url = std::env::var("MSH_17LANDS_URL").unwrap_or_else(|_| {
+            format!(
+                "https://www.17lands.com/card_ratings/data?expansion={}&format=PremierDraft&start_date={}&end_date={}",
+                set,
+                start,
+                today()
+            )
+        });
+        match get_text(&url).and_then(|t| parse_17lands(&t, set)) {
+            // Earlier sets win for reprints (the league's starter set comes first).
+            Ok(r) => {
+                for (k, v) in r {
+                    cards.entry(k).or_insert(v);
+                }
+            }
+            Err(e) => errors.push(format!("{}: {}", set, e)),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    if cards.is_empty() {
+        return Err(errors.join("; "));
+    }
     let n = cards.len();
     let file = RatingsFile {
         fetched: today(),
@@ -309,29 +341,40 @@ pub fn fetch_playgroup(data_dir: &Path, names: &[String]) -> Result<usize, Strin
         .and_then(|t| serde_json::from_str::<CommanderStatsFile>(&t).ok())
         .unwrap_or_default();
     let mut found = 0;
+    let mut tried = 0;
     let mut working: Option<String> = None; // URL pattern that worked, reused for the rest
     for name in names {
+        // Be gentle: if nothing works for the first few commanders, stop instead of
+        // trying every pattern for every commander.
+        if working.is_none() && tried >= 3 {
+            break;
+        }
+        tried += 1;
         let s = slug(name);
         let enc = name
             .replace(' ', "%20")
             .replace(',', "%2C")
             .replace('\'', "%27");
         let mut patterns: Vec<String> = Vec::new();
-        if let Some(w) = &working {
-            patterns.push(w.clone());
+        match &working {
+            // Once an address format works, only that one is used (one request per commander).
+            Some(w) => patterns.push(w.clone()),
+            None => {
+                for p in params.iter().take(3) {
+                    patterns.push(format!("{}/commanders?{}={{name}}", api, p));
+                }
+                patterns.push(format!("{}/commanders/{{slug}}", api));
+                patterns.push(format!("{}/commanders/{{slug}}", base));
+            }
         }
-        for p in params.iter().take(6) {
-            patterns.push(format!("{}/commanders?{}={{name}}", api, p));
-        }
-        patterns.push(format!("{}/commanders/{{slug}}", api));
-        patterns.push(format!("{}/commanders/{{slug}}", base));
         if let Some((_, id)) = KNOWN_PAGES.iter().find(|(n, _)| n == name) {
             patterns.push(format!("{}/commanders/{}-{{slug}}", base, id));
         }
         for pat in patterns {
             let url = pat.replace("{name}", &enc).replace("{slug}", &s);
+            // A pause before every request, successful or not.
+            std::thread::sleep(std::time::Duration::from_millis(400));
             let Ok(body) = get_text(&url) else { continue };
-            std::thread::sleep(std::time::Duration::from_millis(250));
             let stats = serde_json::from_str::<serde_json::Value>(&body)
                 .ok()
                 .and_then(|v| find_stats_in_json(&v, name))
@@ -346,7 +389,13 @@ pub fn fetch_playgroup(data_dir: &Path, names: &[String]) -> Result<usize, Strin
                     },
                 );
                 found += 1;
-                working = Some(pat);
+                // A commander-specific page address can't be reused for the others.
+                if !KNOWN_PAGES
+                    .iter()
+                    .any(|(_, id)| pat.contains(&format!("/commanders/{}-", id)))
+                {
+                    working = Some(pat);
+                }
                 break;
             }
         }
@@ -373,7 +422,8 @@ mod tests {
             {"name": "Bruce Banner // The Incredible Hulk", "ever_drawn_win_rate": 0.66, "ever_drawn_game_count": 900, "avg_seen": null, "drawn_improvement_win_rate": null},
             {"name": "Unplayed", "ever_drawn_win_rate": null, "ever_drawn_game_count": 0}
         ]"#;
-        let r = parse_17lands(json).unwrap();
+        let r = parse_17lands(json, "MSH").unwrap();
+        assert_eq!(r["Red Hulk"].set, "MSH");
         assert_eq!(r["Red Hulk"].games, 4210);
         assert!((r["Red Hulk"].gih_wr.unwrap() - 0.583).abs() < 1e-4);
         assert!(r.contains_key("Bruce Banner"));

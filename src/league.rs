@@ -175,7 +175,7 @@ pub const STAPLES: [&str; 9] = [
     "Thought Vessel",
     "Mind Stone",
     "Commander's Sphere",
-    "Felwar Stone",
+    "Fellwar Stone",
     "Exotic Orchard",
     "Path of Ancestry",
 ];
@@ -266,7 +266,11 @@ pub fn rank_pack<'a>(
                     }
                 }
             }
-            if fit == f32::MIN {
+            if probes.is_empty() {
+                // Empty pool: nothing to fit yet, so judge raw strength.
+                fit = power;
+                reasons.push("no commander options yet - judged on raw strength".into());
+            } else if fit == f32::MIN {
                 fit = 0.0;
                 reasons.push(match identity {
                     Some(id) => format!("outside your colours ({})", id),
@@ -508,4 +512,185 @@ mod tests {
         assert_eq!(staple_cost(9), 45);
         assert_eq!((1..=9).map(staple_cost).sum::<u32>(), 225);
     }
+}
+
+/// One line of an imported card list.
+#[derive(Debug, PartialEq)]
+pub struct ImportLine {
+    pub count: u32,
+    pub name: String,
+}
+
+/// Splits a CSV line, honouring quoted fields ("Ka-Zar, of the..." stays one field).
+fn csv_fields(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                cur.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => out.push(std::mem::take(&mut cur)),
+            c => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out.into_iter().map(|f| f.trim().to_string()).collect()
+}
+
+/// Reads a Mana Mixer / ManaBox export: text lines like "1 Red Hulk (MSH) 149",
+/// "2x Web Up", "Web Up", or a CSV with Name and Quantity columns. Repeated cards are summed.
+pub fn parse_import(text: &str) -> Vec<ImportLine> {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty()).peekable();
+    let mut out: Vec<ImportLine> = Vec::new();
+    let mut push = |count: u32, name: String| {
+        let name = name.trim().to_string();
+        if name.is_empty() || count == 0 {
+            return;
+        }
+        match out.iter_mut().find(|l| l.name.eq_ignore_ascii_case(&name)) {
+            Some(l) => l.count += count,
+            None => out.push(ImportLine { count, name }),
+        }
+    };
+    // CSV with a header row?
+    if let Some(first) = lines.peek() {
+        let header: Vec<String> = csv_fields(&first.to_lowercase());
+        let col = |names: &[&str]| header.iter().position(|h| names.contains(&h.as_str()));
+        if let Some(name_col) = col(&["name", "card name", "card"]) {
+            if first.contains(',') {
+                let qty_col = col(&["quantity", "qty", "count", "amount"]);
+                lines.next();
+                for l in lines {
+                    let f = csv_fields(l);
+                    let n = qty_col
+                        .and_then(|q| f.get(q))
+                        .and_then(|q| q.parse().ok())
+                        .unwrap_or(1);
+                    if let Some(name) = f.get(name_col) {
+                        push(n, name.clone());
+                    }
+                }
+                return out;
+            }
+        }
+    }
+    for l in lines {
+        let l = l.trim();
+        if l.starts_with('#') || l.starts_with("//") {
+            continue;
+        }
+        let low = l.to_lowercase();
+        if ["deck", "commander", "sideboard", "maybeboard"].contains(&low.trim_end_matches(':')) {
+            continue;
+        }
+        let Some((n, rest)) = crate::db::parse_count_line(l) else {
+            continue;
+        };
+        // Drop " (MSH) 149", foil markers like "*F*", and trailing set codes.
+        let mut name = rest.as_str();
+        if let Some(i) = name.find(" (") {
+            name = &name[..i];
+        }
+        let name = name.trim_end_matches("*F*").trim_end_matches("*E*").trim();
+        push(n, name.to_string());
+    }
+    out
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    #[test]
+    fn reads_text_and_csv_exports() {
+        let text = "1 Red Hulk (MSH) 149\n2x Web Up\n1 Web Up (MSH) 41 *F*\nKa-Zar of the Savage Land\n\n# comment\n";
+        let r = parse_import(text);
+        assert_eq!(
+            r[0],
+            ImportLine {
+                count: 1,
+                name: "Red Hulk".into()
+            }
+        );
+        assert_eq!(
+            r[1],
+            ImportLine {
+                count: 3,
+                name: "Web Up".into()
+            }
+        );
+        assert_eq!(r[2].name, "Ka-Zar of the Savage Land");
+        let csv = "Name,Set code,Quantity,Foil\n\"Bullseye, Death Dealer\",MSH,2,normal\nRed Hulk,MSH,1,foil\n";
+        let r = parse_import(csv);
+        assert_eq!(
+            r[0],
+            ImportLine {
+                count: 2,
+                name: "Bullseye, Death Dealer".into()
+            }
+        );
+        assert_eq!(r[1].count, 1);
+    }
+}
+
+pub struct ImportResult {
+    pub cards: u32,
+    pub distinct: usize,
+    /// Names the card database doesn't know (kept in the pool so nothing is lost).
+    pub unknown: Vec<String>,
+}
+
+/// Imports a Mana Mixer / ManaBox list into the pool, either adding to it or replacing it
+/// (the old pool is kept as collection.backup.txt).
+pub fn import_pool(
+    text: &str,
+    replace: bool,
+    db: &CardDb,
+    coll: &mut Collection,
+) -> Result<ImportResult, String> {
+    let lines = parse_import(text);
+    if lines.is_empty() {
+        return Err("No cards found in that list.".into());
+    }
+    let mut unknown = Vec::new();
+    let mut resolved: Vec<(u32, String)> = Vec::new();
+    for l in &lines {
+        let name = match db.lookup(&l.name) {
+            crate::db::Lookup::Found(c) => c.name.clone(),
+            _ => {
+                unknown.push(l.name.clone());
+                l.name.clone()
+            }
+        };
+        match resolved.iter_mut().find(|(_, n)| *n == name) {
+            Some(r) => r.0 += l.count,
+            None => resolved.push((l.count, name)),
+        }
+    }
+    let cards: u32 = resolved.iter().map(|(n, _)| n).sum();
+    if replace {
+        let counts = resolved
+            .iter()
+            .map(|(n, name)| (name.clone(), *n))
+            .collect();
+        let header = format!(
+            "# My league pool - one \"count name\" per line.\n# Imported from Mana Mixer on {}.\n\n",
+            crate::ratings::today()
+        );
+        coll.replace_all(counts, &header)?;
+    } else {
+        for (n, name) in &resolved {
+            coll.adjust(name, *n as i64)?;
+        }
+    }
+    Ok(ImportResult {
+        cards,
+        distinct: resolved.len(),
+        unknown,
+    })
 }

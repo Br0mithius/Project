@@ -40,6 +40,16 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "",
         "Download 17Lands card ratings and Playgroup.gg commander win rates",
     ),
+    (
+        "import",
+        "<file> [replace]",
+        "Import a Mana Mixer / ManaBox list into your pool (adds; `replace` swaps the whole pool)",
+    ),
+    (
+        "update-cards",
+        "",
+        "Add new cards from every league set (incl. Nauctis once released) via Scryfall",
+    ),
     ("commander", "<card>", "Set the deck's commander"),
     (
         "add",
@@ -263,6 +273,8 @@ impl App {
             "commanders" => self.commanders(),
             "why" => self.why(rest),
             "ratings" => self.ratings(),
+            "update-cards" => self.update_cards(),
+            "import" => self.import(rest),
             "commander" | "cmd" => self.set_commander(rest),
             "add" | "+" => self.add(rest),
             "rm" | "remove" | "-" => self.remove(rest),
@@ -722,9 +734,79 @@ impl App {
         }
     }
 
+    fn import(&mut self, arg: &str) {
+        let arg = arg.trim();
+        let (path, replace) = match arg.strip_suffix(" replace") {
+            Some(p) => (p.trim(), true),
+            None => (arg, false),
+        };
+        if path.is_empty() {
+            println!(
+                "Usage: import <file> [replace]   (a Mana Mixer / ManaBox text or CSV export)"
+            );
+            return;
+        }
+        let text = match fs::read_to_string(path.trim_matches('"')) {
+            Ok(t) => t,
+            Err(e) => {
+                println!("Couldn't read {}: {}", path, e);
+                return;
+            }
+        };
+        match league::import_pool(&text, replace, &self.db, &mut self.coll) {
+            Ok(r) => {
+                println!(
+                    "{} {} cards ({} different){}.",
+                    if replace {
+                        "Replaced your pool with"
+                    } else {
+                        "Added"
+                    },
+                    r.cards,
+                    r.distinct,
+                    if replace {
+                        "; the old pool is saved as data/collection.backup.txt"
+                    } else {
+                        ""
+                    }
+                );
+                if !r.unknown.is_empty() {
+                    println!(
+                        "{} {}",
+                        self.style.warn("Not in the card database (kept, but check spelling or run `update-cards`):"),
+                        r.unknown.join(", ")
+                    );
+                }
+            }
+            Err(e) => println!("{}", e),
+        }
+    }
+
+    fn update_cards(&mut self) {
+        println!("Checking Scryfall for every league set...");
+        match crate::setdata::update_cards(&self.data_dir) {
+            Ok((added, checked, missing)) => {
+                println!(
+                    "  Checked {}; {} new cards added.",
+                    checked.join(", "),
+                    added
+                );
+                if !missing.is_empty() {
+                    println!("  Not released yet: {}", missing.join(", "));
+                }
+                if let Ok(mut db) = CardDb::load(&self.data_dir.join("cards.json")) {
+                    db.attach_ratings(&self.data_dir);
+                    self.db = db;
+                    self.names_changed = true;
+                }
+            }
+            Err(e) => println!("  {}", e),
+        }
+    }
+
     fn ratings(&mut self) {
         println!("Downloading 17Lands card ratings...");
-        match crate::ratings::fetch_17lands(&self.data_dir) {
+        match crate::ratings::fetch_17lands(&self.data_dir, &self.db.rated_sets()) {
             Ok(n) => println!("  {} cards rated.", n),
             Err(e) => println!("  Couldn't download 17Lands data: {}", e),
         }

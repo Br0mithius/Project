@@ -25,6 +25,9 @@ pub fn data_dir(args: &[String]) -> PathBuf {
     if let Some(d) = &beside_exe {
         if d.join("cards.json").exists() {
             refresh_card_database(d);
+            if !d.join("collection.txt").exists() {
+                let _ = std::fs::write(d.join("collection.txt"), DEFAULT_COLLECTION);
+            }
             return d.clone();
         }
     }

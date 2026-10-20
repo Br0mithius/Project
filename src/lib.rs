@@ -11,4 +11,5 @@ pub mod league;
 pub mod paths;
 pub mod ranking;
 pub mod ratings;
+pub mod setdata;
 pub mod ui;
