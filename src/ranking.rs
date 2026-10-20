@@ -15,8 +15,8 @@
 //! * **Playtest**    win rate in simulated 4-player games against decks built from
 //!   simulated league pools (`playtest`)
 //! * **EDHREC**      how much of the deck is what EDHREC players run with this commander
-//!   (inclusion and synergy on its EDHREC page) and how popular the commander is there.
-//!   Options without an EDHREC page sit at the middle.
+//!   (inclusion and synergy on its EDHREC page, trusted more the more decks it's built
+//!   on). Options without a page (or one with under 20 decks) sit at the middle.
 //!
 //! Parts come in different units, so before weighting each one is put on the same scale:
 //! how far above or below your typical option it is (median, scaled by the median absolute
@@ -49,23 +49,53 @@ pub struct Weights {
 /// Number of ranking parts.
 pub const PARTS: usize = 8;
 
+/// Default weights, set from `examples/weight_audit` on a real league pool (64 options):
+/// how relevant each part is to winning league games, how reliable it is, and how much of
+/// it other parts already measure.
 impl Default for Weights {
     fn default() -> Self {
         Weights {
+            // The deck's card quality: the broadest, most data-backed measure.
             cards: 1.0,
-            curve: 1.0,
-            creatures: 1.0,
-            interaction: 1.0,
+            // Curve and Interaction largely follow Cards (rank correlation 0.85 and 0.79:
+            // a deep pool in those colours fills both), so they count for less on top.
+            curve: 0.5,
+            // Mostly a penalty for too few creatures (8 distinct values in 64 options).
+            creatures: 0.5,
+            interaction: 0.6,
+            // Independent of the others (correlations near 0) and caught nowhere else:
+            // three-colour decks have better cards but stumble on mana.
             mana: 1.0,
-            commander: 1.0,
-            playtest: 1.0,
-            // Popularity among 100-card decks is a hint, not proof, for league pools.
-            edhrec: 0.5,
+            // Independent information, but partly heuristics and small-sample data.
+            commander: 0.8,
+            // The only part that plays real 4-player games against league-like decks;
+            // it already reflects cards, curve and mana, so it gets the most weight.
+            playtest: 1.25,
+            // Real decks, but 100-card constructed with every card available - a hint
+            // for league pools, and thin for new sets.
+            edhrec: 0.4,
         }
     }
 }
 
 impl Weights {
+    /// Settings saved before the weights were rebalanced hold the old all-1.0 defaults;
+    /// those (and only those - not weights someone chose) move to the new defaults.
+    pub fn replace_old_defaults(&mut self) {
+        let old = [
+            self.cards,
+            self.curve,
+            self.creatures,
+            self.interaction,
+            self.mana,
+            self.commander,
+            self.playtest,
+        ];
+        if old.iter().all(|w| (w - 1.0).abs() < 1e-6) {
+            *self = Weights::default();
+        }
+    }
+
     pub fn values(&self) -> [f32; PARTS] {
         [
             self.cards,
@@ -96,7 +126,8 @@ pub struct Parts {
 
 /// The smallest difference in each part (in its own units) that's worth caring about.
 /// Used as the minimum spread when normalising, so near-identical options stay close.
-const MIN_SPREAD: [f32; PARTS] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.04, 0.2];
+/// The playtest's is about its measured noise (two runs of the same deck differ by ~0.03).
+const MIN_SPREAD: [f32; PARTS] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.03, 0.2];
 
 impl Parts {
     pub const LABELS: [&'static str; PARTS] = [
@@ -179,8 +210,10 @@ pub fn commander_power(
     if let Some(s) = db.commander_stat(&cmd.name) {
         // Playgroup.gg: 25% is average in 4-player pods. Shrunk toward average when the
         // sample is small, and capped - it's 100-card decks, not league pools.
-        let trust = s.games as f32 / (s.games as f32 + 100.0);
-        let pts = ((s.win_rate - 0.25) * trust * 8.0).clamp(-0.8, 1.2);
+        // Half trust at 300 games: 151 games still leave about +-4 points of doubt on a
+        // win rate, and these are 100-card decks, not league pools.
+        let trust = s.games as f32 / (s.games as f32 + 300.0);
+        let pts = ((s.win_rate - 0.25) * trust * 6.0).clamp(-0.6, 0.6);
         score += pts;
         why.push(format!(
             "{:.0}% win rate as a commander in {} Playgroup games ({:+.1})",
@@ -306,9 +339,12 @@ pub fn commander_power(
     (score, why)
 }
 
+/// Commander pages built on fewer decks than this are left out of the EDHREC part.
+const MIN_PAGE_DECKS: u32 = 20;
+
 /// How closely the deck matches what EDHREC players run with its commander(s): average
-/// inclusion and synergy of its spells on the commander's page, plus how popular the
-/// commander is there. NaN when no commander has a saved page.
+/// inclusion and synergy of its spells on the commander's page, scaled by how many decks the
+/// page is built on. NaN when there's no usable page.
 pub fn edhrec_fit(deck: &Deck, db: &CardDb) -> (f32, Option<String>) {
     let pages: Vec<(&String, &crate::edhrec::CommanderPage)> = deck
         .commanders()
@@ -339,7 +375,22 @@ pub fn edhrec_fit(deck: &Deck, db: &CardDb) -> (f32, Option<String>) {
     }
     let per = copies.max(1) as f32;
     let decks = pages.iter().map(|(_, p)| p.decks).max().unwrap_or(0);
-    let value = 4.0 * inclusion / per + 2.0 * synergy / per + 0.3 * ((decks + 1) as f32).log10();
+    if decks < MIN_PAGE_DECKS {
+        return (
+            f32::NAN,
+            Some(format!(
+                "EDHREC page has only {} decks - too few to judge (EDHREC part set to the middle)",
+                decks
+            )),
+        );
+    }
+    // How popular the commander is on EDHREC isn't used: it tracks fandom for the
+    // character more than strength in a league pool. Its deck count only sets the trust.
+    let trust = pages
+        .iter()
+        .map(|(_, p)| crate::edhrec::page_trust(p))
+        .fold(0.0, f32::max);
+    let value = trust * (4.0 * inclusion / per + 2.0 * synergy / per);
     let note = format!(
         "EDHREC: {} of {} spells are on {}'s page (average inclusion {:.0}%, synergy {:+.0}%); {} decks on EDHREC",
         listed,
@@ -373,7 +424,11 @@ fn parts_for(
     let scored = weakest(deck, db, rules);
     let (sum, n) = scored.iter().fold((0.0, 0u32), |acc, s| {
         let copies = deck.count_of(&s.card.name);
-        (acc.0 + s.score * copies as f32, acc.1 + copies)
+        // EDHREC pick bonuses help choose the cards, but are left out here: the EDHREC
+        // part already measures them.
+        let pick = crate::edhrec::pick_bonus(&db.edhrec, &deck.commanders(), &s.card.name)
+            .map_or(0.0, |p| p.0);
+        (acc.0 + (s.score - pick) * copies as f32, acc.1 + copies)
     });
     let mut cards = if n > 0 { sum / n as f32 } else { 0.0 };
     if shortfall > 0 {
@@ -449,7 +504,15 @@ impl TestBed {
     /// Opponents: one deck per other league player, from simulated pools of their packs.
     pub fn new(db: &CardDb, rules: &Rules) -> TestBed {
         TestBed {
-            gauntlet: crate::playtest::gauntlet(db, rules, 2026),
+            // Opponents from two independent sets of simulated pools, so the result doesn't
+            // hinge on one lucky or unlucky draw of the other players' packs.
+            gauntlet: [
+                crate::playtest::gauntlet(db, rules, 2026),
+                crate::playtest::gauntlet(db, rules, 4242),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             games: 1000,
         }
     }
@@ -767,7 +830,10 @@ mod tests {
         };
         // A is better on cards, B on curve.
         let mut evals = vec![mk(3.0, -1.0), mk(1.0, 1.0)];
-        let mut w = Weights::default();
+        let mut w = Weights {
+            curve: 1.0,
+            ..Weights::default()
+        };
         finalize(&mut evals, &w);
         assert!((evals[0].total - evals[1].total).abs() < 1e-3);
         w.curve = 3.0;

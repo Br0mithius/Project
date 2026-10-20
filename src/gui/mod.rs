@@ -257,10 +257,11 @@ impl GuiApp {
                 };
             }
         });
-        let settings: Settings = std::fs::read_to_string(settings_path(&data_dir))
+        let mut settings: Settings = std::fs::read_to_string(settings_path(&data_dir))
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
+        settings.weights.replace_old_defaults();
         let mut error = None;
         let mut db = CardDb::load(&data_dir.join("cards.json")).unwrap_or_else(|e| {
             error = Some(e);

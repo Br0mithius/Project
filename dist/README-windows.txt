@@ -44,9 +44,11 @@ The session picker at the top sets the rules (60 cards, singleton from Session 6
 75 cards from Session 10). Export copies a deck list for Moxfield/Archidekt or Mana Mixer.
 
 ONLINE DATA (downloaded once, then only when you ask)
-  Card ratings from 17Lands and commander win rates from Playgroup.gg are downloaded
-  the first time the app starts and saved in the data folder. They are only downloaded
-  again when you press Settings > "Update ratings now". New league cards (for example
+  Card ratings from 17Lands, commander win rates from Playgroup.gg, EDHREC ranks and
+  commander pages (what real players run with each of your commanders) and Scryfall
+  Tagger tags (what each card is good at) are downloaded the first time the app starts
+  and saved in the data folder. They are only downloaded again when you press
+  Settings > "Update ratings now". New league cards (for example
   Nauctis: The Sunken Realms when it comes out) are added with Settings > "Update card
   database". Sets covered: Marvel Super Heroes, The Hobbit, Reality Fracture,
   Foundations, plus the league staples and Shop cards.
@@ -54,7 +56,8 @@ ONLINE DATA (downloaded once, then only when you ask)
 YOUR FILES (keep these when you update the program)
   data\collection.txt   your league pool ("count name" per line).
   data\cards.json       card database (every league set).
-  data\ratings_17lands.json, data\commander_stats.json   saved ranking data.
+  data\ratings_17lands.json, data\commander_stats.json,
+  data\edhrec.json, data\scryfall_tags.json             saved ranking data.
   images\               card images (downloaded once, reused forever).
   decks\                saved decks (plain text).
 

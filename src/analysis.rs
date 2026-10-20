@@ -362,7 +362,13 @@ const RATING_TRUST_GAMES: f32 = 500.0;
 /// (blended with a rarity-based guess when the sample is small), otherwise rarity alone.
 /// Returns (points, how much 17Lands data counted 0-1, explanation).
 pub fn card_power(card: &Card, db: &CardDb) -> (f32, f32, Option<String>) {
-    let prior = card.rarity_rank() as f32 * 0.6;
+    // Without win-rate data: an average card (1.5, the same centre the data uses), nudged by
+    // rarity. Rares and mythics win only a few points more often than commons in 17Lands
+    // data, so each rarity step is worth about one percentage point (0.25).
+    let prior = match card.rarity_rank() {
+        0 => 1.5, // special printings (league staples)
+        r => 1.0 + 0.25 * r as f32,
+    };
     let Some(r) = db.rating(&card.name) else {
         return (prior, 0.0, None);
     };
@@ -533,21 +539,10 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     score -= pen;
     why.append(&mut pen_why);
     // EDHREC players' picks for this commander (or its partner): what real decks run with it.
-    let best_pick = deck
-        .commanders()
-        .iter()
-        .filter_map(|c| db.edhrec.pick(c, &card.name).map(|p| (c.to_string(), p)))
-        .max_by(|a, b| {
-            crate::edhrec::pick_points(a.1)
-                .partial_cmp(&crate::edhrec::pick_points(b.1))
-                .unwrap()
-        });
-    if let Some((c, p)) = best_pick {
-        let pts = crate::edhrec::pick_points(p);
-        if pts > 0.0 {
-            score += pts;
-            why.push(crate::edhrec::describe_pick(&c, p));
-        }
+    if let Some((pts, note)) = crate::edhrec::pick_bonus(&db.edhrec, &deck.commanders(), &card.name)
+    {
+        score += pts;
+        why.push(note);
     }
     let cmd = deck.commander.as_ref().and_then(|c| db.get(c));
     if let Some(cmd) = cmd {
@@ -1186,12 +1181,6 @@ pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
             }
         }
     }
-    for tribe in ["Hero", "Villain"] {
-        if cmd.subtypes().iter().any(|t| t == tribe) && card.subtypes().iter().any(|t| t == tribe) {
-            score += 0.3;
-            why.push(format!("fellow {}", tribe));
-        }
-    }
     // Stop one card from looking amazing just because it ticks many boxes.
     (score.min(4.0), why)
 }
@@ -1656,7 +1645,9 @@ pub struct SimResult {
 
 pub fn simulate(deck: &Deck, db: &CardDb, trials: u32) -> SimResult {
     let mut lib = library(deck, db);
-    let mut rng = Rng::seeded();
+    // A fixed seed: every deck is dealt the same shuffles, so results don't change from
+    // run to run and decks are compared on equal luck.
+    let mut rng = Rng::new(0x5EED_CAFE);
     let mut hist = [0u32; 8];
     let mut drops = [0u32; 6];
     let mut keep = 0;
@@ -1818,7 +1809,7 @@ mod power_tests {
         db.gih_mean = 0.56;
         let (prior, w0, _) = card_power(&card, &db);
         assert_eq!(w0, 0.0);
-        assert!((prior - 0.6).abs() < 1e-4);
+        assert!((prior - 1.25).abs() < 1e-4);
         db.ratings.insert(
             "test common".into(),
             Rating {

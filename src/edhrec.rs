@@ -54,8 +54,9 @@ pub struct EdhrecFile {
 #[derive(Debug, Clone, Default)]
 pub struct Edhrec {
     pub fetched: String,
-    /// Normalised card name -> (rank, where it sits in its set: 1 = most played, 0 = least).
-    ranks: HashMap<String, (u32, f32)>,
+    /// Normalised card name -> (rank, where it sits in its set: 1 = most played, 0 = least,
+    /// how far to trust that: new sets haven't been in many decks yet).
+    ranks: HashMap<String, (u32, f32, f32)>,
     /// Normalised commander name -> page with normalised card names.
     pages: HashMap<String, CommanderPage>,
 }
@@ -81,7 +82,8 @@ impl Edhrec {
             by_set.entry(set).or_default().push((key, *rank));
         }
         let mut ranks = HashMap::new();
-        for (_, mut list) in by_set {
+        for (set, mut list) in by_set {
+            let trust = set_trust(set);
             list.sort_by_key(|(_, r)| *r);
             let n = list.len();
             for (i, (key, rank)) in list.into_iter().enumerate() {
@@ -90,7 +92,7 @@ impl Edhrec {
                 } else {
                     0.5
                 };
-                ranks.insert(key, (rank, pct));
+                ranks.insert(key, (rank, pct, trust));
             }
         }
         let pages = file
@@ -126,7 +128,7 @@ impl Edhrec {
 
     /// EDHREC rank and where it sits in its set (1 = the set's most played card).
     pub fn rank(&self, card: &str) -> Option<(u32, f32)> {
-        self.ranks.get(&normalize(card)).copied()
+        self.ranks.get(&normalize(card)).map(|&(r, p, _)| (r, p))
     }
 
     pub fn page(&self, commander: &str) -> Option<&CommanderPage> {
@@ -139,11 +141,32 @@ impl Edhrec {
     }
 }
 
+/// How far to trust EDHREC's numbers for a set: a set out for a few weeks has only been in
+/// a few decks, so its ranks and inclusion rates still move a lot (half trust at 90 days).
+fn set_trust(set: &str) -> f32 {
+    match crate::ratings::set_release(set) {
+        Some(date) => {
+            let days = crate::ratings::age_days(date).clamp(0, 3650) as f32;
+            days / (days + 90.0)
+        }
+        // Staples and older printings: years of data.
+        None => 0.9,
+    }
+}
+
+/// Decks behind a commander page needed for half trust in its inclusion rates.
+const PAGE_TRUST_DECKS: f32 = 200.0;
+
+/// How far to trust a commander page's numbers (0..1) from how many decks it's built on.
+pub fn page_trust(page: &CommanderPage) -> f32 {
+    page.decks as f32 / (page.decks as f32 + PAGE_TRUST_DECKS)
+}
+
 /// Points for how much Commander players play a card overall, compared with its set
-/// (about -0.4 .. +0.4), with an explanation.
+/// (at most -0.4 .. +0.4, less for new sets), with an explanation.
 pub fn rank_points(e: &Edhrec, card: &str) -> Option<(f32, String)> {
-    let (rank, pct) = e.rank(card)?;
-    let pts = (pct - 0.5) * 0.8;
+    let &(rank, pct, trust) = e.ranks.get(&normalize(card))?;
+    let pts = (pct - 0.5) * 0.8 * trust;
     Some((
         pts,
         format!(
@@ -157,6 +180,20 @@ pub fn rank_points(e: &Edhrec, card: &str) -> Option<(f32, String)> {
 /// Points for a card that EDHREC players run with this commander (0 .. 1.5).
 pub fn pick_points(p: Pick) -> f32 {
     (p.synergy.clamp(-0.3, 0.8) * 2.0 + p.inclusion * 1.5).clamp(0.0, 1.5)
+}
+
+/// The card's best EDHREC pick bonus across `commanders`, scaled by how many decks each
+/// page is built on, with an explanation.
+pub fn pick_bonus(e: &Edhrec, commanders: &[&String], card: &str) -> Option<(f32, String)> {
+    commanders
+        .iter()
+        .filter_map(|c| {
+            let page = e.page(c)?;
+            let p = *page.picks.get(&normalize(card))?;
+            let pts = pick_points(p) * page_trust(page);
+            (pts > 0.0).then(|| (pts, describe_pick(c, p)))
+        })
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
 }
 
 pub fn describe_pick(commander: &str, p: Pick) -> String {

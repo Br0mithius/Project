@@ -23,7 +23,7 @@ See `dist/README-windows.txt` for a tour. To rebuild the zip from Linux: `tools/
 | Tab | What it does |
 | --- | --- |
 | Deck Builder | Pool browser (filters by colour, type, role, mana value), deck as card stacks or a list, card inspector, auto-build, basic-land controls, suggestions |
-| Commanders | Every legendary creature you own, ranked 0-100 by the deck your pool gives it (seven weighted parts you can adjust, including simulated 4-player games), with a preview of the ranking once singleton starts; one-click build, Prismatic Piper option |
+| Commanders | Every legendary creature you own, ranked 0-100 by the deck your pool gives it (eight weighted parts you can adjust, including simulated 4-player games and EDHREC), with a preview of the ranking once singleton starts; one-click build, Prismatic Piper option |
 | Draft Helper | Type a pack's cards and get them ranked for your deck - or, with no commander yet, for your top-ranked commanders' decks (fit, upgrade over the weakest card, VP value, raw strength); "I took it" adds to your pool |
 | Trades & VP | Trade-in plan for the 10 VP minimum (with the rarity floor), VP prices, Skill Tree costs, Shop |
 | Upgrades | Cards that would improve your deck: what to claim from the Public Pool now (VP cost, rarity floor, a trade-in plan to pay for it) and what could come in the packs still to be handed out, with the odds that you, your draft table, or anyone in the league opens it |
@@ -43,10 +43,12 @@ smooth. If an image can't be fetched, the app draws a stand-in card face.
 | --- | --- | --- |
 | [17Lands](https://www.17lands.com) | Games-in-hand win rate per card, a variable in card strength | Once, on first start; then only via Settings > "Update ratings now" |
 | [Playgroup.gg](https://playgroup.gg) | Commander win rates in recorded multiplayer games | Same as 17Lands (one gentle request at a time, stops early if the site doesn't answer) |
+| [EDHREC](https://edhrec.com) | Each card's EDHREC rank (read from Scryfall, which publishes it, 75 cards per request) and, for each commander you own, the cards EDHREC players run with it | Only via "Update ratings now" (one request per commander, a second apart; commanders without a page aren't asked again until the next update) |
+| [Scryfall Tagger](https://scryfall.com/docs/tagger-tags) | Community tags for what cards do (removal, ramp, sacrifice outlet...) | Only via "Update ratings now": the tag list page, then one search per useful tag, limited to the league sets |
 | [Scryfall](https://scryfall.com) | Card images; new league cards | Each image once, then read from `images/`; cards only via "Update card database" |
 
-Everything downloaded is saved in `data/` (`ratings_17lands.json`, `commander_stats.json`), so the app never asks the
-sites for the same data twice unless you press a button.
+Everything downloaded is saved in `data/` (`ratings_17lands.json`, `commander_stats.json`, `edhrec.json`,
+`scryfall_tags.json`), so the app never asks the sites for the same data twice unless you press a button.
 
 ## Running from source
 
@@ -57,7 +59,8 @@ cargo run --release --bin msh-cli   # the same tools as a typed command line
 
 Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
 `trade 10 rare`, `export mixer`, `import pool.txt`, `ratings`, `update-cards`, `why red hulk`, `upgrades`,
-`publicpool pool.txt`, `roster`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts.
+`publicpool pool.txt`, `roster`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts;
+`cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool.
 
 ## Files
 
@@ -66,6 +69,7 @@ Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red
 | `data/cards.json` | Card database (cost, type, rules text, P/T, rarity, colour identity). |
 | `data/collection.txt` | The cards you own, one `count name` per line (empty until you import). Edit by hand or with `own` / `unown`. |
 | `data/ratings_17lands.json`, `data/commander_stats.json` | Saved 17Lands and Playgroup.gg data. |
+| `data/edhrec.json`, `data/scryfall_tags.json` | Saved EDHREC ranks and commander pages, and Scryfall Tagger tags. |
 | `data/public_pool.txt` | The league's Public Pool, pasted from Mana Mixer (Upgrades tab or `publicpool <file>`). |
 | `data/rules.json` | Format rules, created when you change one with `rules <key> <value>`. |
 | `decks/*.txt` | Saved decks (`decks/_current.txt` is the auto-saved working deck). |
@@ -116,9 +120,18 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   `--removal`, `--roles`, `--synergy "Commander"` for details).
 
 * **Card strength** blends a rarity guess with the card's 17Lands win rate compared with its set's average; the more
-  games 17Lands has recorded, the more the real data counts. Roles from the card reading (graded removal, card draw,
-  board wipes, "each opponent" effects that are better with 4 players, repeatable engines...), creature stats for the
-  cost, curve fit and synergy with your commander are added on top.
+  games 17Lands has recorded, the more the real data counts (half at 500 games). Without data a card counts as
+  average, nudged a little by rarity (mythic +0.5 over common - about 2 points of win rate, roughly what 17Lands
+  shows between rarities). Roles from the card reading (graded removal, card draw, board wipes, "each opponent"
+  effects that are better with 4 players, repeatable engines...), creature stats for the cost, curve fit and synergy
+  with your commander are added on top.
+* **EDHREC** adds two things. A card's EDHREC rank, compared with the rest of its set, moves it up to ±0.4 - less
+  for new sets, which haven't been in many decks yet (half weight 90 days after release). And when its commander has
+  an EDHREC page, cards real players run with that commander get up to +1.5 (from inclusion rate and synergy),
+  trusted more the more decks the page is built on (half at 200 decks). The card inspector shows both.
+* **Scryfall Tagger tags** are a second opinion next to the card reading: a tag adds a role the reading missed
+  (a "removal" tag on a card the reader sees as bounce stays bounce), and tags like "sacrifice-outlet" or "self-mill"
+  count a card as an enabler for a commander that needs one.
 * **Synergy** pairs what a commander rewards with what a card provides, about 25 mechanics read from both cards:
   tokens, +1/+1 counters, deaths and sacrifice, graveyard, instants/sorceries, artifacts, Equipment, Vehicles, Plans,
   landfall, life gain, drawing a second card, discard, attacking, enters-the-battlefield, Storied, planeswalkers/Jace,
@@ -129,18 +142,36 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   small creatures) or spells (instant/sorcery payoffs: 9-14 creatures, more removal and draw). Auto-build, the
   Stats tab's curve targets and the ranking all use that plan.
 * **Commander ranking** auto-builds a full deck for each commander (and each mono-colour commander with The Prismatic
-  Piper in its two best extra colours) and grades it on seven parts - Cards, Curve, Creatures, Interaction, Mana,
-  Commander (17Lands, Playgroup.gg win rate, abilities, cost) and Playtest. Parts are put on one scale (how far above or
-  below your middle option, using the median so one freak option can't distort the rest), the sliders set how much each
-  part counts, and the total runs 0-100 with 50 = your middle option. A commander's ability only counts as much as its
+  Piper in its two best extra colours) and grades it on eight parts - Cards, Curve, Creatures, Interaction, Mana,
+  Commander (17Lands, Playgroup.gg win rate, abilities, cost), Playtest and EDHREC (how much of the deck is what EDHREC
+  players run with that commander; middle when there's no page or one built on under 20 decks). Parts are put on one
+  scale (how far above or below your middle option, using the median so one freak option can't distort the rest), the
+  sliders set how much each part counts, and the total runs 0-100 with 50 = your middle option.
+  The default weights come from measuring each part on a real 64-option pool (`weight_audit`):
+
+  | Part | Weight | Why |
+  | --- | --- | --- |
+  | Cards | 1.0 | Broadest, most data-backed measure |
+  | Curve | 0.5 | Follows Cards closely (rank correlation 0.82) - a deep pool fills the curve too |
+  | Creatures | 0.5 | Mostly a penalty for too few creatures (8 distinct values across 64 options) |
+  | Interaction | 0.6 | Also follows Cards (0.81) |
+  | Mana | 1.0 | Independent of every other part and caught nowhere else; now deterministic |
+  | Commander | 0.8 | Independent, but partly heuristics and small samples |
+  | Playtest | 1.25 | The only part that plays 4-player games against league-like decks (noise ±0.03, reliability 0.92) |
+  | EDHREC | 0.4 | Real decks, but 100-card constructed with every card available, and thin for new sets |
+
+  Playgroup.gg win rates count for less than before (half trust at 300 games, at most ±0.6), and EDHREC's commander
+  popularity isn't used (it tracks fans of the character more than strength in a league pool). Settings still on the
+  old all-equal defaults move to these automatically; weights you changed are kept. A commander's ability only counts as much as its
   deck can feed it: each mechanic it depends on (Equipment, token makers, instants and sorceries, Villains...) is
   counted in its built deck against how many it wants, and abilities that do little without them ("if he's
   equipped", "whenever a token enters") are scaled down - the "Why?" notes say e.g. "needs Equipment: 1 in this deck
   (wants ~6) - ability rarely works". The same check marks other payoff cards in a deck as weak when their enablers
   are missing, and the playtest fires "if equipped" abilities only as often as the deck's Equipment allows. Before Session 6 the same ranking is also run
   under singleton rules as a preview. `why <commander>` in the command line shows the breakdown.
-* **Playtest** plays each deck in 1,000 simplified 4-player games against decks auto-built from simulated league pools
-  (random packs, the same number you have by this point of the season). The simulator understands lands and mana
+* **Playtest** plays each deck in 1,000 simplified 4-player games against decks auto-built from two independent sets of
+  simulated league pools (random packs, the same number you have by this point of the season), so one lucky or unlucky
+  draw of the other players' packs can't swing it. Every deck faces the same opponents and shuffles. The simulator understands lands and mana
   rocks, creature combat and keywords, removal, board wipes, card draw, tokens, drains, life gain, anthems and
   Equipment; it ignores counterspells, tricks and unusual abilities, so treat it as a second opinion.
 * **Upgrades / pack odds** use Play Booster contents: 7 commons, 3 uncommons, a rare or mythic (mythic about 1 in 7),

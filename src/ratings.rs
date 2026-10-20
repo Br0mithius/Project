@@ -65,6 +65,14 @@ pub fn commander_stats_path(data_dir: &Path) -> PathBuf {
     data_dir.join("commander_stats.json")
 }
 
+/// Release date of a league set ("YYYY-MM-DD"), if known.
+pub fn set_release(set: &str) -> Option<&'static str> {
+    SET_RELEASES
+        .iter()
+        .find(|(c, _)| *c == set)
+        .map(|(_, d)| *d)
+}
+
 // ---------------------------------------------------------------- dates
 
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
