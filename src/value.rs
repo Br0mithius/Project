@@ -108,7 +108,7 @@ pub fn effect_value(e: &Effect) -> f32 {
         Effect::Recast => 1.5,
         Effect::Untap(_) => 0.5,
         Effect::GainControl(_) => 4.0,
-        Effect::Copy => 2.0,
+        Effect::Copy => 0.8,
         Effect::Empower(n) => 0.6 * n.value(),
         Effect::Amass(n) => n.value() * 0.9,
         Effect::Goad => 1.0,
@@ -135,16 +135,18 @@ fn times(a: &Ability) -> f32 {
         Some(When::Dies) => 0.6,
         Some(When::Attacks) => 1.5,
         Some(When::CombatDamage) => 1.2,
-        Some(When::EachTurn) => 2.5,
-        Some(When::Event(_)) => 1.0 + 2.0 * a.rate(),
+        Some(When::EachTurn) => 2.2,
+        Some(When::Event(_)) => 1.0 + 1.5 * a.rate(),
+        // `rate` already falls with the ability's mana cost.
         Some(When::Activated(c)) => {
             if c.sacrifice {
                 0.8
             } else {
-                (1.0 + 2.0 * a.rate() - 0.1 * c.mana as f32).max(0.4)
+                1.0 + 1.5 * a.rate()
             }
         }
-        Some(When::PowerUp(_)) => 0.8,
+        // Once only, and its mana has to be found (cheaper the turn it enters).
+        Some(When::PowerUp(c)) => (0.8 * (1.0 - 0.05 * c.mana as f32)).max(0.4),
         Some(When::Loyalty(_)) => 1.2,
         Some(When::Chapter(_)) => 1.0,
         Some(When::Reflexive) => 0.5,
@@ -162,8 +164,33 @@ fn times(a: &Ability) -> f32 {
 
 /// Points for one ability (body scale).
 pub fn ability_value(a: &Ability) -> f32 {
-    // Mana abilities on creatures: ramp.
-    let vals: Vec<f32> = a.effects.iter().map(effect_value).collect();
+    // Mana abilities ({T}: Add ...): ramp, worth about a mana rock however often it's used.
+    if matches!(a.when.first(), Some(When::Activated(c)) if c.tap && !c.sacrifice)
+        && !a.effects.is_empty()
+        && a.effects.iter().all(|e| matches!(e, Effect::AddMana(_)))
+    {
+        let n: f32 = a
+            .effects
+            .iter()
+            .map(|e| match e {
+                Effect::AddMana(n) => n.value(),
+                _ => 0.0,
+            })
+            .sum();
+        return 1.5 + 0.8 * (n - 1.0).max(0.0);
+    }
+    // Bringing back only itself ("return this card from your graveyard") is resilience,
+    // not card advantage.
+    let only_itself = a.text.contains("this card from your graveyard")
+        || a.text.contains("~ from your graveyard");
+    let vals: Vec<f32> = a
+        .effects
+        .iter()
+        .map(|e| match e {
+            Effect::Regrowth | Effect::Reanimate | Effect::Recast if only_itself => 0.5,
+            _ => effect_value(e),
+        })
+        .collect();
     let v = if a.modal {
         vals.iter().copied().fold(0.0, f32::max)
     } else {
