@@ -677,3 +677,49 @@ fn mirror_matches_are_even_and_better_decks_win_more() {
         weak_wr
     );
 }
+
+#[test]
+fn instant_speed_plays_at_end_of_turn_and_in_combat() {
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        card(
+            "Ambusher",
+            "{1}{G}",
+            "Creature — Cat",
+            "Flash",
+            Some(("3", "2")),
+        ),
+        card(
+            "Bolt",
+            "{G}",
+            "Instant",
+            "Bolt deals 4 damage to target creature an opponent controls.",
+            None,
+        ),
+        card("Giant", "{4}{G}", "Creature — Giant", "", Some(("4", "4"))),
+    ]);
+    // A flash creature is cast at the end of the turn before ours.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 3, 'G');
+    g.players[1].hand.push(1);
+    ai::end_of_turn(&mut g, 1, true);
+    assert!(
+        g.perms
+            .iter()
+            .any(|x| x.ctrl == 1 && x.card == Some((1, 1))),
+        "flash creature cast at end of turn"
+    );
+    // Instant removal on a big attacker.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 1, 'G');
+    g.players[1].hand.push(2);
+    let giant = put(&mut g, 0, 3);
+    let at = vec![Attack {
+        attacker: giant,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    ai::before_blocks(&mut g, 1, &at);
+    assert!(g.idx(giant).is_none(), "removal on the attacker");
+}

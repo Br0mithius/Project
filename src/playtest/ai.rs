@@ -1347,7 +1347,14 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 }
                 return;
             }
-            let v = spell_value(g, p, idx, back, commander);
+            let mut v = spell_value(g, p, idx, back, commander);
+            // Flash creatures and instants are worth more cast at instant speed (end of the
+            // turn before ours, or in combat), so the main phase only uses them if there's
+            // nothing better to do with the mana.
+            let c = &pl.cards[idx as usize];
+            if !back && (c.kw & FLASH != 0 || c.is(T_INSTANT)) {
+                v *= 0.6;
+            }
             out.push((v, cost.total(), Act::Cast(src, opts)));
         };
     for (h, &idx) in pl.hand.iter().enumerate() {
@@ -1883,6 +1890,25 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
 pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
     if !next {
         return;
+    }
+    if g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok() {
+        let pl = &g.players[p];
+        let inst: Vec<String> = pl
+            .hand
+            .iter()
+            .map(|&c| &pl.cards[c as usize])
+            .filter(|c| c.is(T_INSTANT) || c.kw & FLASH != 0)
+            .map(|c| c.name.clone())
+            .collect();
+        let mana = g.mana_available(p);
+        g.note(|| {
+            format!(
+                "   P{} end of turn: {} mana, instant-speed cards: {}",
+                p,
+                mana,
+                inst.join(", ")
+            )
+        });
     }
     for _ in 0..4 {
         // Flash creatures and instants that do something now.
