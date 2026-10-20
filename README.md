@@ -121,8 +121,14 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
 * **Card strength** starts every card as average, nudged a little by rarity (mythic +0.5 over common). 17Lands draft
   win rates were used here before; they come from 2-player 40-card draft games, so they've been dropped (and any
   saved copy is deleted). Roles from the card reading (graded removal, card draw, board wipes, "each opponent"
-  effects that are better with 4 players, repeatable engines...), creature stats for the cost, curve fit and synergy
-  with your commander are added on top.
+  effects that are better with 4 players, repeatable engines...), curve fit and synergy are added on top.
+* **Creatures** are rated by value for their mana cost (`src/value.rs`): body, keywords and abilities on one scale
+  (1 point is about 1 power), compared with what a fair creature of that cost gives. Keywords count for more when the
+  creature can use them (flying on a 4-power creature), and abilities that matter in 4-player games (removal, card
+  draw, repeating engines, effects on every opponent) count for more than ones that don't. Mana abilities count as
+  ramp, and returning only itself from the graveyard as resilience. The card's "why" shows e.g. "156% of fair value
+  for 3 mana (2/3 body, 2 damage to any target)"; `cargo run --release --example creature_values -- data --pool`
+  lists your creatures this way.
 * **EDHREC** adds two things. A card's EDHREC rank, compared with the rest of its set, moves it up to ±0.4 - less
   for new sets, which haven't been in many decks yet (half weight 90 days after release). And when its commander has
   an EDHREC page, cards real players run with that commander get up to +1.5 (from inclusion rate and synergy),
@@ -134,7 +140,9 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   tokens, +1/+1 counters, deaths and sacrifice, graveyard, instants/sorceries, artifacts, Equipment, Vehicles, Plans,
   landfall, life gain, drawing a second card, discard, attacking, enters-the-battlefield, Storied, planeswalkers/Jace,
   Teamwork, noncombat damage, big creatures, mana for expensive abilities, Enrage and Armies - plus the creature types
-  the commander cares about.
+  the commander cares about. The same check runs against the rest of the deck being built: a card scores higher when
+  it feeds payoffs already in the deck, when the deck's cards feed its own payoff, or when other cards in the deck
+  care about its creature type.
 * **Deck plans**: each commander's cost, body and rules text decide what kind of deck it wants - aggro (cheap
   attackers, combat triggers: lower curve, 18-24 creatures), midrange, big mana (expensive payoffs: higher curve, fewer
   small creatures) or spells (instant/sorcery payoffs: 9-14 creatures, more removal and draw). Auto-build, the
@@ -153,25 +161,47 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   | Curve | 0.5 | Follows Cards closely (rank correlation 0.82) - a deep pool fills the curve too |
   | Creatures | 0.5 | Mostly a penalty for too few creatures (8 distinct values across 64 options) |
   | Interaction | 0.6 | Also follows Cards (0.81) |
-  | Mana | 1.0 | Independent of every other part and caught nowhere else; now deterministic |
+  | Mana | 0.6 | Opening-hand checks; the full game simulator pays coloured mana exactly and disagrees with it (-0.62), finding three-colour decks win more than this part says |
   | Commander | 0.8 | Independent, but partly heuristics and small samples |
-  | Playtest | 1.25 | The only part that plays 4-player games against league-like decks (noise ±0.03, reliability 0.92) |
+  | Playtest | 1.5 | The only part that plays full 4-player games against league-like decks (noise ±0.017 at 600 games, reliability 0.97) |
   | EDHREC | 0.4 | Real decks, but 100-card constructed with every card available, and thin for new sets |
 
   Playgroup.gg win rates count for less than before (half trust at 300 games, at most ±0.6), and EDHREC's commander
-  popularity isn't used (it tracks fans of the character more than strength in a league pool). Settings still on the
-  old all-equal defaults move to these automatically; weights you changed are kept. A commander's ability only counts as much as its
+  popularity isn't used (it tracks fans of the character more than strength in a league pool). Settings still on an
+  earlier version's defaults move to these automatically; weights you changed are kept. A commander's ability only counts as much as its
   deck can feed it: each mechanic it depends on (Equipment, token makers, instants and sorceries, Villains...) is
   counted in its built deck against how many it wants, and abilities that do little without them ("if he's
   equipped", "whenever a token enters") are scaled down - the "Why?" notes say e.g. "needs Equipment: 1 in this deck
   (wants ~6) - ability rarely works". The same check marks other payoff cards in a deck as weak when their enablers
-  are missing, and the playtest fires "if equipped" abilities only as often as the deck's Equipment allows. Before Session 6 the same ranking is also run
+  are missing, and in the playtest "if equipped" abilities only work when Equipment is attached. Before Session 6 the same ranking is also run
   under singleton rules as a preview. `why <commander>` in the command line shows the breakdown.
-* **Playtest** plays each deck in 1,000 simplified 4-player games against decks auto-built from two independent sets of
-  simulated league pools (random packs, the same number you have by this point of the season), so one lucky or unlucky
-  draw of the other players' packs can't swing it. Every deck faces the same opponents and shuffles. The simulator understands lands and mana
-  rocks, creature combat and keywords, removal, board wipes, card draw, tokens, drains, life gain, anthems and
-  Equipment; it ignores counterspells, tricks and unusual abilities, so treat it as a second opinion.
+* **Playtest** (`src/playtest/`) plays each deck in 600 full 4-player Commander games against decks auto-built from two
+  independent sets of simulated league pools (random packs, the same number you have by this point of the season), so
+  one lucky or unlucky draw of the other players' packs can't swing it. Every deck faces the same opponents and
+  shuffles.
+  - **The game:** library, hand, graveyard, exile and command zone; colour-exact mana from each land and rock;
+    commander tax and 21 commander damage; 30 life; The Prismatic Piper as a second commander; attackable
+    planeswalkers; Sagas, Plans (and taking over an opponent's turn), Equipment, Auras, Vehicles; hand size 7;
+    London mulligan with a free first mulligan.
+  - **The cards:** every effect the card reader understands is played - 1,888 of the 2,106 effects in the database
+    exactly, 206 approximated (copies, free spells, doublers, unusual counters...) and 12 with no effect in a
+    simplified game (naming a card, redirecting a spell...). Every trigger fires, every keyword works (flash, ward,
+    protection, toxic, cycling, crew, convoke, extort, flashback, kicker...) and the league mechanics work: Power-up,
+    Teamwork, Storied, Recruit, Amass, Empower Jace, prepared, Adventures. Conditions ("if you attacked this turn",
+    "as long as you have an enduring story") are checked in the game; the 44 it can't check are decided by chance.
+    `cargo run --release --example sim_coverage -- data` lists how every effect, trigger, keyword and rule is played.
+  - **The AI** plays each seat like an above-average player: it works out who the biggest threat is (and remembers who
+    attacked it), plans its whole turn's mana, holds up counters and instant-speed answers when that's worth more than
+    tapping out, counters by threat, aims removal at the most dangerous thing on the table, wipes the board when it's
+    behind, attacks as a group after predicting the defenders' blocks (keeping enough back to survive the crack-back,
+    going for lethal when it's there, hitting planeswalkers), blocks for value (kill-and-survive, good trades, double
+    blocks, chump only against lethal, wary of open mana), and uses combat tricks, Fogs, flash blockers and protection
+    in response to removal. It also equips, crews, picks loyalty abilities, cycles dead cards and chooses well for
+    scry, discard, sacrifice and tutors.
+  - **Checks:** an all-basic-lands deck wins under 2%; a deck against copies of itself lands near 25%; a deck with half
+    its spells swapped for lands wins clearly less. One game takes about 2.5 ms; a full ranking with the singleton
+    preview takes under a minute on 4 cores. `sim_bench`, `sim_log` (one game, move by move) and `sim_decks` are in
+    `examples/`.
 * **Upgrades / pack odds** use Play Booster contents: 7 commons, 3 uncommons, a rare or mythic (mythic about 1 in 7),
   plus a wildcard and a foil of any rarity at typical published rates. "Your table" means the card is opened at your
   4-player draft table (so it's in your face-up draft) - you plus 3 of the other 7 players, any seating equally likely;

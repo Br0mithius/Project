@@ -1827,6 +1827,23 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
             }
             continue;
         }
+        // "X. If <condition>, Y instead." - Y replaces X when the condition holds (Tidings of
+        // War: amass 1, or 3 if cast from a graveyard). Read as the plain ability plus a
+        // conditional alternative, so the two aren't added together.
+        let (line, alternative) = split_instead(&line);
+        if let Some(alt) = alternative.and_then(|alt| read_line(&alt, card, is_spell)) {
+            if !alt.effects.is_empty() {
+                if let Some(base) =
+                    read_line(&line, card, is_spell).filter(|a| !a.effects.is_empty())
+                {
+                    out.abilities.push(base);
+                    let mut alt = alt;
+                    alt.conditional = true;
+                    out.abilities.push(alt);
+                    continue;
+                }
+            }
+        }
         match read_line(&line, card, is_spell) {
             Some(a) if !a.effects.is_empty() || ignorable(&a.text) => out.abilities.push(a),
             Some(a) => {
@@ -1846,6 +1863,30 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
     // Teamwork, Storied and friends live in the keyword list; Sagas' "I, II —" lines are
     // chapters (handled in read_line).
     out
+}
+
+/// "X. If <condition>, Y instead." -> ("X.", Some("<same trigger/cost>, if <condition>, Y
+/// instead")). Replacement effects ("if ... would ..., ... instead") are left alone: they
+/// aren't alternatives to an earlier sentence.
+fn split_instead(line: &str) -> (String, Option<String>) {
+    let Some(i) = line.find(". if ") else {
+        return (line.to_string(), None);
+    };
+    let sentence = line[i + 2..].trim().trim_end_matches('.');
+    if !sentence.ends_with("instead") || sentence.contains(" would ") || sentence.contains(". ") {
+        return (line.to_string(), None);
+    }
+    let base = format!("{}.", &line[..i]);
+    let alt =
+        if base.starts_with("when ") || base.starts_with("whenever ") || base.starts_with("at ") {
+            let (trigger, _) = split_trigger(&base);
+            format!("{}, {}", trigger, sentence)
+        } else if let Some((cost, _)) = activated_split(&base) {
+            format!("{}: {}", cost, sentence)
+        } else {
+            sentence.to_string()
+        };
+    (base, Some(alt))
 }
 
 /// Splits a triggered ability into (trigger, rest) at the first comma outside the trigger

@@ -63,14 +63,16 @@ impl Default for Weights {
             // Mostly a penalty for too few creatures (8 distinct values in 64 options).
             creatures: 0.5,
             interaction: 0.6,
-            // Independent of the others (correlations near 0) and caught nowhere else:
-            // three-colour decks have better cards but stumble on mana.
-            mana: 1.0,
+            // Opening-hand checks. The full game simulator pays coloured mana exactly and
+            // still finds three-colour decks win more than this part says (rank
+            // correlation -0.62), so it counts for less than it did.
+            mana: 0.6,
             // Independent information, but partly heuristics and small-sample data.
             commander: 0.8,
-            // The only part that plays real 4-player games against league-like decks;
-            // it already reflects cards, curve and mana, so it gets the most weight.
-            playtest: 1.25,
+            // The only part that plays real 4-player games against league-like decks
+            // (noise 0.013 against a spread of 0.08: reliability 0.97); it already
+            // reflects cards, curve and mana, so it gets the most weight.
+            playtest: 1.5,
             // Real decks, but 100-card constructed with every card available - a hint
             // for league pools, and thin for new sets.
             edhrec: 0.4,
@@ -79,10 +81,10 @@ impl Default for Weights {
 }
 
 impl Weights {
-    /// Settings saved before the weights were rebalanced hold the old all-1.0 defaults;
-    /// those (and only those - not weights someone chose) move to the new defaults.
+    /// Settings saved by earlier versions hold that version's default weights; those (and
+    /// only those - not weights someone chose) move to the current defaults.
     pub fn replace_old_defaults(&mut self) {
-        let old = [
+        let now = [
             self.cards,
             self.curve,
             self.creatures,
@@ -90,8 +92,12 @@ impl Weights {
             self.mana,
             self.commander,
             self.playtest,
+            self.edhrec,
         ];
-        if old.iter().all(|w| (w - 1.0).abs() < 1e-6) {
+        let same = |old: &[f32]| now.iter().zip(old).all(|(a, b)| (a - b).abs() < 1e-4);
+        // All-equal weights (before the audit), then the first audit's defaults.
+        let all_equal = now[..7].iter().all(|w| (w - 1.0).abs() < 1e-6);
+        if all_equal || same(&[1.0, 0.5, 0.5, 0.6, 1.0, 0.8, 1.25, 0.4]) {
             *self = Weights::default();
         }
     }
@@ -126,8 +132,9 @@ pub struct Parts {
 
 /// The smallest difference in each part (in its own units) that's worth caring about.
 /// Used as the minimum spread when normalising, so near-identical options stay close.
-/// The playtest's is about its measured noise (two runs of the same deck differ by ~0.03).
-const MIN_SPREAD: [f32; PARTS] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.03, 0.2];
+/// The playtest's is about its measured noise (600 games: runs of the same deck differ by
+/// about 0.017).
+const MIN_SPREAD: [f32; PARTS] = [0.3, 0.25, 0.3, 0.3, 0.25, 0.4, 0.017, 0.2];
 
 impl Parts {
     pub const LABELS: [&'static str; PARTS] = [
@@ -505,7 +512,9 @@ impl TestBed {
             .into_iter()
             .flatten()
             .collect(),
-            games: 1000,
+            // 600 full games per option: noise ~0.017 against a spread of ~0.08 between
+            // options, and a full ranking in under a minute on 4 cores.
+            games: 600,
         }
     }
 
