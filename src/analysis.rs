@@ -508,6 +508,23 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             ));
         }
     }
+    // The deck plan's removal and card draw targets, like its creature count.
+    let have_removal = st.roles.get(&Role::Removal).copied().unwrap_or(0) as f32;
+    if roles.contains(&Role::Removal) && have_removal < plan.removal {
+        score += 1.0;
+        why.push(format!(
+            "deck needs removal ({:.0}/{:.0})",
+            have_removal, plan.removal
+        ));
+    }
+    let have_draw = st.roles.get(&Role::Draw).copied().unwrap_or(0) as f32;
+    if roles.contains(&Role::Draw) && have_draw < plan.draw {
+        score += 0.75;
+        why.push(format!(
+            "deck needs card draw ({:.0}/{:.0})",
+            have_draw, plan.draw
+        ));
+    }
     let bucket = curve_bucket(card.mana_value());
     let target = plan.curve[bucket];
     if st.curve[bucket] < target {
@@ -1027,7 +1044,12 @@ const MECHANICS: &[Mechanic] = &[
         points: 1.25,
         payoff: |c| {
             let t = c.text_lower();
-            yes(t.contains("planeswalker") || t.contains("loyalty") || t.contains("empower"))
+            // Cards that reward planeswalkers - not removal that can hit one ("destroy target
+            // creature or planeswalker").
+            yes(t.contains("planeswalker you control")
+                || t.contains("planeswalkers you control")
+                || t.contains("loyalty")
+                || t.contains("empower"))
         },
         enabler: |c| {
             yes(c.type_line.contains("Planeswalker")
@@ -1320,7 +1342,7 @@ fn with_profile<R>(deck: &Deck, db: &CardDb, f: impl FnOnce(&mut DeckProfile) ->
             for (c, n) in &cards {
                 let mine: Vec<(f32, f32)> = MECHANICS
                     .iter()
-                    .map(|m| ((m.payoff)(c), feed(m, c)))
+                    .map(|m| (deck_payoff(m, c), feed(m, c)))
                     .collect();
                 for (k, (pay, fd)) in mine.iter().enumerate() {
                     mech[k].0 += pay * *n as f32;
@@ -1343,9 +1365,20 @@ fn with_profile<R>(deck: &Deck, db: &CardDb, f: impl FnOnce(&mut DeckProfile) ->
     })
 }
 
+/// A card's payoff for a mechanic, for deck synergy: only clear payoffs (the looser
+/// commander heuristics - "big creatures pay teamwork costs" - don't count for every card).
+fn deck_payoff(m: &Mechanic, c: &Card) -> f32 {
+    if m.need == "Teamwork spells" {
+        // Cards that reward teamwork, not the teamwork spells themselves.
+        return yes(c.text_lower().contains("teamwork") && !c.parsed().has_keyword("teamwork"));
+    }
+    let p = (m.payoff)(c);
+    if p >= 0.75 { p } else { 0.0 }
+}
+
 /// How well a card fits the deck being built (beyond its commander): it feeds payoffs
 /// already in the deck, its own payoff is fed by the deck's enablers, or it's a creature
-/// type other cards in the deck care about. About 0 .. +3.
+/// type other cards in the deck care about. About 0 .. +2.
 pub fn deck_synergy(card: &Card, deck: &Deck, db: &CardDb) -> (f32, Vec<String>) {
     if card.is_land() {
         return (0.0, Vec::new());
@@ -1363,22 +1396,22 @@ pub fn deck_synergy(card: &Card, deck: &Deck, db: &CardDb) -> (f32, Vec<String>)
                 enablers -= o[k].1 * copies;
             }
             let fd = feed(m, card);
-            let pay = (m.payoff)(card);
+            let pay = deck_payoff(m, card);
             let mut pts = 0.0;
-            if fd > 0.0 && payoffs >= 0.5 {
-                pts += fd * 0.35 * payoffs.min(4.0);
+            if fd > 0.0 && payoffs >= 0.75 {
+                pts += fd * 0.2 * payoffs.min(4.0);
                 why.push(format!(
                     "feeds {:.0} {} payoff(s) in the deck",
                     payoffs, m.need
                 ));
             }
             if pay > 0.0 && enablers >= 1.0 {
-                pts += pay * 0.25 * enablers.min(6.0);
+                pts += pay * 0.15 * enablers.min(6.0);
                 why.push(format!("{:.0} {} in the deck feed it", enablers, m.need));
             }
-            mech_total += pts.min(1.5);
+            mech_total += pts.min(1.0);
         }
-        score += mech_total.min(2.5);
+        score += mech_total.min(1.5);
         // Creature types the deck's other cards care about ("other Villains you control").
         if card.is_creature() {
             let changeling = card.parsed().has_keyword("changeling");
@@ -1402,12 +1435,12 @@ pub fn deck_synergy(card: &Card, deck: &Deck, db: &CardDb) -> (f32, Vec<String>)
                     }
                 };
                 if n > 0 {
-                    score += 0.4 * n.min(4) as f32;
+                    score += 0.3 * n.min(4) as f32;
                     why.push(format!("{} card(s) in the deck care about {}s", n, sub));
                 }
             }
         }
-        (score.min(3.0), why)
+        (score.min(2.0), why)
     })
 }
 
@@ -1537,9 +1570,13 @@ pub fn autobuild(
     });
 
     // Nonbasic lands that make our colours come first; they count toward the land total.
+    // "Our colours" include what the commander's abilities cost (Thanos's power-up needs
+    // {C}, blue and green on top of his red-white-black casting cost).
+    let (ability_colors, needs_colorless) = commander.ability_colors();
+    let wanted = plays.union(ColorSet(ability_colors.0 & identity.0));
     for land in db.cards.iter().filter(|c| c.is_land() && !c.is_basic()) {
         let ok_identity = !rules.enforce_color_identity || land.identity().is_subset_of(identity);
-        let useful = land.produces().0 & plays.0 != 0;
+        let useful = land.produces().0 & wanted.0 != 0 || needs_colorless && land.makes_colorless();
         if ok_identity && useful {
             let n = available(land, &deck, coll, rules);
             if n > 0 && n < 99 {

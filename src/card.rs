@@ -322,7 +322,11 @@ impl Card {
     pub fn produces(&self) -> ColorSet {
         let text = self.oracle_text.to_lowercase();
         let mut set = ColorSet(0);
-        if text.contains("mana of any color") || text.contains("one mana of any") {
+        if text.contains("mana of any color")
+            || text.contains("one mana of any")
+            || text.contains("any combination of colors")
+            || text.contains("mana of any one color")
+        {
             return ColorSet(0b11111);
         }
         for (i, line) in text.split("add ").enumerate() {
@@ -337,6 +341,34 @@ impl Card {
             }
         }
         set
+    }
+
+    /// Makes colourless mana ({T}: Add {C}).
+    pub fn makes_colorless(&self) -> bool {
+        self.oracle_text.to_lowercase().contains("add {c}")
+    }
+
+    /// Colours (and whether {C}) the card's own abilities cost beyond casting it - Thanos's
+    /// power-up costs {C}{W}{U}{B}{R}{G}, so his deck wants blue, green and colourless
+    /// sources even though he's cast with {R}{W}{B}.
+    pub fn ability_colors(&self) -> (ColorSet, bool) {
+        let mut set = ColorSet(0);
+        let mut colorless = false;
+        for line in self.oracle_text.split('\n') {
+            let Some((cost, _)) = line.split_once(':') else {
+                continue;
+            };
+            for sym in symbols_in(cost) {
+                if sym.eq_ignore_ascii_case("c") {
+                    colorless = true;
+                } else if sym.len() == 1 {
+                    set = set.union(ColorSet::from_char(
+                        sym.to_ascii_uppercase().chars().next().unwrap(),
+                    ));
+                }
+            }
+        }
+        (set, colorless)
     }
 
     /// What the card does, worked out once from its rules text and then remembered.
