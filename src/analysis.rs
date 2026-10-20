@@ -22,6 +22,182 @@ pub fn curve_targets(rules: &Rules) -> [u32; 6] {
     CURVE_TARGET_60.map(|t| (t * scale).round() as u32)
 }
 
+/// The kind of deck a commander wants to be in, read from its cost, body and rules text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Archetype {
+    /// Cheap attackers, combat triggers: low curve, lots of creatures.
+    Aggro,
+    Midrange,
+    /// Expensive or big-mana payoffs: higher curve, ramp, fewer small creatures.
+    Big,
+    /// Instant/sorcery or noncreature-spell payoffs: fewer creatures, more interaction.
+    Spells,
+}
+
+impl Archetype {
+    pub fn label(self) -> &'static str {
+        match self {
+            Archetype::Aggro => "aggro",
+            Archetype::Midrange => "midrange",
+            Archetype::Big => "big mana",
+            Archetype::Spells => "spells",
+        }
+    }
+}
+
+/// Deck-building targets for one commander: mana curve (nonland cards per mana value),
+/// creature range, and how much removal and card draw to aim for.
+#[derive(Debug, Clone)]
+pub struct Plan {
+    pub archetype: Archetype,
+    pub curve: [u32; 6],
+    pub creatures: (u32, u32),
+    pub removal: f32,
+    pub draw: f32,
+    /// What in the commander's card pointed to this plan.
+    pub signals: Vec<String>,
+}
+
+/// Reads a commander's card for what kind of deck it wants.
+pub fn archetype(cmd: &Card) -> (Archetype, Vec<String>) {
+    let t = cmd.text_lower();
+    let mv = cmd.mana_value();
+    let mut aggro = 0.0;
+    let mut big = 0.0;
+    let mut spells = 0.0;
+    let mut why = Vec::new();
+    let hit = |pts: &mut f32, add: f32, cond: bool, label: &str, why: &mut Vec<String>| {
+        if cond {
+            *pts += add;
+            why.push(label.to_string());
+        }
+    };
+    hit(&mut aggro, 1.0, mv <= 3, "cheap commander", &mut why);
+    hit(
+        &mut aggro,
+        1.5,
+        t.contains(" attacks") || t.contains("attacking creature"),
+        "rewards attacking",
+        &mut why,
+    );
+    hit(
+        &mut aggro,
+        1.5,
+        t.contains("combat damage to a player"),
+        "combat-damage trigger",
+        &mut why,
+    );
+    hit(&mut aggro, 0.5, t.contains("haste"), "haste", &mut why);
+    hit(
+        &mut aggro,
+        1.0,
+        t.contains("double strike"),
+        "double strike",
+        &mut why,
+    );
+    hit(
+        &mut aggro,
+        1.0,
+        t.contains("creatures you control get +"),
+        "anthem for your team",
+        &mut why,
+    );
+    hit(
+        &mut aggro,
+        0.5,
+        mv <= 4 && t.contains("create") && t.contains("token"),
+        "makes tokens",
+        &mut why,
+    );
+    hit(&mut big, 2.0, mv >= 6, "expensive commander", &mut why);
+    hit(&mut big, 0.5, mv == 5, "five mana", &mut why);
+    hit(
+        &mut big,
+        1.5,
+        t.contains("mana value 5 or greater")
+            || t.contains("mana value 4 or greater")
+            || t.contains("power 4 or greater")
+            || t.contains("greatest power"),
+        "rewards big spells",
+        &mut why,
+    );
+    hit(
+        &mut big,
+        1.0,
+        t.contains("landfall") || t.contains("lands you control"),
+        "cares about lands",
+        &mut why,
+    );
+    hit(
+        &mut big,
+        0.5,
+        cmd.mana_cost.contains("{X}"),
+        "X cost",
+        &mut why,
+    );
+    hit(
+        &mut spells,
+        2.5,
+        t.contains("instant or sorcery")
+            || t.contains("instants and sorceries")
+            || t.contains("instant and sorcery")
+            || t.contains("noncreature spell"),
+        "instant/sorcery payoff",
+        &mut why,
+    );
+    hit(
+        &mut spells,
+        1.0,
+        t.contains("whenever you draw"),
+        "card-draw payoff",
+        &mut why,
+    );
+    let best = [
+        (spells, Archetype::Spells),
+        (big, Archetype::Big),
+        (aggro, Archetype::Aggro),
+    ]
+    .into_iter()
+    .fold((0.0, Archetype::Midrange), |acc, x| {
+        if x.0 > acc.0 { x } else { acc }
+    });
+    if best.0 < 1.5 {
+        return (Archetype::Midrange, vec!["no strong lean".into()]);
+    }
+    (best.1, why)
+}
+
+/// Targets for a deck led by `cmd` (midrange targets without a commander).
+pub fn plan_for(cmd: Option<&Card>, rules: &Rules) -> Plan {
+    let (arch, signals) = cmd
+        .map(archetype)
+        .unwrap_or((Archetype::Midrange, Vec::new()));
+    // Per 60 cards with ~26 lands (33 nonland cards each).
+    let (curve, creatures, removal, draw): ([f32; 6], (f32, f32), f32, f32) = match arch {
+        Archetype::Aggro => ([5.0, 9.0, 8.0, 6.0, 3.0, 2.0], (18.0, 24.0), 5.0, 3.0),
+        Archetype::Midrange => (CURVE_TARGET_60, (15.0, 20.0), 7.0, 5.0),
+        Archetype::Big => ([3.0, 6.0, 7.0, 7.0, 6.0, 4.0], (13.0, 18.0), 6.0, 5.0),
+        Archetype::Spells => ([4.0, 8.0, 8.0, 6.0, 4.0, 3.0], (9.0, 14.0), 8.0, 7.0),
+    };
+    let scale = rules.deck_size as f32 / 60.0;
+    Plan {
+        archetype: arch,
+        curve: curve.map(|t| (t * scale).round() as u32),
+        creatures: (
+            (creatures.0 * scale).round() as u32,
+            (creatures.1 * scale).round() as u32,
+        ),
+        removal: removal * scale,
+        draw: draw * scale,
+        signals,
+    }
+}
+
+/// The plan for a deck's commander.
+pub fn deck_plan(deck: &Deck, db: &CardDb, rules: &Rules) -> Plan {
+    plan_for(deck.commander.as_ref().and_then(|c| db.get(c)), rules)
+}
+
 /// Every card in the main deck with its count, resolved against the database.
 pub fn resolved<'a>(deck: &Deck, db: &'a CardDb) -> Vec<(&'a Card, u32)> {
     deck.cards
@@ -295,6 +471,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     score += mp;
     why.append(&mut mp_why);
     let st = stats(deck, db);
+    let plan = deck_plan(deck, db, rules);
     if card.is_creature() {
         if let (Some(p), Some(t)) = (numeric(&card.power), numeric(&card.toughness)) {
             let eff = (p + t) / (card.mana_value().max(1) as f32);
@@ -304,7 +481,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
                 why.push(format!("efficient body {}/{}", p, t));
             }
         }
-        let creature_target = (rules.deck_size as f32 * 0.27) as u32;
+        let creature_target = plan.creatures.0;
         if st.creatures < creature_target {
             score += 1.0;
             why.push(format!(
@@ -314,7 +491,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         }
     }
     let bucket = curve_bucket(card.mana_value());
-    let target = curve_targets(rules)[bucket];
+    let target = plan.curve[bucket];
     if st.curve[bucket] < target {
         score += 0.75;
         why.push(format!("fills the {}-drop slot", curve_label(bucket)));
@@ -886,6 +1063,13 @@ pub fn rank_commanders<'a>(
 pub struct Rng(u64);
 
 impl Rng {
+    /// A repeatable sequence: the same seed always gives the same shuffles.
+    pub fn new(seed: u64) -> Rng {
+        let mut r = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1);
+        r.next();
+        r
+    }
+
     pub fn seeded() -> Rng {
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

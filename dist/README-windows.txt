@@ -21,13 +21,18 @@ TABS
   Deck Builder     Your pool on the left (click = inspect, double-click = add,
                    right-click = more), the deck in the middle, card details on the right.
                    Auto-build, basic land +/- buttons, suggestions along the bottom.
-  Commanders       Every legendary creature you own, ranked by the deck your pool gives
-                   it. Sliders set how much each part counts. "Build" makes the deck.
+  Commanders       Every legendary creature you own, ranked 0-100 by the deck your pool
+                   gives it, including simulated 4-player games. Also shows where each
+                   one lands once singleton starts. Sliders set how much each part
+                   counts. "Build" makes the deck.
                    Mono-colour commanders can add a colour with The Prismatic Piper.
   Draft Helper     Type the cards in a draft pack; it ranks them for your deck.
                    "I took it" adds the card to your pool.
   Trades & VP      Which spare cards to trade in for the 10 VP minimum, VP prices,
                    Skill Tree costs and the Shop.
+  Upgrades         Cards that would improve your deck: Public Pool claims (paste the
+                   pool from Mana Mixer) and cards from upcoming packs, with the odds
+                   that you, your draft table, or anyone in the league opens them.
   Stats & Playtest Mana curve, colours, weakest cards, opening-hand simulation,
                    sample hands.
   Season & Rules   The Season 2 schedule; "Build for this" switches deck size and

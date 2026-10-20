@@ -43,16 +43,18 @@ enum Tab {
     Commanders,
     Draft,
     Trade,
+    Upgrades,
     Stats,
     Season,
     Collection,
 }
 
-const TABS: [(Tab, &str); 7] = [
+const TABS: [(Tab, &str); 8] = [
     (Tab::Build, "Deck Builder"),
     (Tab::Commanders, "Commanders"),
     (Tab::Draft, "Draft Helper"),
     (Tab::Trade, "Trades & VP"),
+    (Tab::Upgrades, "Upgrades"),
     (Tab::Stats, "Stats & Playtest"),
     (Tab::Season, "Season & Rules"),
     (Tab::Collection, "My Pool"),
@@ -136,7 +138,7 @@ enum Action {
 struct RankJob {
     done: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     total: usize,
-    rx: std::sync::mpsc::Receiver<Vec<crate::ranking::Evaluation>>,
+    rx: std::sync::mpsc::Receiver<crate::ranking::Rankings>,
     key: String,
 }
 
@@ -151,6 +153,7 @@ struct Memo {
     draft: Option<(Vec<String>, Vec<(Card, f32, f32, u32, Vec<String>)>)>,
     trade: Option<((u32, usize), Vec<(Card, u32, u32, String)>)>,
     weakest: Option<Vec<(String, f32)>>,
+    upgrades: Option<Vec<crate::upgrades::Upgrade>>,
 }
 
 pub struct GuiApp {
@@ -184,12 +187,15 @@ pub struct GuiApp {
     /// Pool browser set filter ("" = all sets).
     set_filter: String,
     import_text: String,
+    /// The league's Public Pool (pasted from Mana Mixer), for the upgrade planner.
+    public_pool: Collection,
+    public_text: String,
     trade_target: u32,
     trade_need: usize,
     sim: Option<SimResult>,
     hand: Vec<String>,
     library: Vec<String>,
-    ranking: Option<Vec<crate::ranking::Evaluation>>,
+    ranking: Option<crate::ranking::Rankings>,
     ranking_key: String,
     rank_job: Option<RankJob>,
     data_job: Option<std::sync::mpsc::Receiver<String>>,
@@ -233,6 +239,7 @@ fn migrate_old_images(data_dir: &std::path::Path, images_dir: &std::path::Path, 
 impl GuiApp {
     fn new(cc: &eframe::CreationContext<'_>, data_dir: PathBuf) -> GuiApp {
         let ctx = &cc.egui_ctx;
+        let public_pool = crate::upgrades::load_public_pool(&data_dir);
         // Always dark: the card colours and text are designed for it, whatever the OS theme.
         ctx.set_theme(egui::ThemePreference::Dark);
         ctx.global_style_mut(|s| {
@@ -312,6 +319,8 @@ impl GuiApp {
             coll_query: String::new(),
             set_filter: String::new(),
             import_text: String::new(),
+            public_pool,
+            public_text: String::new(),
             trade_target: 10,
             trade_need: 0,
             sim: None,
@@ -1885,19 +1894,11 @@ impl GuiApp {
 
     /// What the commander ranking depends on; when it changes, the ranking is rebuilt.
     fn ranking_key(&self) -> String {
-        format!(
-            "{}|{}|{}|{}|{}|{}|{}",
-            self.coll.total(),
-            self.coll.counts.len(),
-            self.rules.deck_size,
-            self.rules.singleton,
-            self.rules.players,
-            self.db.ratings_date,
-            self.db.commander_stats.len()
-        )
+        crate::ranking::ranking_key(&self.db, &self.coll, &self.rules)
     }
 
-    /// Starts rebuilding the ranking on a background thread (about 50 deck builds).
+    /// Starts rebuilding the ranking on a background thread (a deck build and playtest per
+    /// option, twice while the singleton preview applies).
     fn start_ranking(&mut self) {
         let key = self.ranking_key();
         if self.rank_job.as_ref().is_some_and(|j| j.key == key) {
@@ -1909,13 +1910,13 @@ impl GuiApp {
             self.rules.clone(),
             self.settings.weights,
         );
-        let total = crate::ranking::candidates(&db, &coll, &rules).len().max(1);
+        let total = crate::ranking::build_count(&db, &coll, &rules).max(1);
         let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (tx, rx) = std::sync::mpsc::channel();
         let progress = done.clone();
         std::thread::spawn(move || {
-            let evals = crate::ranking::rank_all(&db, &coll, &rules, &weights, &progress);
-            let _ = tx.send(evals);
+            let ranks = crate::ranking::rank_with_preview(&db, &coll, &rules, &weights, &progress);
+            let _ = tx.send(ranks);
         });
         self.rank_job = Some(RankJob {
             done,
@@ -1928,10 +1929,12 @@ impl GuiApp {
     fn poll_jobs(&mut self, ctx: &egui::Context) {
         if let Some(job) = &self.rank_job {
             match job.rx.try_recv() {
-                Ok(evals) => {
-                    self.ranking = Some(evals);
+                Ok(ranks) => {
+                    self.ranking = Some(ranks);
                     self.ranking_key = job.key.clone();
                     self.rank_job = None;
+                    // The draft helper judges picks against the top commanders' decks.
+                    self.memo.draft = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     ctx.request_repaint_after(std::time::Duration::from_millis(150))
@@ -2028,8 +2031,9 @@ impl GuiApp {
             }
         });
         ui.label(
-            "Each commander is ranked by the full deck auto-build makes from your pool, graded on six parts below. \
-             Mono-colour commanders are also tried with The Prismatic Piper adding their two most promising colours.",
+            "Each commander is ranked by the full deck auto-build makes from your pool, graded on seven parts below and playtested \
+             in simulated 4-player games. Mono-colour commanders are also tried with The Prismatic Piper adding their two most \
+             promising colours. Scores run 0-100: 50 is your middle option.",
         );
         ui.horizontal_wrapped(|ui| {
             let data = if self.db.ratings.is_empty() {
@@ -2065,11 +2069,12 @@ impl GuiApp {
             egui::Grid::new("weights").show(ui, |ui| {
                 for (label, value, help) in [
                     ("Cards", &mut w.cards, "average strength of the deck's spells (17Lands, roles, synergy, 4-player value)"),
-                    ("Curve", &mut w.curve, "how close the mana curve is to the targets"),
-                    ("Creatures", &mut w.creatures, "creature count vs. 15-20 per 60 cards"),
-                    ("Interaction", &mut w.interaction, "removal (board wipes count extra) and card draw"),
+                    ("Curve", &mut w.curve, "mana curve vs. the commander's plan (aggro decks want it lower, big-mana decks higher)"),
+                    ("Creatures", &mut w.creatures, "creature count vs. the plan (e.g. 18-24 aggro, 15-20 midrange, 9-14 spells)"),
+                    ("Interaction", &mut w.interaction, "removal (board wipes count extra) and card draw vs. the plan"),
                     ("Mana", &mut w.mana, "simulated hands: keepable, commander cast on time"),
                     ("Commander", &mut w.commander, "the commander card itself: 17Lands, Playgroup.gg win rate, abilities, cost"),
+                    ("Playtest", &mut w.playtest, "win rate in simulated 4-player games vs. decks from simulated league pools"),
                 ] {
                     ui.label(label);
                     weights_changed |= ui.add(egui::Slider::new(value, 0.0..=3.0).step_by(0.1)).changed();
@@ -2085,16 +2090,25 @@ impl GuiApp {
         if weights_changed {
             let w = self.settings.weights;
             if let Some(r) = &mut self.ranking {
-                crate::ranking::reweigh(r, &w);
+                r.reweigh(&w);
             }
             self.save_settings();
         }
-        let Some(evals) = self.ranking.clone() else {
+        let Some(ranks) = self.ranking.clone() else {
             ui.label("Working out the rankings...");
             return;
         };
+        if ranks.singleton.is_some() {
+            ui.label(
+                RichText::new(
+                    "\"Singleton\" shows where each commander lands once singleton starts (Session 6), using today's pool.",
+                )
+                .small()
+                .weak(),
+            );
+        }
         let groups: Vec<Vec<crate::ranking::Evaluation>> =
-            crate::ranking::best_per_commander(&evals)
+            crate::ranking::best_per_commander(&ranks.now)
                 .into_iter()
                 .map(|g| g.into_iter().cloned().collect())
                 .collect();
@@ -2102,7 +2116,7 @@ impl GuiApp {
             .id_salt("cmd_scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
+                ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
                     ui.spacing_mut().item_spacing = vec2(14.0, 14.0);
                     for (rank, group) in groups.iter().enumerate() {
                         let e = &group[0];
@@ -2130,11 +2144,12 @@ impl GuiApp {
                                 }
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        RichText::new(format!("{:.1}", e.total))
+                                        RichText::new(format!("{:.0}", e.total))
                                             .size(22.0)
                                             .strong()
                                             .color(Color32::from_rgb(255, 205, 80)),
-                                    );
+                                    )
+                                    .on_hover_text("Out of 100; 50 = your middle option");
                                     ui.vertical(|ui| {
                                         if let Some(c) = e.piper {
                                             ui.label(
@@ -2149,12 +2164,29 @@ impl GuiApp {
                                         ui.horizontal(|ui| {
                                             ui.label(RichText::new("plays").small());
                                             identity_dots(ui, e.plays, 12.0);
+                                            ui.label(RichText::new(e.archetype.label()).small().weak());
                                         });
+                                        if let Some((place, score)) = ranks.singleton_place(&e.commander) {
+                                            let moved = place as i64 - (rank as i64 + 1);
+                                            let color = if moved > 0 {
+                                                Color32::from_rgb(230, 140, 110)
+                                            } else if moved < 0 {
+                                                Color32::from_rgb(140, 210, 140)
+                                            } else {
+                                                Color32::GRAY
+                                            };
+                                            ui.label(
+                                                RichText::new(format!("Singleton: #{} ({:.0})", place, score))
+                                                    .small()
+                                                    .color(color),
+                                            )
+                                            .on_hover_text("Where this commander ranks once singleton starts (Session 6), with your current pool");
+                                        }
                                     });
                                 });
-                                // Part bars: green above zero, red below.
+                                // Part bars on the common scale: green above your average option, red below.
                                 for (label, v) in
-                                    crate::ranking::Parts::LABELS.iter().zip(e.parts.values())
+                                    crate::ranking::Parts::LABELS.iter().zip(e.scaled)
                                 {
                                     ui.horizontal(|ui| {
                                         ui.label(
@@ -2170,7 +2202,7 @@ impl GuiApp {
                                             CornerRadius::from(2.0),
                                             Color32::from_gray(45),
                                         );
-                                        let len = (v.abs() * 13.0).min(if v >= 0.0 {
+                                        let len = (v.abs() * 22.0).min(if v >= 0.0 {
                                             80.0
                                         } else {
                                             30.0
@@ -2212,8 +2244,8 @@ impl GuiApp {
                                     let others: Vec<String> = group[1..]
                                         .iter()
                                         .map(|o| match o.piper {
-                                            Some(c) => format!("+Piper({}) {:.1}", c, o.total),
-                                            None => format!("alone {:.1}", o.total),
+                                            Some(c) => format!("+Piper({}) {:.0}", c, o.total),
+                                            None => format!("alone {:.0}", o.total),
                                         })
                                         .collect();
                                     ui.label(
@@ -2330,18 +2362,30 @@ impl GuiApp {
                 }
                 ui.label(RichText::new(format!("{} cards in this pack", self.draft_pack.len())).small());
                 if self.deck.commander.is_none() {
-                    ui.label(
-                        RichText::new("No commander chosen, so cards are judged against your three best commander options.")
-                            .small()
-                            .weak(),
-                    );
+                    let text = if self.rank_job.is_some() {
+                        "No commander chosen: working out your best commanders (see the Commanders tab), then picks are judged against their decks."
+                    } else {
+                        "No commander chosen, so cards are judged against the decks of your three best-ranked commanders."
+                    };
+                    ui.label(RichText::new(text).small().weak());
                 }
             });
             ui.separator();
+            if self.deck.commander.is_none() && (self.ranking.is_none() || self.ranking_key != self.ranking_key()) {
+                self.start_ranking();
+            }
             let stale = self.memo.draft.as_ref().is_none_or(|(pack, _)| *pack != self.draft_pack);
             if stale {
                 let pack: Vec<&Card> = self.draft_pack.iter().filter_map(|n| self.db.get(n)).collect();
-                let ranked = league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules)
+                let options: Vec<Deck> = match (&self.deck.commander, &self.ranking) {
+                    (None, Some(r)) => crate::ranking::best_per_commander(&r.now)
+                        .iter()
+                        .take(3)
+                        .map(|g| g[0].deck.clone())
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let ranked = league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules, &options)
                     .into_iter()
                     .map(|p| (p.card.clone(), p.total, p.fit, p.vp, p.reasons))
                     .collect();
@@ -2350,7 +2394,7 @@ impl GuiApp {
             let picks: Vec<(Card, f32, f32, u32, Vec<String>)> =
                 self.memo.draft.as_ref().map(|(_, r)| r.clone()).unwrap_or_default();
             ScrollArea::vertical().id_salt("draft_scroll").auto_shrink([false, false]).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
+                ui.with_layout(Layout::left_to_right(Align::Min).with_main_wrap(true), |ui| {
                     ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
                     for (rank, (card, total, fit, vp, why)) in picks.iter().enumerate() {
                         ui.allocate_ui(vec2(190.0, 420.0), |ui| {
@@ -2503,11 +2547,198 @@ impl GuiApp {
         });
     }
 
+    // ------------------------------------------------------------------ upgrades
+
+    fn upgrade_row(&mut self, ui: &mut Ui, u: &crate::upgrades::Upgrade, acts: &mut Vec<Action>) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("{:+.1}", u.gain))
+                    .strong()
+                    .color(Color32::from_rgb(140, 210, 140)),
+            )
+            .on_hover_text(format!(
+                "Scores {:.1} better than {}, your weakest card",
+                u.gain, u.replaces
+            ));
+            let resp = ui.add(
+                egui::Label::new(
+                    RichText::new(&u.card.name)
+                        .color(cards::lighten_for_text(cards::frame_color(&u.card))),
+                )
+                .sense(Sense::click()),
+            );
+            let resp = self.with_zoom(resp, &u.card, None);
+            if resp.clicked() {
+                acts.push(Action::Select(u.card.name.clone()));
+            }
+            cost_widget(ui, &u.card.mana_cost, 13.0);
+            ui.label(RichText::new(&u.card.rarity).small().weak());
+        });
+        let detail = match &u.source {
+            crate::upgrades::Source::Pool { cost, floor } => format!(
+                "Claim for {} VP{} · replaces {}",
+                cost,
+                floor
+                    .map(|f| format!(" (trade in {} that round)", f))
+                    .unwrap_or_default(),
+                u.replaces
+            ),
+            crate::upgrades::Source::Packs {
+                set_name,
+                packs,
+                usable_from,
+                you,
+                table,
+                league,
+            } => format!(
+                "{} · {} packs each, usable from Session {}\nYou open it {:.0}% · your table {:.0}% · anyone in the league {:.0}%",
+                set_name,
+                packs,
+                usable_from,
+                you * 100.0,
+                table * 100.0,
+                league * 100.0
+            ),
+        };
+        ui.label(RichText::new(detail).small());
+        if !u.reasons.is_empty() {
+            ui.label(
+                RichText::new(
+                    u.reasons
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                )
+                .small()
+                .weak(),
+            );
+        }
+        ui.add_space(6.0);
+    }
+
+    fn upgrades_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        ui.heading("Upgrades for this deck");
+        if self.deck.commander.is_none() {
+            ui.label("Choose a commander first (Commanders tab), then this shows the cards that would improve its deck and how to get them.");
+            return;
+        }
+        ui.label(
+            "Cards you don't have yet that score better than your deck's weakest card: what's in the Public Pool to claim now, \
+             and what could come in the league packs still to be handed out, with the odds of opening it.",
+        );
+        let next = league::upcoming_session().number;
+        if self.memo.upgrades.is_none() {
+            self.memo.upgrades = Some(crate::upgrades::upgrades(
+                &self.deck,
+                &self.db,
+                &self.coll,
+                &self.rules,
+                &self.public_pool,
+                next,
+            ));
+        }
+        let ups = self.memo.upgrades.clone().unwrap_or_default();
+        let (pool, packs): (Vec<_>, Vec<_>) = ups
+            .into_iter()
+            .partition(|u| matches!(u.source, crate::upgrades::Source::Pool { .. }));
+        ui.columns(2, |cols| {
+            let ui = &mut cols[0];
+            ui.label(RichText::new("Claim from the Public Pool now").strong().size(16.0));
+            ui.label(
+                RichText::new(format!(
+                    "Public Pool list: {} cards ({} different). Claims cost 2x the card's VP; rares and mythics need a rare/mythic traded in the same round.",
+                    self.public_pool.total(),
+                    self.public_pool.counts.len()
+                ))
+                .small(),
+            );
+            egui::CollapsingHeader::new("Update the Public Pool list")
+                .default_open(self.public_pool.counts.is_empty())
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new("Copy the Public Pool from Mana Mixer's trade page and paste it here (Ctrl+V), or drop the file on the box.")
+                            .small(),
+                    );
+                    ScrollArea::vertical().id_salt("public_scroll").max_height(140.0).show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.public_text)
+                                .hint_text("1 Arbiter of Woe\n1 Incinerating Blast\n...")
+                                .desired_rows(5)
+                                .desired_width(f32::INFINITY)
+                                .font(egui::TextStyle::Monospace),
+                        );
+                    });
+                    let n = league::parse_import(&self.public_text).len();
+                    if ui.add_enabled(n > 0, egui::Button::new(format!("Save as the Public Pool ({} cards)", n))).clicked() {
+                        match crate::upgrades::save_public_pool(&self.data_dir, &self.public_text) {
+                            Ok(n) => {
+                                self.public_pool = crate::upgrades::load_public_pool(&self.data_dir);
+                                self.public_text.clear();
+                                self.memo.upgrades = None;
+                                self.status = format!("Saved {} different cards as the Public Pool.", n);
+                            }
+                            Err(e) => self.status = e,
+                        }
+                    }
+                });
+            ui.add_space(6.0);
+            ScrollArea::vertical().id_salt("pool_ups").auto_shrink([false, false]).show(ui, |ui| {
+                if pool.is_empty() {
+                    ui.label(RichText::new(if self.public_pool.counts.is_empty() {
+                        "No Public Pool list yet."
+                    } else {
+                        "Nothing in the pool beats your weakest card."
+                    }).weak());
+                }
+                if let Some(top) = pool.first() {
+                    let plan = crate::upgrades::trade_ins_for(top, &self.deck, &self.db, &self.coll, &self.rules);
+                    let vp: u32 = plan.iter().map(|t| t.vp).sum();
+                    ui.label(
+                        RichText::new(format!(
+                            "To claim {} this round, trade in: {} ({} VP)",
+                            top.card.name,
+                            plan.iter().map(|t| format!("{}x {}", t.copies, t.card.name)).collect::<Vec<_>>().join(", "),
+                            vp
+                        ))
+                        .small()
+                        .color(Color32::from_rgb(255, 205, 80)),
+                    );
+                    ui.add_space(6.0);
+                }
+                for u in pool.iter().take(25) {
+                    self.upgrade_row(ui, u, acts);
+                }
+            });
+            let ui = &mut cols[1];
+            ui.label(RichText::new(format!("Could come in packs (Session {} on)", next)).strong().size(16.0));
+            ui.label(
+                RichText::new(
+                    "\"Your table\" = opened at your 4-player draft table, so it's in your face-up draft. \"League\" = opened by any of the 8 \
+                     players, who might trade it into the pool. Odds use typical Play Booster rarity rates; starter-set odds assume your \
+                     table opens the same starter set. Nauctis cards appear once it's released and added (Settings > Update card database).",
+                )
+                .small(),
+            );
+            ui.add_space(6.0);
+            ScrollArea::vertical().id_salt("pack_ups").auto_shrink([false, false]).show(ui, |ui| {
+                if packs.is_empty() {
+                    ui.label(RichText::new("Nothing found.").weak());
+                }
+                for u in packs.iter().take(40) {
+                    self.upgrade_row(ui, u, acts);
+                }
+            });
+        });
+    }
+
     // ------------------------------------------------------------------ stats
 
     fn stats_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         let st = analysis::stats(&self.deck, &self.db);
-        let targets = analysis::curve_targets(&self.rules);
+        let plan = analysis::deck_plan(&self.deck, &self.db, &self.rules);
+        let targets = plan.curve;
         ui.heading("Stats & playtest");
         ScrollArea::vertical()
             .id_salt("stats_scroll")
@@ -2563,11 +2794,20 @@ impl GuiApp {
                     }
                     ui.label(
                         RichText::new(format!(
-                            "Average mana value {:.2} · yellow lines = target",
-                            st.avg_mv
+                            "Average mana value {:.2} · yellow lines = target for a {} deck",
+                            st.avg_mv,
+                            plan.archetype.label()
                         ))
                         .small(),
-                    );
+                    )
+                    .on_hover_text(format!(
+                        "Read from your commander: {}. Aim for {}-{} creatures, about {:.0} removal and {:.0} card draw.",
+                        plan.signals.join(", "),
+                        plan.creatures.0,
+                        plan.creatures.1,
+                        plan.removal,
+                        plan.draw
+                    ));
                     ui.add_space(6.0);
                     ui.label(RichText::new("Card types").strong());
                     for (t, n) in &st.types {
@@ -3018,7 +3258,7 @@ impl GuiApp {
             let screen = ctx.content_rect();
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
-                egui::Id::new("drop_hint"),
+                egui::Id::unique("drop_hint"),
             ));
             painter.rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(190));
             painter.text(
@@ -3157,6 +3397,13 @@ impl eframe::App for GuiApp {
                     .default_size(330.0)
                     .show(ui, |ui| self.inspector(ui, &mut acts));
                 egui::CentralPanel::default().show(ui, |ui| self.trade_tab(ui, &mut acts));
+            }
+            Tab::Upgrades => {
+                Panel::right("inspector_u")
+                    .resizable(true)
+                    .default_size(330.0)
+                    .show(ui, |ui| self.inspector(ui, &mut acts));
+                egui::CentralPanel::default().show(ui, |ui| self.upgrades_tab(ui, &mut acts));
             }
             Tab::Stats => {
                 egui::CentralPanel::default().show(ui, |ui| self.stats_tab(ui, &mut acts));

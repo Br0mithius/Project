@@ -129,6 +129,16 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Rank a draft pack's cards for your deck (separate names with ;)",
     ),
     (
+        "upgrades",
+        "",
+        "Cards that would improve this deck: Public Pool claims and odds from upcoming packs",
+    ),
+    (
+        "publicpool",
+        "<file>",
+        "Save the Public Pool list from Mana Mixer (used by `upgrades`)",
+    ),
+    (
         "trade",
         "[vp] [rare|mythic]",
         "Plan Public Pool trade-ins (default 10 VP minimum)",
@@ -187,6 +197,8 @@ pub struct App {
     pub style: Style,
     /// Set when the card list changes so the shell can refresh tab-completion.
     pub names_changed: bool,
+    /// Commander ranking, kept until the pool or rules change (it takes a few seconds).
+    ranking: std::cell::RefCell<Option<(String, crate::ranking::Rankings)>>,
 }
 
 impl App {
@@ -221,6 +233,7 @@ impl App {
             history: Vec::new(),
             style,
             names_changed: false,
+            ranking: std::cell::RefCell::new(None),
         })
     }
 
@@ -298,6 +311,8 @@ impl App {
             "piper" => self.piper(rest),
             "draft" | "pack" => self.draft(rest),
             "trade" => self.trade(rest),
+            "upgrades" | "upgrade" => self.upgrades(),
+            "publicpool" => self.public_pool(rest),
             "vp" => self.vp(),
             "own" => self.own(rest, 1),
             "unown" => self.own(rest, -1),
@@ -608,10 +623,35 @@ impl App {
         }
     }
 
-    fn commanders(&self) {
+    /// The commander ranking for the current pool and rules (built on first use).
+    fn rankings(&self) -> crate::ranking::Rankings {
+        let key = crate::ranking::ranking_key(&self.db, &self.coll, &self.rules);
+        if let Some((k, r)) = self.ranking.borrow().as_ref() {
+            if *k == key {
+                return r.clone();
+            }
+        }
+        println!(
+            "{}",
+            self.style.dim(
+                "Building and playtesting a deck for every commander option (takes a few seconds)..."
+            )
+        );
         let done = std::sync::atomic::AtomicUsize::new(0);
-        let weights = crate::ranking::Weights::default();
-        let evals = crate::ranking::rank_all(&self.db, &self.coll, &self.rules, &weights, &done);
+        let r = crate::ranking::rank_with_preview(
+            &self.db,
+            &self.coll,
+            &self.rules,
+            &crate::ranking::Weights::default(),
+            &done,
+        );
+        *self.ranking.borrow_mut() = Some((key, r.clone()));
+        r
+    }
+
+    fn commanders(&self) {
+        let ranks = self.rankings();
+        let evals = &ranks.now;
         if evals.is_empty() {
             println!("You don't own any legendary creatures yet.");
             return;
@@ -628,42 +668,55 @@ impl App {
         println!(
             "{}",
             self.style.dim(&format!(
-                "  #  {:<38} {:<6} {:>6} | {:>5} {:>5} {:>5} {:>6} {:>5} {:>5}",
-                "commander", "plays", "total", "cards", "curve", "crea", "inter", "mana", "cmdr"
+                "  #  {:<38} {:<6} {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | {}",
+                "commander",
+                "plays",
+                "score",
+                "cards",
+                "curve",
+                "crea",
+                "inter",
+                "mana",
+                "cmdr",
+                "play",
+                if ranks.singleton.is_some() {
+                    "singleton (Session 6+)"
+                } else {
+                    ""
+                }
             ))
         );
-        let groups = crate::ranking::best_per_commander(&evals);
+        let groups = crate::ranking::best_per_commander(evals);
         for (i, g) in groups.iter().enumerate() {
             let e = g[0];
-            let p = e.parts.values();
+            let z = e.scaled;
             let other = g
                 .iter()
                 .skip(1)
-                .map(|o| {
-                    format!(
-                        "{} {:.1}",
-                        if o.piper.is_some() {
-                            format!("+Piper({})", o.piper.unwrap())
-                        } else {
-                            "alone".into()
-                        },
-                        o.total
-                    )
+                .map(|o| match o.piper {
+                    Some(c) => format!("+Piper({}) {:.0}", c, o.total),
+                    None => format!("alone {:.0}", o.total),
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
+            let single = ranks
+                .singleton_place(&e.commander)
+                .map(|(p, t)| format!("#{} ({:.0})", p, t))
+                .unwrap_or_default();
             println!(
-                "{:>3}  {:<38} {:<6} {:>6.1} | {:>5.1} {:>5.1} {:>5.1} {:>6.1} {:>5.1} {:>5.1}{}",
+                "{:>3}  {:<38} {:<6} {:>5.0} | {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} {:>+5.1} | {}{}",
                 i + 1,
                 e.label(),
                 e.plays.to_string(),
                 e.total,
-                p[0],
-                p[1],
-                p[2],
-                p[3],
-                p[4],
-                p[5],
+                z[0],
+                z[1],
+                z[2],
+                z[3],
+                z[4],
+                z[5],
+                z[6],
+                single,
                 if other.is_empty() {
                     String::new()
                 } else {
@@ -672,7 +725,10 @@ impl App {
             );
         }
         println!(
-            "Parts: cards = average spell strength; curve; creature count; removal & draw; mana = keepable hands / commander on time; commander's own strength."
+            "Score: 0-100, 50 = your middle option. Parts are on one scale: +1 = one typical spread better than your middle option."
+        );
+        println!(
+            "Parts: cards = spell strength; curve and creatures vs. the commander's plan; removal & draw; mana = keepable hands / commander on time; commander's own strength; play = simulated 4-player games."
         );
         println!(
             "`why <commander>` explains one; `auto <name> [colours]` builds it; `piper <colour>` adds The Prismatic Piper."
@@ -685,40 +741,44 @@ impl App {
             println!("{} isn't a legendary creature.", c.name);
             return;
         }
-        let w = crate::ranking::Weights::default();
-        let mut opts = vec![crate::ranking::evaluate(
-            &c,
-            None,
-            &self.db,
-            &self.coll,
-            &self.rules,
-            &w,
-        )];
-        if c.identity().count() == 1 {
-            for i in 0..5 {
-                if !c.identity().contains(i) {
-                    opts.push(crate::ranking::evaluate(
-                        &c,
-                        Some(crate::card::COLORS[i]),
-                        &self.db,
-                        &self.coll,
-                        &self.rules,
-                        &w,
-                    ));
-                }
-            }
+        if self.coll.owned(&c.name) == 0 {
+            println!("{} isn't in your pool, so it isn't ranked.", c.name);
+            return;
         }
-        opts.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap());
-        for e in opts.iter().take(3) {
-            let p = e.parts.values();
+        let ranks = self.rankings();
+        let groups = crate::ranking::best_per_commander(&ranks.now);
+        let Some(place) = groups.iter().position(|g| g[0].commander == c.name) else {
+            println!("{} isn't in the ranking.", c.name);
+            return;
+        };
+        println!(
+            "#{} of {} commanders{}",
+            place + 1,
+            groups.len(),
+            ranks
+                .singleton_place(&c.name)
+                .map(|(p, t)| format!(" · #{} once singleton starts (score {:.0})", p, t))
+                .unwrap_or_default()
+        );
+        for e in groups[place].iter().take(3) {
             println!(
-                "{}  (plays {}) - total {:.1}",
+                "{}  (plays {}) - score {:.0}/100",
                 self.style.bold(&e.label()),
                 e.plays,
                 e.total
             );
-            for (label, v) in crate::ranking::Parts::LABELS.iter().zip(p) {
-                println!("  {:<12} {:>5.1}", label, v);
+            let raw = e.parts.values();
+            for (k, label) in crate::ranking::Parts::LABELS.iter().enumerate() {
+                println!(
+                    "  {:<12} {:>+5.1}   {}",
+                    label,
+                    e.scaled[k],
+                    self.style.dim(&if k == 6 {
+                        format!("(won {:.0}%)", raw[k] * 100.0)
+                    } else {
+                        format!("(raw {:.2})", raw[k])
+                    })
+                );
             }
             println!(
                 "  {} creatures, {} removal, {} draw · keepable hands {:.0}% · commander on time {:.0}%",
@@ -731,6 +791,101 @@ impl App {
             for n in &e.notes {
                 println!("  - {}", n);
             }
+        }
+    }
+
+    fn upgrades(&self) {
+        if self.deck.commander.is_none() {
+            println!("Choose a commander first (`commander <name>` or `auto <name>`).");
+            return;
+        }
+        let public = crate::upgrades::load_public_pool(&self.data_dir);
+        let next = league::upcoming_session().number;
+        let ups =
+            crate::upgrades::upgrades(&self.deck, &self.db, &self.coll, &self.rules, &public, next);
+        let s = &self.style;
+        let (pool, packs): (Vec<_>, Vec<_>) = ups
+            .iter()
+            .partition(|u| matches!(u.source, crate::upgrades::Source::Pool { .. }));
+        println!("{}", s.bold("Claim from the Public Pool now"));
+        if public.counts.is_empty() {
+            println!(
+                "  {}",
+                s.dim("No Public Pool list saved - copy it from Mana Mixer and run `publicpool <file>`.")
+            );
+        } else if pool.is_empty() {
+            println!(
+                "  {}",
+                s.dim("Nothing in the pool beats your weakest card.")
+            );
+        }
+        for u in pool.iter().take(10) {
+            println!(
+                "  {:+5.1}  {:<34} {}  {}",
+                u.gain,
+                u.card.name,
+                crate::upgrades::describe(u),
+                s.dim(&format!("replaces {}", u.replaces))
+            );
+        }
+        if let Some(top) = pool.first() {
+            let plan =
+                crate::upgrades::trade_ins_for(top, &self.deck, &self.db, &self.coll, &self.rules);
+            let vp: u32 = plan.iter().map(|t| t.vp).sum();
+            println!(
+                "  To claim {} this round, trade in: {} ({} VP)",
+                top.card.name,
+                plan.iter()
+                    .map(|t| format!("{}x {}", t.copies, t.card.name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                vp
+            );
+        }
+        println!(
+            "{}",
+            s.bold(&format!(
+                "Could come in the packs still to be handed out (Session {} on)",
+                next
+            ))
+        );
+        if packs.is_empty() {
+            println!("  {}", s.dim("Nothing found."));
+        }
+        for u in packs.iter().take(15) {
+            println!(
+                "  {:+5.1}  {:<34} {}",
+                u.gain,
+                u.card.name,
+                crate::upgrades::describe(u)
+            );
+        }
+        println!(
+            "{}",
+            s.dim("Gain = how much better than your weakest card. Table = opened at your 4-player draft table (face-up draft, so it's in your draft); league = opened by any of the 8 players (it could be traded into the pool). Pack odds use typical Play Booster rarity rates.")
+        );
+    }
+
+    fn public_pool(&mut self, arg: &str) {
+        let path = arg.trim().trim_matches('"');
+        if path.is_empty() {
+            let public = crate::upgrades::load_public_pool(&self.data_dir);
+            println!(
+                "Public Pool list: {} cards ({} different). Update it with `publicpool <file>` (a Mana Mixer copy of the pool).",
+                public.total(),
+                public.counts.len()
+            );
+            return;
+        }
+        match std::fs::read(path).map(|b| league::decode_text(&b)) {
+            Ok(text) => match crate::upgrades::save_public_pool(&self.data_dir, &text) {
+                Ok(n) => println!(
+                    "Saved {} different cards as the Public Pool. Run `upgrades` to see what's worth claiming.",
+                    n
+                ),
+                Err(e) => println!("Couldn't save it: {}", e),
+            },
+            Err(e) => println!("Couldn't read {}: {}", path, e),
         }
     }
 
@@ -1032,8 +1187,21 @@ impl App {
     fn stats(&self) {
         let s = &self.style;
         let st = analysis::stats(&self.deck, &self.db);
-        let targets = analysis::curve_targets(&self.rules);
-        println!("{}", s.bold("Mana curve (non-land)            target"));
+        let plan = analysis::deck_plan(&self.deck, &self.db, &self.rules);
+        let targets = plan.curve;
+        println!(
+            "{}  {}",
+            s.bold("Mana curve (non-land)            target"),
+            s.dim(&format!(
+                "(a {} deck: {}; {}-{} creatures, ~{:.0} removal, ~{:.0} draw)",
+                plan.archetype.label(),
+                plan.signals.join(", "),
+                plan.creatures.0,
+                plan.creatures.1,
+                plan.removal,
+                plan.draw
+            ))
+        );
         for b in 0..6 {
             println!(
                 "  {:>3} | {:<20} {:>2}   {}",
@@ -1766,7 +1934,23 @@ impl App {
                 }
             }
         }
-        let picks = league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules);
+        let options: Vec<Deck> = if self.deck.commander.is_some() {
+            Vec::new()
+        } else {
+            crate::ranking::best_per_commander(&self.rankings().now)
+                .iter()
+                .take(3)
+                .map(|g| g[0].deck.clone())
+                .collect()
+        };
+        let picks = league::rank_pack(
+            &pack,
+            &self.deck,
+            &self.db,
+            &self.coll,
+            &self.rules,
+            &options,
+        );
         println!(
             "{}",
             self.style

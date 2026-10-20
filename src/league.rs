@@ -211,29 +211,35 @@ pub struct DraftPick<'a> {
 
 /// Ranks the cards in a pack for the current deck. Fit to your deck dominates; trade value
 /// (VP) and raw card strength (worth taking so a table-mate can't) break ties.
+/// Without a commander, `options` are the auto-built decks of your best commander options
+/// (from the commander ranking) and each card is judged against the one it fits best.
 pub fn rank_pack<'a>(
     pack: &[&'a Card],
     deck: &Deck,
     db: &CardDb,
     coll: &Collection,
     rules: &Rules,
+    options: &[Deck],
 ) -> Vec<DraftPick<'a>> {
     let blank = Deck::new("blank");
     let identity = deck.identity(db);
-    // Without a commander, judge fit against your three best commander options.
     let probes: Vec<Deck> = if deck.commander.is_some() {
         vec![deck.clone()]
     } else {
-        analysis::rank_commanders(db, coll, rules)
-            .iter()
-            .take(3)
-            .map(|o| {
-                let mut d = Deck::new("probe");
-                d.commander = Some(o.card.name.clone());
-                d
-            })
-            .collect()
+        options.to_vec()
     };
+    // The weakest spell in each full deck: a pick that beats it is an upgrade.
+    let weakest: Vec<Option<(String, f32)>> = probes
+        .iter()
+        .map(|p| {
+            if p.main_count() + 5 < p.main_target(rules) {
+                return None;
+            }
+            analysis::weakest(p, db, rules)
+                .first()
+                .map(|s| (s.card.name.clone(), s.score))
+        })
+        .collect();
     let mut out: Vec<DraftPick> = pack
         .iter()
         .map(|&card| {
@@ -258,6 +264,15 @@ pub fn rank_pack<'a>(
                 if s > fit {
                     fit = s;
                     fit_reasons = why;
+                    let pi = probes
+                        .iter()
+                        .position(|p| std::ptr::eq(p, probe))
+                        .unwrap_or(0);
+                    if let Some((name, w)) = &weakest[pi] {
+                        if s > *w && !card.is_land() && *name != card.name {
+                            fit_reasons.insert(0, format!("upgrade over {} ({:.1})", name, w));
+                        }
+                    }
                     if deck.commander.is_none() {
                         fit_reasons.insert(
                             0,
@@ -545,11 +560,7 @@ pub fn decode_text(bytes: &[u8]) -> String {
     }
 }
 
-/// Splits a CSV line, honouring quoted fields ("Ka-Zar, of the..." stays one field).
-fn csv_fields(line: &str) -> Vec<String> {
-    csv_fields_by(line, ',')
-}
-
+/// Splits a CSV line on `sep`, honouring quoted fields ("Ka-Zar, of the..." stays one field).
 fn csv_fields_by(line: &str, sep: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
