@@ -633,7 +633,7 @@ fn mirror_matches_are_even_and_better_decks_win_more() {
     let mut rng = Rng::new(5);
     let me = &decks[0];
     let mut wins = 0;
-    let n = 400;
+    let n = 800;
     for k in 0..n {
         let seat = k % 4;
         let table: Vec<&Prepared> = vec![me, me, me, me];
