@@ -59,8 +59,10 @@ pub struct Perm {
     pub born: u32,
     /// Goaded by this player (until their next turn).
     pub goad: Option<u8>,
-    /// "Can't attack or block" / "loses all abilities" from a lasting effect.
+    /// "Can't attack or block" (from an effect or an Aura), worked out by `recalc`.
     pub locked: bool,
+    /// Locked by a one-off effect ("target creature can't attack or block for as long as...").
+    pub lock_effect: bool,
     pub crewed: bool,
     pub prepared: bool,
     pub loyalty_used: bool,
@@ -69,6 +71,8 @@ pub struct Perm {
     /// Cards exiled "until ~ leaves the battlefield".
     pub holding: Vec<(u8, CardRef)>,
     pub activations: u8,
+    /// Once-each-turn triggers that already fired this turn (bit per ability).
+    pub fired: u32,
     // Values after static effects (`Game::recalc`).
     pub p: i16,
     pub t: i16,
@@ -128,6 +132,9 @@ pub struct Player<'a> {
     pub extra_combats: u8,
     /// How much each opponent has attacked this player recently (for retaliation).
     pub grudge: [f32; 8],
+    /// The last instant or sorcery cast (for copy effects): (card, back face).
+    pub last_spell: Option<(CardRef, bool)>,
+    pub mulligans: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +176,17 @@ pub struct Game<'a> {
     /// Guards against endless trigger loops.
     pub resolved_this_action: u32,
     pub log: Option<Vec<String>>,
+    /// The permanent the AI has in mind for its next targeted spell (protection, tricks,
+    /// removal aimed at an attacker).
+    pub focus: Option<u32>,
+    /// Bumped whenever the board changes (`recalc`); the AI caches values per tick.
+    pub tick: u64,
+    /// Per permanent index: (tick, id, value).
+    pub vcache: std::cell::RefCell<Vec<(u64, u32, f32)>>,
+    /// Per player: (tick, threat).
+    pub tcache: std::cell::RefCell<[(u64, f32); 8]>,
+    /// Per (me, opponent): (tick, weight).
+    pub wcache: std::cell::RefCell<[[(u64, f32); 8]; 8]>,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -195,6 +213,9 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             text: text.to_string(),
             until_eot: false,
             counter_goal: None,
+            filter: Filter::default(),
+            once_per_turn: false,
+            second_draw: false,
         };
         let it = Target {
             kind: crate::abilities::Kind::Creature,
@@ -214,17 +235,64 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             text: String::new(),
             until_eot: false,
             counter_goal: None,
+            filter: Filter::default(),
+            once_per_turn: false,
+            second_draw: false,
         };
         vec![
-            (Tok::Food, vec![act(2, true, vec![Effect::GainLife(Amount::fixed(3))], "{2}, {t}, sacrifice this: you gain 3 life")]),
-            (Tok::Clue, vec![act(2, false, vec![Effect::Draw { amount: Amount::fixed(1), you: true }], "{2}, sacrifice this: draw a card")]),
-            (Tok::Map, vec![act(1, true, vec![Effect::PlusCounters { amount: Amount::fixed(1), to: it }], "{1}, {t}, sacrifice this: target creature you control explores")]),
-            (Tok::Blood, vec![act(1, true, vec![Effect::Loot], "{1}, {t}, discard a card, sacrifice this: draw a card")]),
+            (
+                Tok::Food,
+                vec![act(
+                    2,
+                    true,
+                    vec![Effect::GainLife(Amount::fixed(3))],
+                    "{2}, {t}, sacrifice this: you gain 3 life",
+                )],
+            ),
+            (
+                Tok::Clue,
+                vec![act(
+                    2,
+                    false,
+                    vec![Effect::Draw {
+                        amount: Amount::fixed(1),
+                        you: true,
+                    }],
+                    "{2}, sacrifice this: draw a card",
+                )],
+            ),
+            (
+                Tok::Map,
+                vec![act(
+                    1,
+                    true,
+                    vec![Effect::PlusCounters {
+                        amount: Amount::fixed(1),
+                        to: it,
+                    }],
+                    "{1}, {t}, sacrifice this: target creature you control explores",
+                )],
+            ),
+            (
+                Tok::Blood,
+                vec![act(
+                    1,
+                    true,
+                    vec![Effect::Loot],
+                    "{1}, {t}, discard a card, sacrifice this: draw a card",
+                )],
+            ),
             (
                 Tok::Jace,
                 vec![
                     loyalty(-1, vec![Effect::Scry(Amount::fixed(1))]),
-                    loyalty(-3, vec![Effect::Draw { amount: Amount::fixed(1), you: true }]),
+                    loyalty(
+                        -3,
+                        vec![Effect::Draw {
+                            amount: Amount::fixed(1),
+                            you: true,
+                        }],
+                    ),
                 ],
             ),
         ]
@@ -250,9 +318,6 @@ impl<'a> Game<'a> {
 
     /// The abilities a permanent has.
     pub fn abilities_of(&self, perm: &Perm) -> &'a [SimAbility] {
-        if perm.locked && perm.is_creature() {
-            return &[];
-        }
         match (perm.tok, perm.card) {
             (Tok::None | Tok::Creature | Tok::Other, Some(r)) => &self.card(r).abilities,
             (t, _) => token_abilities(t),
@@ -274,7 +339,11 @@ impl<'a> Game<'a> {
     }
 
     pub fn rand(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.rng.next() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.rng.next() % n as u64) as usize
+        }
     }
 
     // ------------------------------------------------------------ statics
@@ -282,10 +351,12 @@ impl<'a> Game<'a> {
     /// Re-applies static effects: anthems, Equipment and Aura bonuses, conditional
     /// self-buffs, locks; then state-based actions.
     pub fn recalc(&mut self) {
+        self.tick += 1;
         for x in self.perms.iter_mut() {
             x.p = x.base_p + x.counters + x.temp_p;
             x.t = x.base_t + x.counters + x.temp_t;
             x.eff_kw = x.kw | x.temp_kw;
+            x.locked = x.lock_effect;
             if let Some(r) = x.card {
                 let c = &self.players[r.0 as usize].cards[r.1 as usize];
                 x.ward = c.ward;
@@ -296,23 +367,43 @@ impl<'a> Game<'a> {
         let mut mods: Vec<(usize, i16, i16, u32, bool)> = Vec::new();
         for si in 0..self.perms.len() {
             let src = &self.perms[si];
+            if src.card.is_none_or(|r| !self.card(r).has_static)
+                || matches!(
+                    src.tok,
+                    Tok::Treasure | Tok::Food | Tok::Clue | Tok::Map | Tok::Blood | Tok::Jace
+                )
+            {
+                continue;
+            }
             for a in self.abilities_of(src) {
-                if a.trig != Trig::Static || !self.cond_holds(&a.cond, src.ctrl as usize, Some(si)) {
+                if a.trig != Trig::Static || !self.cond_holds(&a.cond, src.ctrl as usize, Some(si))
+                {
                     continue;
                 }
-                let attached_text = a.text.starts_with("equipped") || a.text.starts_with("enchanted");
+                let attached_text =
+                    a.text.starts_with("equipped") || a.text.starts_with("enchanted");
                 for e in &a.effects {
                     let (dp, dt, kw, lock, target) = match e {
-                        Effect::Pump { power, toughness, to, until_eot: false } => {
-                            (*power as i16, *toughness as i16, 0, false, Some(to))
-                        }
-                        Effect::Shrink { amount, to, until_eot: false } => {
-                            (-amount.n as i16, -amount.n as i16, 0, false, Some(to))
-                        }
-                        Effect::Grant { keywords, to, until_eot: false } => {
-                            (0, 0, keyword_bits(keywords), false, Some(to))
-                        }
-                        Effect::Lock { target, lasting: true } if attached_text => (0, 0, 0, true, Some(target)),
+                        Effect::Pump {
+                            power,
+                            toughness,
+                            to,
+                            until_eot: false,
+                        } => (*power as i16, *toughness as i16, 0, false, Some(to)),
+                        Effect::Shrink {
+                            amount,
+                            to,
+                            until_eot: false,
+                        } => (-amount.n as i16, -amount.n as i16, 0, false, Some(to)),
+                        Effect::Grant {
+                            keywords,
+                            to,
+                            until_eot: false,
+                        } => (0, 0, keyword_bits(keywords), false, Some(to)),
+                        Effect::Lock {
+                            target,
+                            lasting: true,
+                        } if attached_text => (0, 0, 0, true, Some(target)),
                         _ => continue,
                     };
                     let Some(to) = target else { continue };
@@ -328,7 +419,7 @@ impl<'a> Game<'a> {
                         }
                         continue;
                     }
-                    let filt = filter_of(&a.text);
+                    let filt = &a.filter;
                     for (ti, t) in self.perms.iter().enumerate() {
                         if !t.is_creature() && filt.types & !T_CREATURE == 0 {
                             continue;
@@ -388,7 +479,9 @@ impl<'a> Game<'a> {
             Cond::Always => true,
             Cond::Equipped => src.is_some_and(|s| {
                 let id = self.perms[s].id;
-                self.perms.iter().any(|x| x.is(T_EQUIPMENT) && x.attached == Some(id))
+                self.perms
+                    .iter()
+                    .any(|x| x.is(T_EQUIPMENT) && x.attached == Some(id))
             }),
             Cond::Teamwork | Cond::Gift | Cond::CastFromGraveyard => false,
             Cond::Storied => pl.enduring_story,
@@ -396,7 +489,10 @@ impl<'a> Game<'a> {
             Cond::CreatureDiedThisTurn => self.died_this_turn > 0,
             Cond::Graveyard(n, creatures) => {
                 let k = if *creatures {
-                    pl.graveyard.iter().filter(|&&c| pl.cards[c as usize].is(T_CREATURE)).count()
+                    pl.graveyard
+                        .iter()
+                        .filter(|&&c| pl.cards[c as usize].is(T_CREATURE))
+                        .count()
                 } else {
                     pl.graveyard.len()
                 };
@@ -433,7 +529,9 @@ impl<'a> Game<'a> {
             Cond::MyTurn => self.active == p,
             Cond::NotPrepared => src.is_some_and(|s| !self.perms[s].prepared),
             // Can't be checked: decided once per check, deterministically from the round.
-            Cond::Chance(f) => ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f,
+            Cond::Chance(f) => {
+                ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f
+            }
         }
     }
 
@@ -454,10 +552,16 @@ impl<'a> Game<'a> {
             let c = self.card(r);
             let land = x.is(T_LAND);
             if land || c.mana_ability && !(x.is_creature() && x.sick && !x.has(HASTE)) {
-                if x.locked && !land {
-                    continue;
-                }
-                out.push((i, if c.produces == 0 && land { 0 } else { c.produces }, c.mana_amount.max(1), false));
+                out.push((
+                    i,
+                    if c.produces == 0 && land {
+                        0
+                    } else {
+                        c.produces
+                    },
+                    c.mana_amount.max(1),
+                    false,
+                ));
             }
         }
         // Cheapest-to-lose first: single-colour lands before rainbow sources, Treasures last.
@@ -670,7 +774,9 @@ impl<'a> Game<'a> {
             let owner = perm.owner as usize;
             if r.0 as usize == owner {
                 let pl = &mut self.players[owner];
-                if perm.commander > 0 && matches!(to, Zone::Graveyard | Zone::Exile | Zone::Library(_)) {
+                if perm.commander > 0
+                    && matches!(to, Zone::Graveyard | Zone::Exile | Zone::Library(_))
+                {
                     pl.command.push((r.1, perm.commander));
                 } else {
                     match to {
@@ -740,13 +846,26 @@ impl<'a> Game<'a> {
     }
 
     /// Creates a new permanent and returns its index.
-    pub fn new_perm(&mut self, ctrl: usize, owner: usize, card: Option<CardRef>, tok: Tok) -> usize {
+    pub fn new_perm(
+        &mut self,
+        ctrl: usize,
+        owner: usize,
+        card: Option<CardRef>,
+        tok: Tok,
+    ) -> usize {
         let id = self.next_id;
         self.next_id += 1;
         let (types, subtypes, colors, p, t, kw) = match card {
             Some(r) if tok == Tok::None || tok == Tok::Creature || tok == Tok::Other => {
                 let c = self.card(r);
-                (c.types, c.subtypes.clone(), c.colors, c.power, c.toughness, c.kw)
+                (
+                    c.types,
+                    c.subtypes.clone(),
+                    c.colors,
+                    c.power,
+                    c.toughness,
+                    c.kw,
+                )
             }
             _ => (T_ARTIFACT, Vec::new(), 0, 0, 0, 0),
         };
@@ -780,12 +899,14 @@ impl<'a> Game<'a> {
             born: self.round,
             goad: None,
             locked: false,
+            lock_effect: false,
             crewed: false,
             prepared: false,
             loyalty_used: false,
             threaten_from: None,
             holding: Vec::new(),
             activations: 0,
+            fired: 0,
             p,
             t,
             eff_kw: kw,
@@ -804,6 +925,7 @@ impl<'a> Game<'a> {
             Tok::Germ => {
                 perm.types = T_CREATURE | T_TOKEN;
             }
+            Tok::Creature if card.is_none() => perm.types = T_CREATURE | T_TOKEN,
             Tok::Creature | Tok::Other => perm.types |= T_TOKEN,
             Tok::None => {}
             _ => perm.types = T_ARTIFACT | T_TOKEN,
@@ -812,10 +934,18 @@ impl<'a> Game<'a> {
         self.perms.len() - 1
     }
 
-    /// Puts card `idx` from player `list`'s deck onto the battlefield under `ctrl`.
-    pub fn enter_card(&mut self, list: usize, idx: u16, ctrl: usize, commander_slot: bool) -> usize {
+    /// Puts card `idx` from player `list`'s deck onto the battlefield under `ctrl`. Returns
+    /// its index afterwards (None if it didn't survive arriving).
+    pub fn enter_card(
+        &mut self,
+        list: usize,
+        idx: u16,
+        ctrl: usize,
+        _commander: bool,
+    ) -> Option<usize> {
         let r = (list as u8, idx);
         let i = self.new_perm(ctrl, list, Some(r), Tok::None);
+        let id = self.perms[i].id;
         let c = self.card(r);
         if c.is(T_LAND) && c.enters_tapped {
             self.perms[i].tapped = true;
@@ -823,9 +953,8 @@ impl<'a> Game<'a> {
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
         }
-        let _ = commander_slot;
         self.after_enter(i);
-        i
+        self.idx(id)
     }
 
     /// Enters-the-battlefield bookkeeping: triggers, Sagas, living weapon, Auras, legend rule.
@@ -887,7 +1016,9 @@ impl<'a> Game<'a> {
 
     /// An event about player `p` (drawing, gaining life, landfall...).
     pub fn emit(&mut self, ev: Ev, p: usize, subject: Option<u32>) {
-        let snap = subject.and_then(|id| self.idx(id)).map(|i| self.perms[i].clone());
+        let snap = subject
+            .and_then(|id| self.idx(id))
+            .map(|i| self.perms[i].clone());
         match snap {
             Some(s) => self.emit_about(ev, p, &s),
             None => self.emit_inner(ev, p, None),
@@ -900,10 +1031,27 @@ impl<'a> Game<'a> {
 
     fn emit_inner(&mut self, ev: Ev, p: usize, subject: Option<&Perm>) {
         let mut add = Vec::new();
-        for src in &self.perms {
+        let mut fired = Vec::new();
+        let bit = ev_bit(ev);
+        for (si, src) in self.perms.iter().enumerate() {
+            // Only cards that listen for this kind of event (tokens without a card don't).
+            let Some(r) = src.card else { continue };
+            if self.card(r).ev_mask & bit == 0
+                || src.tok != Tok::None && src.tok != Tok::Other && src.tok != Tok::Creature
+            {
+                continue;
+            }
             for (ai, a) in self.abilities_of(src).iter().enumerate() {
-                let Trig::Event(kind, f) = &a.trig else { continue };
+                let Trig::Event(kind, f) = &a.trig else {
+                    continue;
+                };
                 if *kind != ev {
+                    continue;
+                }
+                if a.once_per_turn && ai < 32 && src.fired & (1 << ai) != 0 {
+                    continue;
+                }
+                if a.second_draw && ev == Ev::Draw && self.players[p].drawn_this_turn != 2 {
                     continue;
                 }
                 let mine = src.ctrl as usize == p;
@@ -914,8 +1062,12 @@ impl<'a> Game<'a> {
                 }
                 if let Some(s) = subject {
                     // Self-referential events ("whenever ~ is dealt damage", "becomes the target").
-                    let about_self = a.text.contains("whenever ~") && !a.text.contains("whenever ~ or");
-                    if matches!(ev, Ev::Damaged | Ev::Targeted | Ev::TeamworkTapped) && about_self && s.id != src.id {
+                    let about_self =
+                        a.text.contains("whenever ~") && !a.text.contains("whenever ~ or");
+                    if matches!(ev, Ev::Damaged | Ev::Targeted | Ev::TeamworkTapped)
+                        && about_self
+                        && s.id != src.id
+                    {
                         continue;
                     }
                     if f.other && s.id == src.id {
@@ -924,10 +1076,16 @@ impl<'a> Game<'a> {
                     if ev == Ev::OtherEnters && s.id == src.id {
                         continue;
                     }
-                    if f.types != 0 && s.types & f.types == 0 && !(f.types & T_CREATURE != 0 && s.is_creature()) {
+                    if f.types != 0
+                        && s.types & f.types == 0
+                        && !(f.types & T_CREATURE != 0 && s.is_creature())
+                    {
                         continue;
                     }
                     if f.not_types != 0 && s.types & f.not_types != 0 {
+                        continue;
+                    }
+                    if (f.nontoken && s.is_token()) || (f.token && !s.is_token()) {
                         continue;
                     }
                     if let Some(sub) = &f.subtype {
@@ -936,19 +1094,29 @@ impl<'a> Game<'a> {
                         }
                     }
                 }
+                if a.once_per_turn && ai < 32 {
+                    fired.push((si, ai));
+                }
                 add.push(Pending {
                     ctrl: src.ctrl,
                     source: Some(src.id),
-                    card: src.card.unwrap_or((src.ctrl, NO_CARD)),
+                    card: r,
                     back: false,
                     ability: ai as u16,
-                    snapshot: if src.card.is_none() || src.tok != Tok::None { Some(src.clone()) } else { None },
+                    snapshot: if src.tok != Tok::None {
+                        Some(src.clone())
+                    } else {
+                        None
+                    },
                     subject: subject.map(|s| s.id),
                     teamwork: false,
                     gift: false,
                     from_graveyard: false,
                 });
             }
+        }
+        for (si, ai) in fired {
+            self.perms[si].fired |= 1 << ai;
         }
         self.pending.extend(add);
     }
@@ -964,7 +1132,11 @@ impl<'a> Game<'a> {
         };
         self.emit_about(Ev::Cast, p, &probe);
         if !card.is(T_CREATURE) {
-            for x in self.perms.iter_mut().filter(|x| x.ctrl as usize == p && x.has(PROWESS)) {
+            for x in self
+                .perms
+                .iter_mut()
+                .filter(|x| x.ctrl as usize == p && x.has(PROWESS))
+            {
                 x.temp_p += 1;
                 x.temp_t += 1;
             }
@@ -1020,12 +1192,14 @@ impl<'a> Game<'a> {
             born: 0,
             goad: None,
             locked: false,
+            lock_effect: false,
             crewed: false,
             prepared: false,
             loyalty_used: false,
             threaten_from: None,
             holding: Vec::new(),
             activations: 0,
+            fired: 0,
             p: 0,
             t: 0,
             eff_kw: 0,
@@ -1056,14 +1230,20 @@ impl<'a> Game<'a> {
                 if !self.players[p].alive {
                     // A player who leaves takes their permanents with them (CR 800.4a).
                     let before = self.perms.len();
-                    self.perms.retain(|x| x.owner as usize != p && x.ctrl as usize != p);
+                    self.perms
+                        .retain(|x| x.owner as usize != p && x.ctrl as usize != p);
                     changed |= self.perms.len() != before;
                 }
             }
             let dead = self.perms.iter().position(|x| {
-                (x.is_creature() && (x.t <= 0 || (!x.has(INDESTRUCTIBLE) && (x.damage >= x.t || x.deathtouched && x.damage > 0))))
+                (x.is_creature()
+                    && (x.t <= 0
+                        || (!x.has(INDESTRUCTIBLE)
+                            && (x.damage >= x.t || x.deathtouched && x.damage > 0))))
                     || (x.is(T_PLANESWALKER) && !x.is_creature() && x.loyalty <= 0)
-                    || (x.is(T_AURA) && x.attached.is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))
+                    || (x.is(T_AURA)
+                        && x.attached
+                            .is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))
             });
             if let Some(i) = dead {
                 let x = &self.perms[i];

@@ -1,0 +1,959 @@
+//! A 4-player Commander game simulator, so decks can be compared by playing them rather
+//! than only by scoring their cards.
+//!
+//! Cards are read by the ability parser (`abilities`) and compiled into what the game needs
+//! (`compile`): costs, types, keywords, triggers, conditions. The game (`state`) has every
+//! zone - library, hand, graveyard, exile, command zone, battlefield - with creatures,
+//! artifacts, enchantments, Auras, Equipment, Vehicles, Sagas, planeswalkers and tokens;
+//! mana is paid source by source with the right colours. Every parsed effect resolves
+//! (`resolve`), combat follows the combat rules (`combat`), and each seat is played by an
+//! AI that plans its mana, holds up interaction, picks fights and blocks like a careful
+//! player (`ai`). It's still a model: where a card's text goes beyond what the parser
+//! reads, the simulator plays what was read.
+
+pub mod ai;
+pub mod combat;
+pub mod compile;
+pub mod resolve;
+pub mod state;
+#[cfg(test)]
+mod tests;
+
+use crate::analysis::Rng;
+use crate::db::{CardDb, Rules};
+use crate::deck::Deck;
+use compile::*;
+use state::*;
+
+/// A deck read once into simulator cards, ready to play many games.
+pub struct Prepared {
+    pub cards: Vec<SimCard>,
+    library: Vec<u16>,
+    /// Command zone: (card, slot) - the commander, and The Prismatic Piper or a partner.
+    commanders: Vec<(u16, u8)>,
+}
+
+impl Prepared {
+    pub fn new(deck: &Deck, db: &CardDb) -> Prepared {
+        let mut cards = Vec::new();
+        let mut library = Vec::new();
+        for (name, n) in &deck.cards {
+            if let Some(c) = db.get(name) {
+                cards.push(compile(c));
+                for _ in 0..*n {
+                    library.push((cards.len() - 1) as u16);
+                }
+            }
+        }
+        let mut commanders = Vec::new();
+        for (slot, name) in [(1u8, &deck.commander), (2u8, &deck.partner)] {
+            if let Some(c) = name.as_ref().and_then(|n| db.get(n)) {
+                cards.push(compile(c));
+                commanders.push(((cards.len() - 1) as u16, slot));
+            }
+        }
+        Prepared {
+            cards,
+            library,
+            commanders,
+        }
+    }
+}
+
+/// Where a spell is cast from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Src {
+    Hand(usize),
+    /// Index into the command zone list.
+    Command(usize),
+    /// Index into the graveyard (cards allowed to be cast from there).
+    Graveyard(usize),
+    /// Index into the cards exiled on an Adventure.
+    Adventure(usize),
+    /// A prepared creature's spell copy (CR 722).
+    Prepared(u32),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CastOpts {
+    /// Cast the back face (Adventure / other double-faced spell) from hand.
+    pub back: bool,
+    pub free: bool,
+    pub teamwork: bool,
+    pub gift: bool,
+    pub offspring: bool,
+    pub convoke: bool,
+}
+
+impl<'a> Game<'a> {
+    pub fn new(decks: &[&'a Prepared], rules: &Rules, rng: Rng) -> Game<'a> {
+        let life = rules.starting_life.max(1) as i32;
+        let players = decks
+            .iter()
+            .map(|d| Player {
+                cards: &d.cards,
+                life,
+                poison: 0,
+                library: d.library.clone(),
+                hand: Vec::new(),
+                graveyard: Vec::new(),
+                exile: Vec::new(),
+                adventure: Vec::new(),
+                recast: Vec::new(),
+                command: d.commanders.clone(),
+                casts: [0; 3],
+                cmd_damage: [[0; 3]; 8],
+                alive: true,
+                lands_played: 0,
+                spells_this_turn: 0,
+                drawn_this_turn: 0,
+                attacked_this_turn: false,
+                gained_life_turn: false,
+                lost_life_turn: false,
+                enduring_story: false,
+                hijacked: false,
+                pool: 0,
+                extra_combats: 0,
+                grudge: [0.0; 8],
+                last_spell: None,
+                mulligans: 0,
+            })
+            .collect();
+        let mut g = Game {
+            players,
+            perms: Vec::new(),
+            next_id: 1,
+            round: 0,
+            active: 0,
+            rng,
+            start_life: life,
+            died_this_turn: 0,
+            pending: Vec::new(),
+            fog: false,
+            in_combat: false,
+            resolved_this_action: 0,
+            log: None,
+            focus: None,
+            tick: 1,
+            vcache: Default::default(),
+            tcache: std::cell::RefCell::new([(0, 0.0); 8]),
+            wcache: std::cell::RefCell::new([[(0, 0.0); 8]; 8]),
+        };
+        for p in 0..g.players.len() {
+            let mut lib = std::mem::take(&mut g.players[p].library);
+            g.rng.shuffle(&mut lib);
+            g.players[p].library = lib;
+            ai::mulligan(&mut g, p);
+        }
+        g
+    }
+
+    /// The card a cast would use, and whether it's the back face.
+    pub fn spell_card(&self, p: usize, src: Src, opts: CastOpts) -> Option<(u16, bool)> {
+        let pl = &self.players[p];
+        Some(match src {
+            Src::Hand(h) => (*pl.hand.get(h)?, opts.back),
+            Src::Command(k) => (pl.command.get(k)?.0, false),
+            Src::Graveyard(k) => (*pl.graveyard.get(k)?, false),
+            Src::Adventure(k) => (*pl.adventure.get(k)?, false),
+            Src::Prepared(id) => {
+                let x = &self.perms[self.idx(id)?];
+                if !x.prepared || x.ctrl as usize != p {
+                    return None;
+                }
+                let r = x.card?;
+                if r.0 as usize != p {
+                    return None;
+                }
+                (r.1, true)
+            }
+        })
+    }
+
+    /// What casting from `src` costs right now (tax, reductions, extras), if it's allowed.
+    pub fn cast_cost(&self, p: usize, src: Src, opts: CastOpts) -> Option<Mana> {
+        let (idx, back) = self.spell_card(p, src, opts)?;
+        let c = &self.players[p].cards[idx as usize];
+        if c.is(T_LAND) && !back {
+            return None;
+        }
+        if let Src::Graveyard(_) = src {
+            if !self.players[p].recast.contains(&idx) {
+                return None;
+            }
+        }
+        let (mut cost, types, subtypes) = if back {
+            let b = c.back.as_ref()?;
+            if matches!(src, Src::Hand(_)) && b.kind == BackKind::Prepare {
+                return None;
+            }
+            (b.cost, b.types, &c.subtypes)
+        } else {
+            (c.cost, c.types, &c.subtypes)
+        };
+        if cost.x {
+            // X spells: spend about half the remaining mana on X.
+            cost =
+                cost.plus_generic((self.mana_available(p).saturating_sub(cost.total()) / 2).max(1));
+        }
+        if let Src::Command(k) = src {
+            let slot = self.players[p].command[k].1 as usize;
+            cost = cost.plus_generic(2 * self.players[p].casts[slot.min(2)] as u32);
+        }
+        if opts.free {
+            return Some(Mana::default());
+        }
+        // "Spells you cast cost {N} less" (and the like).
+        let mut less = 0;
+        for x in self.perms.iter().filter(|x| x.ctrl as usize == p) {
+            let Some(r) = x.card else { continue };
+            if let Some((n, f)) = &self.card(r).cost_reduction {
+                let type_ok = f.types == 0 || types & f.types != 0;
+                let not_ok = f.not_types == 0 || types & f.not_types == 0;
+                let sub_ok = f
+                    .subtype
+                    .as_ref()
+                    .is_none_or(|s| subtypes.iter().any(|t| t == s));
+                if type_ok && not_ok && sub_ok {
+                    less += *n as u32;
+                }
+            }
+        }
+        if c.affinity {
+            less += self
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == p && x.is(T_ARTIFACT))
+                .count() as u32;
+        }
+        if opts.convoke && (c.convoke || c.improvise) {
+            less += self.convoke_tappers(p, c).len() as u32;
+        }
+        cost = cost.minus_generic(less);
+        if opts.offspring {
+            cost = cost.plus_generic(c.offspring.unwrap_or(0) as u32);
+        }
+        Some(cost)
+    }
+
+    /// Creatures (convoke) or artifacts (improvise) that could be tapped to help pay.
+    fn convoke_tappers(&self, p: usize, c: &SimCard) -> Vec<u32> {
+        self.perms
+            .iter()
+            .filter(|x| {
+                x.ctrl as usize == p
+                    && !x.tapped
+                    && ((c.convoke && x.is_creature())
+                        || (c.improvise && x.is(T_ARTIFACT) && !x.is_creature()))
+                    && x.tok != Tok::Treasure
+            })
+            .map(|x| x.id)
+            .collect()
+    }
+
+    pub fn can_cast(&self, p: usize, src: Src, opts: CastOpts) -> bool {
+        self.cast_cost(p, src, opts)
+            .is_some_and(|m| self.can_pay(p, &m))
+    }
+
+    /// Casts a spell: pays, moves the card, fires cast triggers, lets opponents respond,
+    /// then resolves it. False if it couldn't be cast.
+    pub fn cast(&mut self, p: usize, src: Src, opts: CastOpts) -> bool {
+        let Some((idx, back)) = self.spell_card(p, src, opts) else {
+            return false;
+        };
+        let Some(cost) = self.cast_cost(p, src, opts) else {
+            return false;
+        };
+        let c: &'a SimCard = &self.players[p].cards[idx as usize];
+        // Convoke / improvise: tap helpers first (the cost already counts them).
+        if opts.convoke && (c.convoke || c.improvise) && !opts.free {
+            let tappers = self.convoke_tappers(p, c);
+            let mut base = self
+                .cast_cost(
+                    p,
+                    src,
+                    CastOpts {
+                        convoke: false,
+                        ..opts
+                    },
+                )
+                .unwrap_or(cost);
+            for id in tappers {
+                if base.generic == 0 {
+                    break;
+                }
+                if let Some(i) = self.idx(id) {
+                    self.perms[i].tapped = true;
+                    base.generic -= 1;
+                }
+            }
+            if !self.pay(p, &base) {
+                return false;
+            }
+        } else if !self.pay(p, &cost) {
+            return false;
+        }
+        // Teamwork: tap creatures with enough total power as an extra cost.
+        let mut teamwork = false;
+        if opts.teamwork {
+            if let Some(n) = c.teamwork {
+                let helpers = ai::teamwork_tappers(self, p, n as i16);
+                if !helpers.is_empty() {
+                    teamwork = true;
+                    for id in helpers {
+                        if let Some(i) = self.idx(id) {
+                            self.perms[i].tapped = true;
+                            let snap = self.perms[i].clone();
+                            self.emit_about(Ev::TeamworkTapped, p, &snap);
+                        }
+                    }
+                }
+            }
+        }
+        // The card leaves its zone.
+        let mut commander_slot = 0;
+        let from_graveyard = matches!(src, Src::Graveyard(_));
+        match src {
+            Src::Hand(h) => {
+                self.players[p].hand.remove(h);
+            }
+            Src::Command(k) => {
+                let (_, slot) = self.players[p].command.remove(k);
+                commander_slot = slot;
+                self.players[p].casts[slot as usize % 3] += 1;
+            }
+            Src::Graveyard(k) => {
+                self.players[p].graveyard.remove(k);
+                self.players[p].recast.retain(|&x| x != idx);
+            }
+            Src::Adventure(k) => {
+                self.players[p].adventure.remove(k);
+            }
+            Src::Prepared(id) => {
+                if let Some(i) = self.idx(id) {
+                    self.perms[i].prepared = false;
+                }
+            }
+        }
+        let gift = opts.gift && c.gift;
+        if gift {
+            if let Some(o) = ai::choose_opponent(self, p, 0) {
+                if c.abilities.iter().any(|a| a.text.contains("gift a card")) {
+                    self.draw(o, 1);
+                } else {
+                    self.make_item(o, "treasure");
+                }
+            }
+        }
+        let spell_types = if back {
+            c.back.as_ref().map(|b| b.types).unwrap_or(T_SORCERY)
+        } else {
+            c.types
+        };
+        let probe_card = SimCard {
+            types: spell_types,
+            ..c.clone()
+        };
+        self.on_cast(p, &probe_card);
+        self.note(|| {
+            format!(
+                "P{} casts {}{}",
+                p,
+                c.name,
+                if back { " (back face)" } else { "" }
+            )
+        });
+        // Opponents may counter it.
+        if !c.cant_be_countered && ai::respond_to_spell(self, p, idx, back) {
+            self.note(|| format!("  {} is countered", c.name));
+            match src {
+                Src::Prepared(_) => {}
+                _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
+                _ => self.players[p].graveyard.push(idx),
+            }
+            self.run_pending();
+            return true;
+        }
+        let permanent = !back && c.is_permanent();
+        if permanent {
+            let entered = self.enter_card(p, idx, p, commander_slot > 0);
+            let Some(i) = entered else {
+                self.run_pending();
+                self.sba();
+                return true;
+            };
+            let id = self.perms[i].id;
+            self.perms[i].commander = commander_slot;
+            for pend in self.pending.iter_mut().filter(|x| x.source == Some(id)) {
+                pend.teamwork = teamwork;
+                pend.gift = gift;
+            }
+            // Auras attach as they enter.
+            if c.is(T_AURA) {
+                if let Some(t) = ai::aura_target(self, p, idx) {
+                    let tid = self.perms[t].id;
+                    if let Some(j) = self.idx(id) {
+                        self.perms[j].attached = Some(tid);
+                    }
+                }
+            }
+            if opts.offspring && c.offspring.is_some() {
+                let t = self.new_perm(p, p, Some((p as u8, idx)), Tok::Other);
+                self.perms[t].base_p = 1;
+                self.perms[t].base_t = 1;
+                self.after_enter(t);
+            }
+        } else {
+            let abilities: &'a [SimAbility] = if back {
+                c.back
+                    .as_ref()
+                    .map(|b| b.abilities.as_slice())
+                    .unwrap_or(&[])
+            } else {
+                &c.abilities
+            };
+            for (k, a) in abilities.iter().enumerate() {
+                if a.trig == Trig::Spell
+                    || (back && a.trig != Trig::Static && !matches!(a.trig, Trig::Activated { .. }))
+                {
+                    self.pending.push(Pending {
+                        ctrl: p as u8,
+                        source: None,
+                        card: (p as u8, idx),
+                        back,
+                        ability: k as u16,
+                        snapshot: None,
+                        subject: None,
+                        teamwork,
+                        gift,
+                        from_graveyard,
+                    });
+                }
+            }
+            self.run_pending();
+            if c.is(T_INSTANT | T_SORCERY) || back {
+                self.players[p].last_spell = Some(((p as u8, idx), back));
+            }
+            // Where the card goes.
+            let kind = c.back.as_ref().map(|b| b.kind);
+            match src {
+                Src::Prepared(_) => {}
+                Src::Hand(_) if back && kind == Some(BackKind::Adventure) => {
+                    self.players[p].adventure.push(idx)
+                }
+                Src::Graveyard(_) => self.players[p].exile.push(idx),
+                _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
+                _ => self.players[p].graveyard.push(idx),
+            }
+        }
+        self.run_pending();
+        self.sba();
+        true
+    }
+
+    /// The fodder an activated "sacrifice a ..." cost would use.
+    fn sac_fodder(&self, p: usize, src_id: u32, text: &str) -> Option<usize> {
+        let types = if text.contains("sacrifice a creature")
+            || text.contains("sacrifice another creature")
+        {
+            T_CREATURE
+        } else if text.contains("sacrifice an artifact")
+            || text.contains("sacrifice another artifact")
+        {
+            T_ARTIFACT
+        } else if text.contains("sacrifice a land") {
+            T_LAND
+        } else {
+            0xFFFF & !T_LAND
+        };
+        ai::fodder(self, p, types, src_id)
+    }
+
+    /// The mana an activated ability needs now (None if it can't be activated).
+    pub fn activation_cost(&self, p: usize, i: usize, k: usize) -> Option<Mana> {
+        let x = &self.perms[i];
+        if x.ctrl as usize != p {
+            return None;
+        }
+        let ab = self.abilities_of(x).get(k)?;
+        match &ab.trig {
+            Trig::Activated {
+                mana,
+                tap,
+                sac_other,
+                discard,
+                life,
+                ..
+            } => {
+                if ab
+                    .effects
+                    .iter()
+                    .any(|e| matches!(e, crate::abilities::Effect::AddMana(_)))
+                    && *tap
+                    && *mana == 0
+                {
+                    return None; // mana abilities are used as mana sources
+                }
+                if *tap && (x.tapped || (x.is_creature() && x.sick && !x.has(HASTE))) {
+                    return None;
+                }
+                if *sac_other && self.sac_fodder(p, x.id, &ab.text).is_none() {
+                    return None;
+                }
+                if *discard && self.players[p].hand.is_empty() {
+                    return None;
+                }
+                if *life as i32 >= self.players[p].life {
+                    return None;
+                }
+                if ab.once && x.powered {
+                    return None;
+                }
+                if x.activations >= 3 {
+                    return None; // keep loops in check
+                }
+                Some(Mana::generic(*mana as u32))
+            }
+            Trig::PowerUp(n) => {
+                if x.powered {
+                    return None;
+                }
+                let less = if x.born == self.round {
+                    x.card.map(|r| self.card(r).mv as u32).unwrap_or(0)
+                } else {
+                    0
+                };
+                Some(Mana::generic((*n as u32).saturating_sub(less)))
+            }
+            Trig::Loyalty(n) => {
+                if x.loyalty_used || x.loyalty + (*n as i16) < 0 {
+                    return None;
+                }
+                Some(Mana::default())
+            }
+            _ => None,
+        }
+    }
+
+    /// Activates ability `k` of permanent `id` (paying all its costs). False if it couldn't.
+    pub fn activate(&mut self, p: usize, id: u32, k: usize) -> bool {
+        let Some(i) = self.idx(id) else { return false };
+        let Some(cost) = self.activation_cost(p, i, k) else {
+            return false;
+        };
+        if !self.pay(p, &cost) {
+            return false;
+        }
+        let Some(i) = self.idx(id) else { return false };
+        let x = self.perms[i].clone();
+        let ab = &self.abilities_of(&x)[k];
+        let mut snapshot = None;
+        match &ab.trig {
+            Trig::Activated {
+                tap,
+                sac_self,
+                sac_other,
+                discard,
+                life,
+                ..
+            } => {
+                if *tap {
+                    self.perms[i].tapped = true;
+                }
+                self.perms[i].activations += 1;
+                if ab.once {
+                    self.perms[i].powered = true;
+                }
+                if *life > 0 {
+                    self.lose_life(p, *life as i32);
+                }
+                if *discard {
+                    self.discard(p);
+                }
+                if *sac_other {
+                    if let Some(f) = self.sac_fodder(p, id, &ab.text) {
+                        self.sacrifice(f);
+                    }
+                }
+                if *sac_self {
+                    snapshot = Some(x.clone());
+                    if let Some(i) = self.idx(id) {
+                        self.sacrifice(i);
+                    }
+                }
+            }
+            Trig::PowerUp(_) => self.perms[i].powered = true,
+            Trig::Loyalty(n) => {
+                self.perms[i].loyalty += *n as i16;
+                self.perms[i].loyalty_used = true;
+            }
+            _ => return false,
+        }
+        let card = x.card.unwrap_or((p as u8, NO_CARD));
+        let snapshot =
+            snapshot.or_else(|| (x.card.is_none() || x.tok != Tok::None).then(|| x.clone()));
+        self.note(|| format!("P{} activates {}", p, ab.text));
+        self.pending.push(Pending {
+            ctrl: p as u8,
+            source: Some(id),
+            card,
+            back: false,
+            ability: k as u16,
+            snapshot,
+            subject: None,
+            teamwork: false,
+            gift: false,
+            from_graveyard: false,
+        });
+        self.run_pending();
+        self.sba();
+        true
+    }
+
+    pub fn equip(&mut self, p: usize, equip_id: u32, target_id: u32) -> bool {
+        let Some(e) = self.idx(equip_id) else {
+            return false;
+        };
+        let Some(r) = self.perms[e].card else {
+            return false;
+        };
+        let cost = Mana::generic(self.card(r).equip.unwrap_or(2) as u32);
+        if self.perms[e].attached == Some(target_id) || !self.pay(p, &cost) {
+            return false;
+        }
+        if let Some(e) = self.idx(equip_id) {
+            self.perms[e].attached = Some(target_id);
+        }
+        self.recalc();
+        true
+    }
+
+    pub fn crew(&mut self, p: usize, vehicle_id: u32) -> bool {
+        let Some(v) = self.idx(vehicle_id) else {
+            return false;
+        };
+        let Some(r) = self.perms[v].card else {
+            return false;
+        };
+        let need = self.card(r).crew.unwrap_or(2) as i16;
+        let helpers = ai::crew_tappers(self, p, need, vehicle_id);
+        if helpers.is_empty() {
+            return false;
+        }
+        for id in helpers {
+            if let Some(i) = self.idx(id) {
+                self.perms[i].tapped = true;
+            }
+        }
+        if let Some(v) = self.idx(vehicle_id) {
+            self.perms[v].crewed = true;
+            self.perms[v].sick = false;
+        }
+        self.recalc();
+        true
+    }
+
+    pub fn cycle(&mut self, p: usize, h: usize) -> bool {
+        let c = &self.players[p].cards[self.players[p].hand[h] as usize];
+        let Some((cost, land)) = c.cycling else {
+            return false;
+        };
+        if !self.pay(p, &Mana::generic(cost as u32)) {
+            return false;
+        }
+        let card = self.players[p].hand.remove(h);
+        self.players[p].graveyard.push(card);
+        self.emit(Ev::Discard, p, None);
+        if land {
+            if let Some(k) = ai::land_to_fetch(self, p, true) {
+                let l = self.players[p].library.remove(k);
+                self.players[p].hand.push(l);
+            }
+        } else {
+            self.draw(p, 1);
+        }
+        self.run_pending();
+        true
+    }
+
+    pub fn play_land(&mut self, p: usize, h: usize) {
+        let c = self.players[p].hand.remove(h);
+        self.players[p].lands_played += 1;
+        self.enter_card(p, c, p, false);
+        self.run_pending();
+        self.sba();
+    }
+
+    /// Triggers of "at the beginning of" a phase for the active player `a`.
+    fn phase_triggers(&mut self, a: usize, phase: Phase) {
+        let mut add = Vec::new();
+        for x in &self.perms {
+            for (k, ab) in self.abilities_of(x).iter().enumerate() {
+                if let Trig::Phase {
+                    phase: ph,
+                    any_player,
+                } = ab.trig
+                {
+                    if ph == phase && (x.ctrl as usize == a || any_player) {
+                        add.push(Pending {
+                            ctrl: x.ctrl,
+                            source: Some(x.id),
+                            card: x.card.unwrap_or((x.ctrl, NO_CARD)),
+                            back: false,
+                            ability: k as u16,
+                            snapshot: (x.card.is_none() || x.tok != Tok::None).then(|| x.clone()),
+                            subject: None,
+                            teamwork: false,
+                            gift: false,
+                            from_graveyard: false,
+                        });
+                    }
+                }
+            }
+        }
+        self.pending.extend(add);
+        self.run_pending();
+        self.sba();
+    }
+
+    /// One full turn for player `a`.
+    pub fn take_turn(&mut self, a: usize, first_turn: bool) {
+        self.active = a;
+        self.died_this_turn = 0;
+        for pl in self.players.iter_mut() {
+            pl.lands_played = 0;
+            pl.spells_this_turn = 0;
+            pl.drawn_this_turn = 0;
+            pl.attacked_this_turn = false;
+            pl.gained_life_turn = false;
+            pl.lost_life_turn = false;
+            for g in pl.grudge.iter_mut() {
+                *g *= 0.8;
+            }
+        }
+        // Goad lasts until the goading player's next turn; once-a-turn triggers reset.
+        for x in self.perms.iter_mut() {
+            if x.goad == Some(a as u8) {
+                x.goad = None;
+            }
+            x.fired = 0;
+        }
+        // Untap.
+        for x in self.perms.iter_mut().filter(|x| x.ctrl as usize == a) {
+            if x.stun > 0 && x.tapped {
+                x.stun -= 1;
+            } else {
+                x.tapped = false;
+            }
+            x.sick = false;
+            x.loyalty_used = false;
+            x.activations = 0;
+        }
+        self.recalc();
+        let hijacked = std::mem::take(&mut self.players[a].hijacked);
+        self.phase_triggers(a, Phase::Upkeep);
+        if !first_turn {
+            self.draw(a, 1);
+        }
+        self.run_pending();
+        self.sba();
+        if !self.players[a].alive {
+            return;
+        }
+        // Sagas gain a lore counter after the draw.
+        let sagas: Vec<u32> = self
+            .perms
+            .iter()
+            .filter(|x| x.ctrl as usize == a && x.is(T_SAGA))
+            .map(|x| x.id)
+            .collect();
+        for id in sagas {
+            if let Some(i) = self.idx(id) {
+                self.add_other_counters(i, 1);
+                self.run_pending();
+                if let Some(i) = self.idx(id) {
+                    let ch = self.perms[i]
+                        .card
+                        .map(|r| self.card(r).chapters)
+                        .unwrap_or(3) as i16;
+                    if self.perms[i].other_counters >= ch {
+                        self.sacrifice(i);
+                    }
+                }
+            }
+        }
+        if hijacked {
+            // An opponent runs this turn (MSH Plans): they play a land and nothing useful.
+            if let Some(h) = self.players[a]
+                .hand
+                .iter()
+                .position(|&c| self.players[a].cards[c as usize].is(T_LAND))
+            {
+                self.play_land(a, h);
+            }
+        } else {
+            ai::main_phase(self, a, false);
+            let combats = 1 + self.players[a].extra_combats as usize;
+            for _ in 0..combats {
+                if self.alive_count() <= 1 || !self.players[a].alive {
+                    break;
+                }
+                self.phase_triggers(a, Phase::Combat);
+                self.combat(a);
+            }
+            self.players[a].extra_combats = 0;
+            if self.players[a].alive && self.alive_count() > 1 {
+                ai::main_phase(self, a, true);
+            }
+        }
+        if !self.players[a].alive || self.alive_count() <= 1 {
+            return;
+        }
+        self.phase_triggers(a, Phase::End);
+        // Other players use instant-speed tricks at the end of the turn - mostly the next
+        // player, whose mana is about to untap.
+        let n = self.players.len();
+        for k in 1..n {
+            let o = (a + k) % n;
+            if self.players[o].alive && self.alive_count() > 1 {
+                ai::end_of_turn(self, o, k == 1);
+            }
+        }
+        // Cleanup.
+        while self.players[a].hand.len() > 7 {
+            self.discard(a);
+        }
+        for x in self.perms.iter_mut() {
+            x.damage = 0;
+            x.deathtouched = false;
+            x.temp_p = 0;
+            x.temp_t = 0;
+            x.temp_kw = 0;
+            x.crewed = false;
+            if x.threaten_from.is_some() && x.ctrl as usize == a {
+                x.ctrl = x.threaten_from.take().unwrap_or(x.ctrl);
+            }
+        }
+        for pl in self.players.iter_mut() {
+            pl.pool = 0;
+        }
+        self.fog = false;
+        self.run_pending();
+        self.sba();
+    }
+
+    /// A rough standing for games that hit the round limit.
+    fn standing(&self, p: usize) -> f32 {
+        if !self.players[p].alive {
+            return f32::MIN;
+        }
+        let board: f32 = (0..self.perms.len())
+            .filter(|&i| self.perms[i].ctrl as usize == p)
+            .map(|i| ai::perm_value(self, i))
+            .sum();
+        self.players[p].life as f32 + 0.5 * board - 3.0 * self.players[p].poison as f32
+    }
+}
+
+/// Rounds before a game is called on life and board.
+pub const MAX_ROUNDS: u32 = 25;
+
+/// Plays one game; returns the winner's seat.
+pub fn play_game(decks: &[&Prepared], rules: &Rules, rng: &mut Rng) -> usize {
+    let seed = rng.next();
+    let mut g = Game::new(decks, rules, Rng::new(seed));
+    play(&mut g)
+}
+
+pub fn play(g: &mut Game) -> usize {
+    let n = g.players.len();
+    for round in 1..=MAX_ROUNDS {
+        g.round = round;
+        for a in 0..n {
+            if !g.players[a].alive {
+                continue;
+            }
+            g.take_turn(a, round == 1 && a == 0);
+            g.sba();
+            let alive: Vec<usize> = (0..n).filter(|&i| g.players[i].alive).collect();
+            match alive.len() {
+                0 => return a,
+                1 => return alive[0],
+                _ => {}
+            }
+        }
+    }
+    (0..n)
+        .max_by(|&x, &y| g.standing(x).partial_cmp(&g.standing(y)).unwrap())
+        .unwrap_or(0)
+}
+
+/// Win rate of `deck` in `games` 4-player games against random picks from `gauntlet`
+/// (25% = as good as the gauntlet decks). `seed` makes results repeatable, so different
+/// decks are tested on the same shuffles of opponents.
+pub fn win_rate(
+    deck: &Deck,
+    gauntlet: &[Prepared],
+    db: &CardDb,
+    rules: &Rules,
+    games: u32,
+    seed: u64,
+) -> f32 {
+    if gauntlet.is_empty() {
+        return 0.25;
+    }
+    let me = Prepared::new(deck, db);
+    let mut rng = Rng::new(seed);
+    let seats = rules.players.clamp(2, 4) as usize;
+    let mut wins = 0;
+    for g in 0..games {
+        // Three different opponents when there are enough (like a real pod).
+        let mut picks: Vec<usize> = (0..gauntlet.len()).collect();
+        rng.shuffle(&mut picks);
+        let mut table: Vec<&Prepared> = (1..seats)
+            .map(|i| &gauntlet[picks[(i - 1) % picks.len()]])
+            .collect();
+        // Rotate our seat so turn order evens out.
+        let seat = g as usize % seats;
+        table.insert(seat, &me);
+        if play_game(&table, rules, &mut rng) == seat {
+            wins += 1;
+        }
+    }
+    wins as f32 / games.max(1) as f32
+}
+
+/// Opponent decks for playtesting: one per other player in the league, auto-built from a
+/// simulated pool of the packs that player has by this point of the season (their own
+/// Marvel / Hobbit mix from `rules.roster`).
+pub fn gauntlet(db: &CardDb, rules: &Rules, seed: u64) -> Vec<Prepared> {
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::new();
+    for player in &rules.roster.others {
+        // A pool with no legendary creature can't make a deck; reopen (rare).
+        for _ in 0..4 {
+            let pool = crate::packs::simulated_pool(db, player, rules.session.max(1), &mut rng);
+            let best = db
+                .cards
+                .iter()
+                .filter(|c| {
+                    c.can_be_commander() && c.name != crate::deck::PIPER && pool.owned(&c.name) > 0
+                })
+                .map(|c| {
+                    let colors = crate::analysis::best_colors(c, db, &pool, rules);
+                    (
+                        crate::analysis::pool_quality_for(c, colors, db, &pool, rules),
+                        c,
+                    )
+                })
+                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            if let Some((_, cmd)) = best {
+                let deck = crate::analysis::autobuild(cmd, db, &pool, rules, None, None).0;
+                out.push(Prepared::new(&deck, db));
+                break;
+            }
+        }
+    }
+    out
+}
