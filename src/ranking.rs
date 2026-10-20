@@ -144,8 +144,14 @@ impl Evaluation {
     }
 }
 
-/// How strong the commander card is on its own (roughly -1 .. +3.5).
-pub fn commander_power(cmd: &Card, db: &CardDb) -> (f32, Vec<String>) {
+/// How strong the commander card is on its own (roughly -1 .. +3.5). `support` (from
+/// `analysis::commander_support` on its built deck) scales the value of abilities that
+/// depend on enablers: an "if he's equipped" ability is worth little with no Equipment.
+pub fn commander_power(
+    cmd: &Card,
+    db: &CardDb,
+    support: Option<&[analysis::Support]>,
+) -> (f32, Vec<String>) {
     let mut score = 0.0;
     let mut why = Vec::new();
     let (power, w, note) = card_power(cmd, db);
@@ -179,38 +185,69 @@ pub fn commander_power(cmd: &Card, db: &CardDb) -> (f32, Vec<String>) {
         .filter(|a| !a.effects.iter().all(|e| matches!(e, Effect::AddMana(_))))
         .map(|a| a.rate())
         .sum::<f32>();
+    // What the abilities are worth, before checking the deck can use them.
+    let mut ability = 0.0;
+    let mut ability_why = Vec::new();
     if engine > 0.0 {
         let pts = (0.4 + 0.4 * engine).min(1.2);
-        score += pts;
-        why.push(format!("repeatable abilities ({:+.1})", pts));
+        ability += pts;
+        ability_why.push(format!("repeatable abilities ({:+.1})", pts));
     }
     if parsed
         .abilities
         .iter()
         .any(|a| a.when.iter().any(|w| matches!(w, When::PowerUp(_))))
     {
-        score += 0.3;
-        why.push("power-up (cheap to use the turn it's cast)".into());
+        ability += 0.3;
+        ability_why.push("power-up (cheap to use the turn it's cast)".into());
     } else if parsed.abilities.iter().any(|a| {
         a.when
             .iter()
             .any(|w| matches!(w, When::Activated(c) if c.mana > 0))
     }) {
-        score += 0.3;
-        why.push("mana sink".into());
+        ability += 0.3;
+        ability_why.push("mana sink".into());
     }
     if let Some(r) = parsed.removal() {
         if r.repeatable {
-            score += 0.8;
-            why.push(format!("repeatable removal ({})", r.label));
+            ability += 0.8;
+            ability_why.push(format!("repeatable removal ({})", r.label));
         } else {
-            score += 0.3;
-            why.push(format!("removal when it arrives ({})", r.label));
+            ability += 0.3;
+            ability_why.push(format!("removal when it arrives ({})", r.label));
         }
     }
     if parsed.each_opponent() {
-        score += 0.3;
-        why.push("hits every opponent".into());
+        ability += 0.3;
+        ability_why.push("hits every opponent".into());
+    }
+    // Does the deck supply what those abilities need?
+    let factor = support.map(analysis::support_factor).unwrap_or(1.0);
+    score += ability * factor;
+    why.append(&mut ability_why);
+    if let Some(sup) = support {
+        for s in sup.iter().filter(|s| s.gates) {
+            why.push(format!(
+                "needs {}: {:.0} in this deck (wants ~{:.0}){}",
+                s.need,
+                s.have,
+                s.wanted,
+                if s.ratio() < 0.5 {
+                    " - ability rarely works"
+                } else if s.ratio() < 1.0 {
+                    " - works some of the time"
+                } else {
+                    ""
+                }
+            ));
+        }
+        if factor < 0.99 {
+            why.push(format!(
+                "ability value scaled to {:.0}% for missing support ({:+.1})",
+                factor * 100.0,
+                -ability * (1.0 - factor)
+            ));
+        }
     }
     let keywords = [
         "flying",
@@ -381,7 +418,8 @@ pub fn evaluate(
     let (deck, shortfall) = autobuild(cmd, db, coll, rules, Some(plays), piper);
     let (mut parts, creatures, removal, draw, keepable, on_curve, mut notes) =
         parts_for(&deck, db, rules, shortfall);
-    let (cmd_pts, mut cmd_why) = commander_power(cmd, db);
+    let support = analysis::commander_support(cmd, &deck, db, rules);
+    let (cmd_pts, mut cmd_why) = commander_power(cmd, db, Some(&support));
     parts.commander = cmd_pts;
     if piper.is_some() {
         // The Piper is a vanilla 5-mana 3/3 taking a deck slot.

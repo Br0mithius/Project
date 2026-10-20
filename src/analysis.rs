@@ -522,6 +522,11 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if card.mana_value() >= 7 {
         score -= 1.5;
     }
+    // Payoff cards need their enablers too: a "whenever a token enters" creature is weak in
+    // a deck with no token makers (cards that are enablers themselves are exempt).
+    let (pen, mut pen_why) = payoff_penalty(card, deck, db, rules);
+    score -= pen;
+    why.append(&mut pen_why);
     let cmd = deck.commander.as_ref().and_then(|c| db.get(c));
     if let Some(cmd) = cmd {
         let (syn, mut reasons) = synergy(cmd, card);
@@ -593,6 +598,14 @@ fn cares_about(text: &str, word: &str) -> bool {
 /// fetching, "whenever you draw your second card" with card draw and looting, and so on.
 struct Mechanic {
     label: &'static str,
+    /// What the commander needs, in plain words ("Equipment", "token makers").
+    need: &'static str,
+    /// Enablers a 60-card deck wants for the payoff to work reliably.
+    wanted: f32,
+    /// The commander's ability does little without them (an "if equipped" drain, a
+    /// "whenever a token enters" trigger). False = just better with them (attack or
+    /// landfall triggers still happen without help).
+    gates: bool,
     points: f32,
     /// How strongly the commander rewards it (0 = not at all, 1 = a trigger built on it).
     payoff: fn(&Card) -> f32,
@@ -636,6 +649,9 @@ fn yes(b: bool) -> f32 {
 const MECHANICS: &[Mechanic] = &[
     Mechanic {
         label: "token maker for a token commander",
+        need: "token makers",
+        wanted: 8.0,
+        gates: true,
         points: 1.25,
         payoff: |c| {
             payoff_by(
@@ -648,6 +664,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "+1/+1 counters for a counters commander",
+        need: "+1/+1 counter cards",
+        wanted: 8.0,
+        gates: true,
         points: 1.25,
         payoff: |c| {
             payoff_by(
@@ -673,6 +692,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "sacrifice fodder/outlet for a death commander",
+        need: "sacrifice outlets / fodder",
+        wanted: 6.0,
+        gates: false,
         points: 1.25,
         payoff: |c| {
             payoff_by(
@@ -694,6 +716,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "fills the graveyard",
+        need: "graveyard fillers",
+        wanted: 6.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             let t = c.text_lower();
@@ -712,6 +737,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "instant/sorcery for a spells commander",
+        need: "instants and sorceries",
+        wanted: 12.0,
+        gates: true,
         points: 1.5,
         payoff: |c| {
             payoff_by(
@@ -724,6 +752,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "noncreature spell for the commander",
+        need: "other noncreature spells",
+        wanted: 6.0,
+        gates: false,
         points: 0.6,
         payoff: |c| {
             yes(has_event(
@@ -737,6 +768,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "artifact for an artifact commander",
+        need: "artifacts",
+        wanted: 10.0,
+        gates: true,
         points: 1.25,
         payoff: |c| {
             payoff_by(
@@ -763,6 +797,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "Equipment for an equipped commander",
+        need: "Equipment",
+        wanted: 6.0,
+        gates: true,
         points: 2.0,
         payoff: |c| {
             let t = c.text_lower();
@@ -779,6 +816,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "Vehicle for a crew commander",
+        need: "Vehicles",
+        wanted: 4.0,
+        gates: true,
         points: 1.5,
         payoff: |c| {
             let t = c.text_lower();
@@ -788,6 +828,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "enchantment for an enchantment commander",
+        need: "enchantments",
+        wanted: 8.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             payoff_by(
@@ -804,12 +847,18 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "Plan for a Plan commander",
+        need: "Plans",
+        wanted: 3.0,
+        gates: true,
         points: 1.5,
         payoff: |c| yes(c.text_lower().contains("plan")),
         enabler: |c| yes(c.type_line.contains("Plan") && !c.type_line.contains("Planeswalker")),
     },
     Mechanic {
         label: "extra lands for landfall",
+        need: "land fetchers",
+        wanted: 4.0,
+        gates: false,
         points: 1.0,
         payoff: |c| {
             payoff_by(
@@ -828,6 +877,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "life gain for a life-gain commander",
+        need: "life gain cards",
+        wanted: 8.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             payoff_by(
@@ -840,6 +892,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "extra card draw for a draw commander",
+        need: "card draw",
+        wanted: 8.0,
+        gates: true,
         points: 1.5,
         payoff: |c| {
             payoff_by(
@@ -857,6 +912,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "discard outlet for a discard commander",
+        need: "discard outlets",
+        wanted: 5.0,
+        gates: true,
         points: 1.25,
         payoff: |c| {
             payoff_by(
@@ -877,6 +935,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "helps attacks for an attack commander",
+        need: "evasive/haste creatures",
+        wanted: 6.0,
+        gates: false,
         points: 0.8,
         payoff: |c| {
             let p = c.parsed();
@@ -903,6 +964,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "enters-the-battlefield value for an ETB commander",
+        need: "enters-effect creatures",
+        wanted: 8.0,
+        gates: false,
         points: 0.8,
         payoff: |c| {
             yes(has_event(
@@ -921,6 +985,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "legendary/artifact for a Storied commander",
+        need: "legendaries/artifacts/Sagas",
+        wanted: 8.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             let p = c.parsed();
@@ -936,6 +1003,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "empowers Jace for a planeswalker commander",
+        need: "Jace/planeswalker cards",
+        wanted: 5.0,
+        gates: true,
         points: 1.25,
         payoff: |c| {
             let t = c.text_lower();
@@ -950,6 +1020,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "teamwork spell (taps your creatures)",
+        need: "Teamwork spells",
+        wanted: 4.0,
+        gates: false,
         points: 0.6,
         payoff: |c| {
             // Commanders with big bodies or that make creatures pay teamwork costs easily.
@@ -963,6 +1036,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "damage effect boosted by the commander",
+        need: "damage spells",
+        wanted: 8.0,
+        gates: true,
         points: 1.5,
         payoff: |c| {
             let t = c.text_lower();
@@ -980,6 +1056,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "big creature for a big-creature commander",
+        need: "big creatures",
+        wanted: 8.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             let t = c.text_lower();
@@ -995,6 +1074,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "mana for the commander's expensive abilities",
+        need: "mana sources",
+        wanted: 6.0,
+        gates: false,
         points: 0.6,
         payoff: |c| {
             let p = c.parsed();
@@ -1008,6 +1090,10 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "damages your creatures for an Enrage commander",
+        need: "ways to damage your creatures",
+        wanted: 4.0,
+        // Combat damage triggers Enrage too, so it isn't dead without help.
+        gates: false,
         points: 1.25,
         payoff: |c| yes(has_event(c, |e| matches!(e, Event::Damaged))),
         enabler: |c| {
@@ -1018,6 +1104,9 @@ const MECHANICS: &[Mechanic] = &[
     },
     Mechanic {
         label: "grows your Army",
+        need: "amass cards",
+        wanted: 5.0,
+        gates: true,
         points: 1.0,
         payoff: |c| {
             let t = c.text_lower();
@@ -1072,6 +1161,123 @@ pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
     }
     // Stop one card from looking amazing just because it ticks many boxes.
     (score.min(4.0), why)
+}
+
+/// How well a deck supplies what its commander's abilities depend on.
+#[derive(Debug, Clone)]
+pub struct Support {
+    pub need: String,
+    /// Payoff strength on the commander (1 = a trigger built on it).
+    pub payoff: f32,
+    /// Enablers in the deck (cards weighted by how well they feed it, times copies).
+    pub have: f32,
+    pub wanted: f32,
+    /// Without enablers the ability does little.
+    pub gates: bool,
+}
+
+impl Support {
+    /// 0..1: how much of what's wanted the deck has.
+    pub fn ratio(&self) -> f32 {
+        (self.have / self.wanted.max(1.0)).min(1.0)
+    }
+}
+
+/// What `cmd`'s abilities depend on, and how much of it `deck` (or a pool) has: the
+/// mechanics in `MECHANICS`, plus creature types the commander cares about (a "Villain
+/// spell" commander needs Villains).
+pub fn commander_support(cmd: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> Vec<Support> {
+    let scale = rules.deck_size as f32 / 60.0;
+    let cards: Vec<(&Card, u32)> = resolved(deck, db)
+        .into_iter()
+        .filter(|(c, _)| c.name != cmd.name && !c.is_basic())
+        .collect();
+    let mut out = Vec::new();
+    for m in MECHANICS {
+        let payoff = (m.payoff)(cmd);
+        if payoff <= 0.0 {
+            continue;
+        }
+        let have: f32 = cards
+            .iter()
+            .map(|(c, n)| (m.enabler)(c).min(1.0) * *n as f32)
+            .sum();
+        out.push(Support {
+            need: m.need.to_string(),
+            payoff,
+            have,
+            wanted: m.wanted * scale,
+            gates: m.gates,
+        });
+    }
+    let ct = cmd.text_lower();
+    for sub in [
+        "villain", "hero", "dwarf", "elf", "goblin", "orc", "human", "robot", "cat", "dragon",
+        "angel", "zombie", "wizard", "soldier", "spider",
+    ] {
+        if cares_about(ct, sub) {
+            let have: f32 = cards
+                .iter()
+                .filter(|(c, _)| c.subtypes().iter().any(|t| t.eq_ignore_ascii_case(sub)))
+                .map(|(_, n)| *n as f32)
+                .sum();
+            let mut name = sub.to_string();
+            name[..1].make_ascii_uppercase();
+            out.push(Support {
+                need: format!("{}s", name),
+                payoff: 1.0,
+                have,
+                wanted: 12.0 * scale,
+                gates: true,
+            });
+        }
+    }
+    out
+}
+
+/// Penalty for a card whose own triggered ability depends on enablers the deck lacks.
+fn payoff_penalty(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32, Vec<String>) {
+    let mut pen = 0.0;
+    let mut why = Vec::new();
+    // "Costs {2} less if you control a Vehicle" works without one - it's a discount, not a payoff.
+    let t = card.text_lower();
+    if t.contains("less to cast") || t.contains("costs {") {
+        return (pen, why);
+    }
+    let scale = rules.deck_size as f32 / 60.0;
+    for m in MECHANICS.iter().filter(|m| m.gates) {
+        if (m.payoff)(card) < 1.0 || (m.enabler)(card) > 0.0 {
+            continue;
+        }
+        let have: f32 = resolved(deck, db)
+            .iter()
+            .filter(|(c, _)| c.name != card.name)
+            .map(|(c, n)| (m.enabler)(c).min(1.0) * *n as f32)
+            .sum();
+        let ratio = (have / (m.wanted * scale).max(1.0)).min(1.0);
+        if ratio < 1.0 {
+            pen += 1.2 * (1.0 - ratio);
+            why.push(format!(
+                "needs {}: {:.0} in deck (wants ~{:.0})",
+                m.need,
+                have,
+                m.wanted * scale
+            ));
+        }
+    }
+    (pen, why)
+}
+
+/// How much of a commander's ability value its deck can actually use (0.25..1).
+/// Only abilities that need enablers count; a commander with none is fully supported.
+pub fn support_factor(support: &[Support]) -> f32 {
+    let gated: Vec<&Support> = support.iter().filter(|s| s.gates).collect();
+    if gated.is_empty() {
+        return 1.0;
+    }
+    let weight: f32 = gated.iter().map(|s| s.payoff).sum();
+    let met: f32 = gated.iter().map(|s| s.payoff * s.ratio()).sum::<f32>() / weight;
+    0.25 + 0.75 * met
 }
 
 /// Owned copies not already used by `deck`.

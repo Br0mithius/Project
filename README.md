@@ -129,7 +129,12 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   Piper in its two best extra colours) and grades it on seven parts - Cards, Curve, Creatures, Interaction, Mana,
   Commander (17Lands, Playgroup.gg win rate, abilities, cost) and Playtest. Parts are put on one scale (how far above or
   below your middle option, using the median so one freak option can't distort the rest), the sliders set how much each
-  part counts, and the total runs 0-100 with 50 = your middle option. Before Session 6 the same ranking is also run
+  part counts, and the total runs 0-100 with 50 = your middle option. A commander's ability only counts as much as its
+  deck can feed it: each mechanic it depends on (Equipment, token makers, instants and sorceries, Villains...) is
+  counted in its built deck against how many it wants, and abilities that do little without them ("if he's
+  equipped", "whenever a token enters") are scaled down - the "Why?" notes say e.g. "needs Equipment: 1 in this deck
+  (wants ~6) - ability rarely works". The same check marks other payoff cards in a deck as weak when their enablers
+  are missing, and the playtest fires "if equipped" abilities only as often as the deck's Equipment allows. Before Session 6 the same ranking is also run
   under singleton rules as a preview. `why <commander>` in the command line shows the breakdown.
 * **Playtest** plays each deck in 1,000 simplified 4-player games against decks auto-built from simulated league pools
   (random packs, the same number you have by this point of the season). The simulator understands lands and mana

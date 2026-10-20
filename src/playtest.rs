@@ -230,12 +230,12 @@ fn kill_value(k: Kill) -> i32 {
 
 impl Profile {
     pub fn from_card(card: &Card) -> Profile {
-        Profile::in_deck(card, true)
+        Profile::in_deck(card, 6)
     }
 
-    /// Reads a card (via the ability parser) for a deck; `equipment` = whether the deck has
-    /// any Equipment (for "if it's equipped" conditions).
-    pub fn in_deck(card: &Card, equipment: bool) -> Profile {
+    /// Reads a card (via the ability parser) for a deck; `equipment` = how many Equipment
+    /// the deck has (for "if it's equipped" conditions).
+    pub fn in_deck(card: &Card, equipment: u32) -> Profile {
         use abilities::{Effect as E, When};
         let parsed = card.parsed();
         let mut p = Profile {
@@ -298,11 +298,12 @@ impl Profile {
             }
         }
         for (a, base) in abilities {
-            // Conditions: "if it's equipped" never holds without Equipment; others half the time.
+            // Conditions: "if it's equipped" holds about as often as the deck can find and
+            // attach Equipment (~6 makes it near-reliable); others about half the time.
             let cond = if !a.conditional {
                 1.0
-            } else if a.text.contains("equipped") && !equipment {
-                0.0
+            } else if a.text.contains("equipped") {
+                (equipment as f32 / 6.0).min(0.9)
             } else {
                 0.5
             };
@@ -494,10 +495,12 @@ pub struct Prepared {
 
 impl Prepared {
     pub fn new(deck: &Deck, db: &CardDb) -> Prepared {
-        let equipment = deck
+        let equipment: u32 = deck
             .cards
-            .keys()
-            .any(|n| db.get(n).is_some_and(|c| c.type_line.contains("Equipment")));
+            .iter()
+            .filter(|(n, _)| db.get(n).is_some_and(|c| c.type_line.contains("Equipment")))
+            .map(|(_, k)| *k)
+            .sum();
         let mut cards = Vec::new();
         let mut library = Vec::new();
         for (name, n) in &deck.cards {
@@ -1457,7 +1460,7 @@ mod tests {
             None,
         ));
         assert_eq!(lock.kill, Some(Kill::Exile));
-        // Attack triggers wait for an attack; conditions count half; mana abilities don't fire.
+        // Attack triggers wait for an attack; mana abilities are used now and then.
         let raider = Profile::from_card(&card(
             "Raider",
             "{2}{B}",
@@ -1466,13 +1469,12 @@ mod tests {
             Some(("2", "2")),
         ));
         assert_eq!(
-            (
-                raider.drain.now,
-                raider.drain.per_turn,
-                raider.drain.per_attack
-            ),
-            (0.0, 0.0, 1.0)
+            (raider.drain.now, raider.drain.per_turn),
+            (0.0, 0.0),
+            "attack triggers wait for an attack"
         );
+        // "If it's equipped" with 6 Equipment in the deck: ~90% of attacks.
+        assert!((raider.drain.per_attack - 1.8).abs() < 1e-4);
         // "{3}{B}: Draw a card" is used now and then, not on arrival.
         assert!(raider.draw.now == 0.0 && raider.draw.per_turn > 0.0 && raider.draw.per_turn < 0.3);
         let whip = Profile::in_deck(
@@ -1483,7 +1485,7 @@ mod tests {
                 "Whenever Whip attacks, if he's equipped, each opponent loses X life, where X is the number of Equipment attached to him.",
                 Some(("2", "2")),
             ),
-            false,
+            0,
         );
         assert_eq!(whip.drain.per_attack, 0.0);
     }
