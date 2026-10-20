@@ -7,7 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Lower-cases and strips punctuation so "Ka-Zar" matches "kazar" and curly quotes match straight ones.
+/// Two-faced names ("Bilbo Baggins, Burglar // Take a Glance", as Mana Mixer and ManaBox
+/// export Adventures and double-faced cards) match their front face.
 pub fn normalize(name: &str) -> String {
+    let name = name.split(" // ").next().unwrap_or(name);
     name.to_lowercase()
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == ' ')

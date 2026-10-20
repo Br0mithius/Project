@@ -3,12 +3,14 @@
 A deck builder for the **Mulligans Island Commander League (Season 2)**: build a commander deck from your
 league pool, with official card images, league rules, a draft helper and trade planning. The card database covers
 every set in the Season 2 rules: **Marvel Super Heroes**, **The Hobbit**, **Reality Fracture**, **Foundations** (the
-Public Pool starter kit), the league staples and Shop cards, and **Nauctis: The Sunken Realms** once it is released
+Public Pool starter kit - the booster set plus its Starter Collection / Beginner Box / precon reprints, marked
+"product-only" so pack odds ignore them), the league staples and Shop cards, and **Nauctis: The Sunken Realms** once it is released
 (Settings > "Update card database").
 
 The repository ships with an **empty pool**. Import yours from Mana Mixer: drag the export file onto the app window, or paste it into the
 My Pool tab's import box with Ctrl+V, then press "Add to my pool" or "Replace my pool", or with `import <file> [replace]` in the command-line app. Lines like
-`1 Red Hulk (MSH) 149`, `2x Web Up`, and CSV files with Name and Quantity columns are understood; "replace" keeps a
+`1 Red Hulk (MSH) 149`, `2x Web Up`, two-faced names like `Bilbo Baggins, Burglar // Take a Glance`, and CSV files
+with Name and Quantity columns are understood (exports use the same Mana Mixer format, "Front // Back" names included); "replace" keeps a
 copy of the old pool in `data/collection.backup.txt`.
 
 ## Windows

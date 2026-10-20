@@ -343,6 +343,23 @@ impl Card {
             .clone()
     }
 
+    /// The name as Mana Mixer, ManaBox and Scryfall write it: "Front // Back" for Adventures
+    /// and double-faced cards (the back face is stored in the rules text), otherwise the name.
+    pub fn full_name(&self) -> String {
+        match self.oracle_text.split_once("// Back face: ") {
+            Some((_, rest)) => {
+                let line = rest.lines().next().unwrap_or("");
+                let back = line.split(" {").next().unwrap_or(line).trim();
+                if back.is_empty() {
+                    self.name.clone()
+                } else {
+                    format!("{} // {}", self.name, back)
+                }
+            }
+            None => self.name.clone(),
+        }
+    }
+
     /// The rules text read into keywords and abilities (worked out once).
     pub fn parsed(&self) -> &crate::abilities::Parsed {
         self.parsed_cache

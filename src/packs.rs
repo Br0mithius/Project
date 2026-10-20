@@ -110,7 +110,12 @@ pub fn rarity_index(rarity: &str) -> Option<usize> {
 /// Cards a pack of `set` can contain, grouped by rarity (basics and league extras left out).
 pub fn set_contents<'a>(db: &'a CardDb, set: &str) -> [Vec<&'a Card>; 4] {
     let mut out: [Vec<&Card>; 4] = Default::default();
-    for c in db.cards.iter().filter(|c| c.set == set && !c.is_basic()) {
+    // Product-only cards (e.g. Foundations' Starter Collection reprints) aren't in boosters.
+    for c in db
+        .cards
+        .iter()
+        .filter(|c| c.set == set && !c.is_basic() && !c.note.contains("Product-only"))
+    {
         if let Some(r) = rarity_index(&c.rarity) {
             out[r].push(c);
         }
@@ -123,11 +128,17 @@ pub fn chance_per_pack(card: &Card, db: &CardDb) -> f32 {
     let Some(r) = rarity_index(&card.rarity) else {
         return 0.0;
     };
+    if card.note.contains("Product-only") {
+        return 0.0;
+    }
     let n = db
         .cards
         .iter()
         .filter(|c| {
-            c.set == card.set && !c.is_basic() && c.rarity.eq_ignore_ascii_case(&card.rarity)
+            c.set == card.set
+                && !c.is_basic()
+                && !c.note.contains("Product-only")
+                && c.rarity.eq_ignore_ascii_case(&card.rarity)
         })
         .count();
     if n == 0 {

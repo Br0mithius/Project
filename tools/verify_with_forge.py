@@ -7,6 +7,8 @@ Usage:
     python3 tools/verify_with_forge.py                         # show differences only
     python3 tools/verify_with_forge.py --write                 # also update data/cards.json
     python3 tools/verify_with_forge.py --import-set HOB --write   # add a whole league set
+                                    # (booster cards plus product-only cards such as Foundations'
+                                    # Starter Collection / Beginner Box reprints)
     python3 tools/verify_with_forge.py --add "Sol Ring" --set LEAGUE --write
 
 League sets: MSH (Marvel Super Heroes), HOB (The Hobbit), FRA (Reality Fracture),
@@ -61,8 +63,15 @@ def forge(path):
     return get(FORGE + urllib.parse.quote(path), path)
 
 
-def edition_cards(code):
-    """[(number, rarity, name)] from a Forge edition file's [cards] section."""
+# Sections of an edition file that are only alternate artwork of cards already listed.
+VARIANT_SECTIONS = {"full art", "borderless", "alternate art", "showcase", "extended art", "promo", "tokens",
+                    "etched", "serialized", "japan showcase", "textured"}
+
+
+def edition_cards(code, products=False):
+    """[(number, rarity, name, section)] from a Forge edition file: the booster set ([cards]),
+    and with products=True also product-only sections such as [precon product] (Foundations'
+    Starter Collection / Beginner Box / starter kit reprints) - but not alternate-art variants."""
     text = forge(f"editions/{EDITIONS[code][0]}.txt") or ""
     out, section = [], None
     for line in text.splitlines():
@@ -70,15 +79,23 @@ def edition_cards(code):
             section = line.strip("[]").lower()
             continue
         m = re.match(r"^(\d+[a-z]?)\s+([CURMSLT])\s+(.+?)(\s+@.*)?$", line.strip())
-        if m and section == "cards":
-            out.append((m.group(1), RARITY[m.group(2)], m.group(3).strip()))
+        if not m or section is None or section == "metadata":
+            continue
+        if section == "cards" or (products and section not in VARIANT_SECTIONS):
+            out.append((m.group(1), RARITY[m.group(2)], m.group(3).strip(), section))
     return out
 
 
 NUMBERS = {}  # name -> {code: (number, rarity)}
+PRODUCT_ONLY = set()  # names only in product sections (not in booster packs)
 for code in EDITIONS:
-    for num, rar, name in edition_cards(code):
+    for num, rar, name, _ in edition_cards(code):
         NUMBERS.setdefault(name, {}).setdefault(code, (num, rar))
+for code in EDITIONS:
+    for num, rar, name, section in edition_cards(code, products=True):
+        if section != "cards" and code not in NUMBERS.get(name, {}):
+            NUMBERS.setdefault(name, {}).setdefault(code, (num, rar))
+            PRODUCT_ONLY.add((name, code))
 
 
 def xmage_back_name(name, code):
@@ -181,6 +198,8 @@ def build(card):
     new["power"], new["toughness"] = (pt.split("/", 1) if pt else (None, None))
     new["color_identity"] = identity(new["mana_cost"] + (cost(back.get("ManaCost", "")) if back else ""), text)
     entries = NUMBERS.get(new["name"], {})
+    if card.get("set") == "LEAGUE":
+        entries = {}  # Skill Tree / Shop cards keep their league set and rarity
     code = card.get("set") if card.get("set") in entries else (next(iter(entries)) if entries else None)
     if code:
         new["set"] = code
@@ -189,6 +208,8 @@ def build(card):
     new["note"] = "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge)" + (
         f"; number and rarity from its {EDITIONS[code][0]} edition list." if code else "."
     )
+    if code and (new["name"], code) in PRODUCT_ONLY:
+        new["note"] += " Product-only card (starter/precon products, not in booster packs)."
     return new
 
 
@@ -201,7 +222,7 @@ def main():
     for i, a in enumerate(args):
         if a == "--import-set":
             code = args[i + 1].upper()
-            for num, rar, name in edition_cards(code):
+            for num, rar, name, _ in edition_cards(code, products=True):
                 if name not in BASICS and name not in have:
                     db.append({"name": name, "set": code, "confidence": "new"})
                     have.add(name)

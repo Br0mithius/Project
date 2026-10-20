@@ -469,12 +469,15 @@ pub fn singleton_conflicts(deck: &Deck, db: &CardDb) -> Vec<(String, u32)> {
 }
 
 /// "1 Red Hulk (MSH) 149" lines - the ManaBox-style text list Mana Mixer takes.
+/// One line in Mana Mixer's format: "count Name (SET) number", with two-faced cards named
+/// "Front // Back" the way Mana Mixer lists them.
 pub fn mana_mixer_line(card: Option<&Card>, name: &str, n: u32) -> String {
     match card {
-        Some(c) if !c.set.is_empty() => match &c.collector_number {
-            Some(num) => format!("{} {} ({}) {}", n, c.name, c.set, num),
-            None => format!("{} {} ({})", n, c.name, c.set),
+        Some(c) if !c.set.is_empty() && c.set != "LEAGUE" => match &c.collector_number {
+            Some(num) => format!("{} {} ({}) {}", n, c.full_name(), c.set, num),
+            None => format!("{} {} ({})", n, c.full_name(), c.set),
         },
+        Some(c) => format!("{} {}", n, c.full_name()),
         _ => format!("{} {}", n, name),
     }
 }
@@ -591,7 +594,13 @@ pub fn parse_import(text: &str) -> Vec<ImportLine> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty()).peekable();
     let mut out: Vec<ImportLine> = Vec::new();
     let mut push = |count: u32, name: String| {
-        let name = name.trim().to_string();
+        // "Front // Back" names (Adventures, double-faced cards): the front face names the card.
+        let name = name
+            .split(" // ")
+            .next()
+            .unwrap_or(&name)
+            .trim()
+            .to_string();
         if name.is_empty() || count == 0 {
             return;
         }
@@ -719,6 +728,27 @@ mod import_tests {
         assert_eq!(
             (r[0].name.as_str(), r[1].name.as_str(), r[1].count),
             ("Red Hulk", "Web Up", 2)
+        );
+        // Two-faced names as Mana Mixer exports them - and they round-trip on export.
+        let db = CardDb::load(
+            &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/cards.json"),
+        )
+        .unwrap();
+        let bilbo = db
+            .get("Bilbo Baggins, Burglar // Take a Glance")
+            .expect("two-faced name resolves");
+        assert!(
+            mana_mixer_line(Some(bilbo), "", 3)
+                .starts_with("3 Bilbo Baggins, Burglar // Take a Glance (HOB) ")
+        );
+        assert_eq!(
+            mana_mixer_line(db.get("Red Hulk"), "", 1),
+            "1 Red Hulk (MSH) 149"
+        );
+        let r = parse_import("3 Bilbo Baggins, Burglar // Take a Glance (HOB) 12\n");
+        assert_eq!(
+            (r[0].count, r[0].name.as_str()),
+            (3, "Bilbo Baggins, Burglar")
         );
         // UTF-16 file from Notepad.
         let mut bytes = vec![0xFF, 0xFE];
