@@ -109,8 +109,9 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   happens, what it does and what it can hit, so removal is graded by what it actually answers (unconditional exile >
   conditional > damage-based > fight > lockdown > bounce; "for each opponent" removal counts extra), board wipes are
   told apart from single-target spells, once-only and sacrifice abilities aren't counted as repeatable, and tokens
-  given to an opponent (Beast Within) aren't counted as yours. About 98% of all rules lines in the card database are
-  read; the card inspector's "How the app reads this card" (and `show <card>`) shows the reading and marks anything it
+  given to an opponent (Beast Within) aren't counted as yours. Every rules line in the card database (2,329 lines) is
+  read; one-off rule changes ("can't be countered", replacement effects with "instead") are named rather than skipped.
+  The card inspector's "How the app reads this card" (and `show <card>`) shows the reading and marks anything it
   couldn't read with "?". `cargo run --release --example parse_report -- data` reports coverage (`--card "Name"`,
   `--removal`, `--roles`, `--synergy "Commander"` for details).
 
