@@ -1631,15 +1631,43 @@ fn ignorable(s: &str) -> bool {
 }
 
 /// Replaces the card's own name and "this creature"-style references with "~".
+/// Drops accents so "Thrór's Map" matches rules text that writes "Thror's Map".
+fn fold_accents(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ä' | 'ã' | 'å' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'ö' | 'õ' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ñ' => 'n',
+            other => other,
+        })
+        .collect()
+}
+
 fn self_refs(text: &str, card: &Card) -> String {
-    let mut t = text
-        .to_lowercase()
-        .replace('’', "'")
-        .replace('−', "-")
-        .replace(['“', '”'], "\"");
-    let name = card.name.to_lowercase();
+    let mut t = fold_accents(
+        &text
+            .to_lowercase()
+            .replace('’', "'")
+            .replace('−', "-")
+            .replace(['“', '”'], "\""),
+    );
+    let name = fold_accents(&card.name.to_lowercase());
     t = t.replace(&name, "~");
-    if let Some((short, _)) = name.split_once(", ") {
+    // Short names: "Bilbo" for "Bilbo Baggins, Burglar", "Ka-Zar" for "Ka-Zar of the Savage Land".
+    let short = name
+        .split_once(", ")
+        .map(|x| x.0)
+        .or_else(|| name.split_once(" of the ").map(|x| x.0))
+        .or_else(|| {
+            name.split_once(" the ")
+                .map(|x| x.0)
+                .filter(|s| !s.contains(' '))
+        })
+        .filter(|s| s.len() >= 3);
+    if let Some(short) = short {
         // Whole words only: "Ori" mustn't turn "storied" into "st~ed".
         if let Ok(re) = Regex::new(&format!(r"\b{}\b", regex::escape(short))) {
             t = re.replace_all(&t, "~").into_owned();

@@ -148,7 +148,22 @@ pub enum Ev {
     OthersAttack,
     TeamworkTapped,
     LoseLife,
+    Scry,
+    LoyaltyActivated,
+    AbilityActivated,
+    Tapped,
+    Untapped,
+    /// Any creature dealing combat damage to a player (not just the card itself).
+    CombatDamageAny,
+    NoncombatDamage,
+    LeavesGraveyard,
+    Bounced,
+    Blocks,
     Other,
+}
+
+pub fn ev_bit(k: Ev) -> u32 {
+    1 << (k as u32)
 }
 
 /// "a Villain spell", "another creature you control", "an artifact": what an event needs.
@@ -164,6 +179,9 @@ pub struct Filter {
     pub subtype: Option<String>,
     /// "another"/"other": not the source itself.
     pub other: bool,
+    /// "nontoken": real cards only; `token`: tokens only.
+    pub nontoken: bool,
+    pub token: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,7 +191,10 @@ pub enum Trig {
     Dies,
     Attacks,
     CombatDamage,
-    Phase { phase: Phase, any_player: bool },
+    Phase {
+        phase: Phase,
+        any_player: bool,
+    },
     Event(Ev, Filter),
     Activated {
         mana: u8,
@@ -219,6 +240,18 @@ pub enum Cond {
     MyTurn,
     NotPrepared,
     CastFromGraveyard,
+    Kicked,
+    /// The source isn't a token.
+    NotToken,
+    /// You haven't cast a spell this turn.
+    NoSpellsThisTurn,
+    /// The source has at least N +1/+1 counters.
+    CountersAtLeast(i16),
+    /// The source's power is N or less.
+    PowerAtMost(i16),
+    HasShield,
+    /// You control at least N Treasures.
+    Treasures(u8),
     /// Can't be checked: happens this often.
     Chance(f32),
 }
@@ -237,6 +270,12 @@ pub struct SimAbility {
     pub until_eot: bool,
     /// Reflexive abilities that fire when the card reaches N counters ("third plan counter").
     pub counter_goal: Option<i16>,
+    /// What a static ability's "creatures you control"-style wording covers.
+    pub filter: Filter,
+    /// "This ability triggers only once each turn".
+    pub once_per_turn: bool,
+    /// "Whenever you draw your second card each turn".
+    pub second_draw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -279,7 +318,14 @@ pub struct SimCard {
     pub enters_tapped: bool,
     pub equip: Option<u8>,
     pub crew: Option<u8>,
-    pub cycling: Option<(u8, bool)>,
+    /// Cycling cost and what it finds: "" = draws a card, "land" = a basic land, or a
+    /// land type / creature type ("mountain", "halfling").
+    pub cycling: Option<(u8, String)>,
+    pub flashback: Option<Mana>,
+    pub kicker: Option<Mana>,
+    pub overload: Option<Mana>,
+    /// MSH Sneak: an alternative cost when you attacked this turn.
+    pub sneak: Option<Mana>,
     pub teamwork: Option<u8>,
     pub offspring: Option<u8>,
     pub gift: bool,
@@ -302,6 +348,9 @@ pub struct SimCard {
     pub back: Option<BackFace>,
     /// Rough worth of the card on its own (for the AI's quick estimates).
     pub value: f32,
+    /// Bit per `Ev` kind its abilities listen for (so events skip cards that don't care).
+    pub ev_mask: u32,
+    pub has_static: bool,
 }
 
 impl SimCard {
@@ -390,12 +439,18 @@ fn number_before(text: &str, key: &str) -> Option<u8> {
 pub fn filter_of(what: &str) -> Filter {
     let w = what.to_lowercase();
     let mut f = Filter::default();
-    if w.contains("you control") || w.contains("your ") || w.starts_with("you ") || w.contains("you cast") {
+    if w.contains("you control")
+        || w.contains("your ")
+        || w.starts_with("you ")
+        || w.contains("you cast")
+    {
         f.yours = Some(true);
     } else if w.contains("opponent") {
         f.yours = Some(false);
     }
     f.other = w.contains("another") || w.contains("other ");
+    f.nontoken = w.contains("nontoken");
+    f.token = !f.nontoken && w.contains("token");
     for (word, bit) in [
         ("creature", T_CREATURE),
         ("artifact", T_ARTIFACT),
@@ -415,9 +470,8 @@ pub fn filter_of(what: &str) -> Filter {
     }
     for sub in [
         "hero", "villain", "robot", "human", "dwarf", "elf", "goblin", "hobbit", "halfling",
-        "wizard", "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider",
-        "mutant", "avenger", "inhuman", "army", "orc", "wolf", "cat", "bird", "knight",
-        "rogue", "spy",
+        "wizard", "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant",
+        "avenger", "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
     ] {
         if w.contains(sub) {
             f.subtype = Some(sub.to_string());
@@ -433,14 +487,55 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("enduring story") {
         return Cond::Storied;
     }
-    if t.contains("teamwork") && (t.contains("cast using teamwork") || t.contains("teamwork cost was paid")) {
+    if t.contains("teamwork")
+        && (t.contains("cast using teamwork") || t.contains("teamwork cost was paid"))
+    {
         return Cond::Teamwork;
     }
     if t.contains("gift was promised") {
         return Cond::Gift;
     }
+    if t.contains("was kicked") {
+        return Cond::Kicked;
+    }
     if !conditional {
         return Cond::Always;
+    }
+    // Wordings that hold whenever the ability comes up in a game.
+    for always in [
+        "if you cast it",
+        "if you cast him",
+        "if you cast her",
+        "if you cast them",
+        "attacks each combat if able",
+        "fewer than ten cards in hand",
+        "if it wasn't a",
+        "if they were a creature",
+        "if it's a creature",
+        "if it's a planeswalker",
+        "if it had a revival counter",
+    ] {
+        if t.contains(always) {
+            return Cond::Always;
+        }
+    }
+    if t.contains("isn't a token") || t.contains("not a token") {
+        return Cond::NotToken;
+    }
+    if t.contains("didn't cast a spell this turn") {
+        return Cond::NoSpellsThisTurn;
+    }
+    if t.contains("shield counter on") {
+        return Cond::HasShield;
+    }
+    if t.contains("or more +1/+1 counters on") {
+        return Cond::CountersAtLeast(number_before(t, " or more +1/+1").unwrap_or(3) as i16);
+    }
+    if t.contains("power is") && t.contains("or less") {
+        return Cond::PowerAtMost(number_after(t, "power is").unwrap_or(1) as i16);
+    }
+    if t.contains("or more treasures") {
+        return Cond::Treasures(number_before(t, " or more treasures").unwrap_or(4));
     }
     if t.contains("equipped") {
         return Cond::Equipped;
@@ -464,7 +559,8 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("with toughness") && t.contains("or greater") {
         return Cond::ControlToughness(number_after(t, "with toughness").unwrap_or(4));
     }
-    if t.contains("unless you control a planeswalker") || t.contains("don't control a planeswalker") {
+    if t.contains("unless you control a planeswalker") || t.contains("don't control a planeswalker")
+    {
         return Cond::NoPlaneswalker;
     }
     if t.contains("control a planeswalker") {
@@ -494,14 +590,15 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("cast from a graveyard") || t.contains("cast it from your graveyard") {
         return Cond::CastFromGraveyard;
     }
-    for key in ["if you control a", "as long as you control a", "if you control another", "as long as you control another"] {
+    for key in [
+        "if you control a",
+        "as long as you control a",
+        "if you control another",
+        "as long as you control another",
+    ] {
         if let Some(i) = t.find(key) {
             let rest = t[i + key.len()..].trim_start_matches(['n', ' ']);
-            let what: String = rest
-                .split([' ', ',', '.'])
-                .next()
-                .unwrap_or("")
-                .to_string();
+            let what: String = rest.split([' ', ',', '.']).next().unwrap_or("").to_string();
             if !what.is_empty() {
                 return Cond::Control(what, key.contains("another"));
             }
@@ -547,22 +644,69 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 Event::Targeted => (Ev::Targeted, "~"),
                 Event::OthersAttack => (Ev::OthersAttack, "you"),
                 Event::Other(what) => {
-                    if what.contains("teamwork") {
-                        (Ev::TeamworkTapped, "~")
+                    let k = if what.contains("teamwork") {
+                        Ev::TeamworkTapped
                     } else if what.contains("loses life") || what.contains("lose life") {
-                        (Ev::LoseLife, what.as_str())
+                        Ev::LoseLife
+                    } else if t.contains("scry or surveil") {
+                        Ev::Scry
+                    } else if t.contains("loyalty ability") {
+                        Ev::LoyaltyActivated
+                    } else if t.contains("activate an ability") {
+                        Ev::AbilityActivated
+                    } else if t.contains("becomes untapped") || t.contains("become untapped") {
+                        Ev::Untapped
+                    } else if t.contains("becomes tapped") || t.contains("become tapped") {
+                        Ev::Tapped
+                    } else if t.contains("noncombat damage") {
+                        Ev::NoncombatDamage
+                    } else if t.contains("combat damage") || t.contains("deal damage to a player") {
+                        Ev::CombatDamageAny
+                    } else if t.contains("leaves your graveyard") {
+                        Ev::LeavesGraveyard
+                    } else if t.contains("owner's hand") {
+                        Ev::Bounced
+                    } else if t.contains(" blocks") {
+                        Ev::Blocks
+                    } else if t.contains("targets ~") {
+                        Ev::Targeted
+                    } else if t.contains(" casts") || t.contains(" cast ") {
+                        Ev::Cast
+                    } else if t.contains(" dies") || t.contains(" die,") {
+                        Ev::Death
                     } else {
-                        (Ev::Other, what.as_str())
-                    }
+                        Ev::Other
+                    };
+                    (k, what.as_str())
                 }
             };
             let mut f = filter_of(what);
-            if matches!(kind, Ev::Cast | Ev::GainLife | Ev::Draw | Ev::Tokens | Ev::OthersAttack | Ev::Landfall)
-                && f.yours.is_none()
+            if matches!(
+                kind,
+                Ev::Cast
+                    | Ev::GainLife
+                    | Ev::Draw
+                    | Ev::Tokens
+                    | Ev::OthersAttack
+                    | Ev::Landfall
+                    | Ev::Scry
+                    | Ev::LoyaltyActivated
+                    | Ev::AbilityActivated
+                    | Ev::CombatDamageAny
+                    | Ev::LeavesGraveyard
+            ) && f.yours.is_none()
                 && !what.contains("player")
                 && !what.contains("opponent")
             {
                 f.yours = Some(true);
+            }
+            if kind == Ev::NoncombatDamage {
+                // "an opponent is dealt noncombat damage": the event is about the opponent.
+                f.yours = Some(false);
+                f.types = 0;
+            }
+            if matches!(kind, Ev::Cast | Ev::LoyaltyActivated) && what.contains("opponent") {
+                f.yours = Some(false);
             }
             Trig::Event(kind, f)
         }
@@ -572,7 +716,11 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             sac_self: c.sacrifice && (t.contains("sacrifice ~") || t.contains("sacrifice this")),
             sac_other: c.sacrifice && !(t.contains("sacrifice ~") || t.contains("sacrifice this")),
             discard: c.discard,
-            life: if c.life { number_after(t, "pay").unwrap_or(2) } else { 0 },
+            life: if c.life {
+                number_after(t, "pay").unwrap_or(2)
+            } else {
+                0
+            },
             sorcery: t.contains("only as a sorcery"),
         },
         When::PowerUp(c) => Trig::PowerUp(c.mana.min(255) as u8),
@@ -619,6 +767,9 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 } else {
                     None
                 },
+                filter: filter_of(&a.text),
+                once_per_turn: a.text.contains("only once each turn"),
+                second_draw: a.text.contains("second card"),
             });
         }
     }
@@ -632,6 +783,14 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
         }
     }
     out
+}
+
+/// The cost after a keyword ("flashback {2}{b}{b}", "kicker—{1}{w}").
+fn keyword_cost(words: &[String], key: &str) -> Option<Mana> {
+    let k = words.iter().find(|w| w.starts_with(key))?;
+    let rest = k[key.len()..].trim_start_matches(['—', ' ']);
+    let cost = rest.split(',').next().unwrap_or(rest);
+    Some(Mana::parse(cost))
 }
 
 /// Keyword bits in a list of keyword words.
@@ -652,7 +811,10 @@ pub fn keyword_bits(words: &[String]) -> u32 {
 
 fn color_bits(text: &str) -> u8 {
     let mut m = 0;
-    for (i, c) in ["white", "blue", "black", "red", "green"].iter().enumerate() {
+    for (i, c) in ["white", "blue", "black", "red", "green"]
+        .iter()
+        .enumerate()
+    {
         if text.contains(c) {
             m |= 1 << i;
         }
@@ -696,7 +858,11 @@ fn back_face(card: &Card, parsed: &abilities::Parsed) -> Option<BackFace> {
 pub fn compile(card: &Card) -> SimCard {
     let parsed = card.parsed();
     let text = card.text_lower().to_string();
-    let front_text = text.split("// back face:").next().unwrap_or(&text).to_string();
+    let front_text = text
+        .split("// back face:")
+        .next()
+        .unwrap_or(&text)
+        .to_string();
     let types = types_of(&card.type_line);
     let cost = Mana::parse(&card.mana_cost);
     let mut colors = 0u8;
@@ -707,24 +873,37 @@ pub fn compile(card: &Card) -> SimCard {
     }
     let kw_words = &parsed.keywords;
     let mut kw = keyword_bits(kw_words);
-    if front_text.contains("~ can't be blocked") || front_text.contains("can't be blocked.") && front_text.starts_with("~") {
+    if front_text.contains("~ can't be blocked")
+        || front_text.contains("can't be blocked.") && front_text.starts_with("~")
+    {
         kw |= UNBLOCKABLE;
     }
-    if front_text.contains("~ can't block") || front_text.contains("can't block.") && !front_text.contains("target") {
+    if front_text.contains("~ can't block")
+        || front_text.contains("can't block.") && !front_text.contains("target")
+    {
         kw |= CANT_BLOCK;
     }
-    let kw_num = |key: &str| kw_words.iter().find(|k| k.starts_with(key)).map(|k| {
-        let digits: String = k.chars().filter(|c| c.is_ascii_digit()).collect();
-        digits.parse::<u8>().unwrap_or(2)
-    });
+    let kw_num = |key: &str| {
+        kw_words.iter().find(|k| k.starts_with(key)).map(|k| {
+            let digits: String = k.chars().filter(|c| c.is_ascii_digit()).collect();
+            digits.parse::<u8>().unwrap_or(2)
+        })
+    };
     let protection = kw_words
         .iter()
         .filter(|k| k.starts_with("protection"))
         .fold(0, |m, k| m | color_bits(k));
     let abilities = compile_abilities(parsed);
     let mana_ability = abilities.iter().any(|a| {
-        matches!(a.trig, Trig::Activated { tap: true, mana: 0, sac_self: false, .. })
-            && a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))
+        matches!(
+            a.trig,
+            Trig::Activated {
+                tap: true,
+                mana: 0,
+                sac_self: false,
+                ..
+            }
+        ) && a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))
     });
     let mut produces = if types & T_LAND != 0 || mana_ability {
         card.produces().0
@@ -821,13 +1000,32 @@ pub fn compile(card: &Card) -> SimCard {
         mana_amount,
         enters_tapped: front_text.contains("enters tapped") && !front_text.contains("unless"),
         equip: (types & T_EQUIPMENT != 0).then(|| kw_num("equip").unwrap_or(2)),
-        crew: kw_words.iter().any(|k| k.starts_with("crew")).then(|| kw_num("crew").unwrap_or(2)),
+        crew: kw_words
+            .iter()
+            .any(|k| k.starts_with("crew"))
+            .then(|| kw_num("crew").unwrap_or(2)),
         cycling: kw_words.iter().find(|k| k.contains("cycling")).map(|k| {
             let digits: String = k.chars().filter(|c| c.is_ascii_digit()).collect();
-            (digits.parse().unwrap_or(2), k.contains("landcycling"))
+            let kind = k.split("cycling").next().unwrap_or("").trim();
+            let find = if kind.ends_with("land") || kind == "basic land" {
+                "land".to_string()
+            } else {
+                kind.to_string()
+            };
+            (digits.parse().unwrap_or(2), find)
         }),
-        teamwork: kw_words.iter().any(|k| k.starts_with("teamwork")).then(|| kw_num("teamwork").unwrap_or(3)),
-        offspring: kw_words.iter().any(|k| k.starts_with("offspring")).then(|| kw_num("offspring").unwrap_or(2)),
+        flashback: keyword_cost(kw_words, "flashback"),
+        kicker: keyword_cost(kw_words, "kicker"),
+        overload: keyword_cost(kw_words, "overload"),
+        sneak: keyword_cost(kw_words, "sneak"),
+        teamwork: kw_words
+            .iter()
+            .any(|k| k.starts_with("teamwork"))
+            .then(|| kw_num("teamwork").unwrap_or(3)),
+        offspring: kw_words
+            .iter()
+            .any(|k| k.starts_with("offspring"))
+            .then(|| kw_num("offspring").unwrap_or(2)),
         gift: kw_words.iter().any(|k| k.starts_with("gift")) || front_text.contains("gift a"),
         extort: kw_words.iter().any(|k| k == "extort"),
         convoke: kw_words.iter().any(|k| k == "convoke"),
@@ -844,79 +1042,19 @@ pub fn compile(card: &Card) -> SimCard {
         abilities,
         back: back_face(card, parsed),
         value: 0.0,
+        ev_mask: 0,
+        has_static: false,
     };
     sc.value = static_value(&sc);
+    sc.ev_mask = sc.abilities.iter().fold(0, |m, a| match &a.trig {
+        Trig::Event(k, _) => m | ev_bit(*k),
+        _ => m,
+    });
+    sc.has_static = sc.abilities.iter().any(|a| a.trig == Trig::Static);
     sc
 }
 
-/// What an effect is roughly worth on its own (the AI refines this with the board).
-pub fn effect_value(e: &Effect) -> f32 {
-    use abilities::Whose;
-    match e {
-        Effect::Destroy(t) | Effect::Exile { target: t, .. } if t.whose != Whose::Yours => {
-            if t.mass { 5.0 } else { 3.5 }
-        }
-        Effect::Damage { amount, to } if to.whose != Whose::Yours => {
-            let n = amount.n.min(6) as f32;
-            if to.mass { n * 1.2 } else { 0.5 + n * 0.5 }
-        }
-        Effect::Fight(_) => 2.5,
-        Effect::Shrink { amount, to, .. } if to.whose != Whose::Yours => {
-            (amount.n.min(5) as f32) * if to.mass { 1.0 } else { 0.6 }
-        }
-        Effect::Bounce(t) if t.whose != Whose::Yours => 1.5,
-        Effect::Lock { lasting, .. } => if *lasting { 3.0 } else { 0.7 },
-        Effect::Edict { .. } => 2.5,
-        Effect::CounterSpell => 3.0,
-        Effect::Draw { amount, you: true } => 1.3 * amount.value(),
-        Effect::Loot => 0.6,
-        Effect::Discard { opponents: true } => 1.0,
-        Effect::Mill { .. } => 0.3,
-        Effect::Scry(n) => 0.25 * n.value(),
-        Effect::Tokens { amount, power, toughness, .. } => {
-            amount.value() * (0.6 + (*power + *toughness).max(0) as f32 * 0.45)
-        }
-        Effect::ItemTokens { amount, kind } => {
-            amount.value() * if kind == "treasure" || kind == "clue" { 1.0 } else { 0.6 }
-        }
-        Effect::PlusCounters { amount, to } => amount.value() * if to.mass { 2.0 } else { 0.8 },
-        Effect::Pump { power, toughness, to, until_eot } => {
-            let base = (*power + *toughness).max(0) as f32;
-            match (to.mass, until_eot) {
-                (true, false) => base * 1.5,
-                (true, true) => base * 0.8,
-                (false, false) => base * 0.6,
-                (false, true) => base * 0.3,
-            }
-        }
-        Effect::Grant { keywords, until_eot, .. } => keywords.len() as f32 * if *until_eot { 0.3 } else { 0.8 },
-        Effect::GainLife(n) => n.value() * 0.12,
-        Effect::Drain { amount, each } => amount.value() * if *each { 1.0 } else { 0.4 },
-        Effect::AddMana(n) => n.value() * 0.5,
-        Effect::FetchLand { battlefield } => if *battlefield { 1.8 } else { 0.8 },
-        Effect::Reanimate => 4.0,
-        Effect::Regrowth => 1.8,
-        Effect::Recast => 1.5,
-        Effect::Untap(_) => 0.5,
-        Effect::GainControl(_) => 4.0,
-        Effect::Copy => 2.0,
-        Effect::Empower(n) => 0.6 * n.value(),
-        Effect::Amass(n) => n.value() * 0.9,
-        Effect::Goad => 1.0,
-        Effect::Proliferate => 1.0,
-        Effect::ExtraCombat => 3.0,
-        Effect::Blink => 1.5,
-        Effect::Tutor => 2.0,
-        Effect::FreeSpell => 2.5,
-        Effect::Prepared => 1.0,
-        Effect::Attach => 0.8,
-        Effect::Doubler(_) => 2.0,
-        Effect::Fog => 1.0,
-        Effect::Dig => 1.0,
-        Effect::OtherCounters(_) => 0.3,
-        _ => 0.2,
-    }
-}
+pub use crate::value::effect_value;
 
 fn static_value(c: &SimCard) -> f32 {
     let mut v = 0.0;
@@ -939,12 +1077,20 @@ fn static_value(c: &SimCard) -> f32 {
             Trig::Phase { .. } => 3.0,
             Trig::Event(..) => 1.8,
             Trig::Attacks | Trig::CombatDamage => 1.5,
-            Trig::Activated { sac_self: false, .. } => 2.0,
+            Trig::Activated {
+                sac_self: false, ..
+            } => 2.0,
             Trig::Loyalty(_) => 1.2,
             Trig::Static => 1.5,
             _ => 1.0,
         };
-        v += ab * repeat * if matches!(a.cond, Cond::Always) { 1.0 } else { 0.6 };
+        v += ab
+            * repeat
+            * if matches!(a.cond, Cond::Always) {
+                1.0
+            } else {
+                0.6
+            };
     }
     if c.mana_ability && !c.is(T_LAND) {
         v += 2.0;
