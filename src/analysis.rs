@@ -785,13 +785,7 @@ mod tests {
             cards.push(Card::basic_land(b, COLORS[i]));
         }
         cards.sort_by(|a, b| a.name.cmp(&b.name));
-        (
-            CardDb { cards },
-            Collection {
-                path: PathBuf::new(),
-                counts,
-            },
-        )
+        (CardDb::new(cards), Collection::new(PathBuf::new(), counts))
     }
 
     #[test]

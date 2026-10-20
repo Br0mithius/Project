@@ -80,7 +80,11 @@ pub fn decks_dir(data_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("decks"))
 }
 
-/// Downloaded card pictures are cached here.
+/// Card images are saved once in an `images` folder next to the program (beside
+/// `data` and `decks`) and reused from there.
 pub fn images_dir(data_dir: &Path) -> PathBuf {
-    data_dir.join("images")
+    data_dir
+        .parent()
+        .map(|p| p.join("images"))
+        .unwrap_or_else(|| PathBuf::from("images"))
 }

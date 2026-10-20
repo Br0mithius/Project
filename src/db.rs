@@ -2,7 +2,7 @@
 
 use crate::card::{BASIC_FOR_COLOR, COLORS, Card};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +19,10 @@ pub fn normalize(name: &str) -> String {
 
 pub struct CardDb {
     pub cards: Vec<Card>,
+    /// Normalised name -> position in `cards`, so lookups don't scan the whole set.
+    index: HashMap<String, usize>,
+    /// Normalised name of each card, same order as `cards` (for searching).
+    pub norm: Vec<String>,
 }
 
 pub enum Lookup<'a> {
@@ -38,8 +42,30 @@ impl CardDb {
                 cards.push(Card::basic_land(name, COLORS[i]));
             }
         }
+        Ok(CardDb::new(cards))
+    }
+
+    pub fn new(mut cards: Vec<Card>) -> CardDb {
         cards.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(CardDb { cards })
+        let mut db = CardDb {
+            cards,
+            index: HashMap::new(),
+            norm: Vec::new(),
+        };
+        db.reindex();
+        db
+    }
+
+    /// Call after changing `cards` (e.g. adding a card by hand).
+    pub fn reindex(&mut self) {
+        self.cards.sort_by(|a, b| a.name.cmp(&b.name));
+        self.norm = self.cards.iter().map(|c| normalize(&c.name)).collect();
+        self.index = self
+            .norm
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.clone(), i))
+            .collect();
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -50,8 +76,11 @@ impl CardDb {
     }
 
     pub fn get(&self, name: &str) -> Option<&Card> {
-        let n = normalize(name);
-        self.cards.iter().find(|c| normalize(&c.name) == n)
+        // Exact names (the common case) skip normalising.
+        if let Ok(i) = self.cards.binary_search_by(|c| c.name.as_str().cmp(name)) {
+            return Some(&self.cards[i]);
+        }
+        self.index.get(&normalize(name)).map(|&i| &self.cards[i])
     }
 
     /// Resolves what the user typed: exact, then unique prefix, then unique substring,
@@ -125,6 +154,8 @@ pub fn parse_count_line(line: &str) -> Option<(u32, String)> {
 pub struct Collection {
     pub path: PathBuf,
     pub counts: BTreeMap<String, u32>,
+    /// Normalised name -> copies owned, for fast lookups.
+    index: HashMap<String, u32>,
 }
 
 impl Collection {
@@ -139,19 +170,33 @@ impl Collection {
                 }
             }
         }
-        Ok(Collection {
-            path: path.to_path_buf(),
+        Ok(Collection::new(path.to_path_buf(), counts))
+    }
+
+    pub fn new(path: PathBuf, counts: BTreeMap<String, u32>) -> Collection {
+        let mut c = Collection {
+            path,
             counts,
-        })
+            index: HashMap::new(),
+        };
+        c.reindex();
+        c
+    }
+
+    fn reindex(&mut self) {
+        self.index.clear();
+        for (k, v) in &self.counts {
+            *self.index.entry(normalize(k)).or_insert(0) += v;
+        }
     }
 
     pub fn owned(&self, name: &str) -> u32 {
-        let n = normalize(name);
-        self.counts
-            .iter()
-            .filter(|(k, _)| normalize(k) == n)
-            .map(|(_, v)| *v)
-            .sum()
+        if let Some(v) = self.counts.get(name) {
+            if self.index.get(&normalize(name)) == Some(v) {
+                return *v;
+            }
+        }
+        *self.index.get(&normalize(name)).unwrap_or(&0)
     }
 
     pub fn total(&self) -> u32 {
@@ -173,6 +218,7 @@ impl Collection {
         } else {
             self.counts.insert(key.clone(), new);
         }
+        self.reindex();
         self.rewrite(&key, new)?;
         Ok(new)
     }
@@ -316,26 +362,24 @@ mod tests {
 
     #[test]
     fn lookup_is_forgiving() {
-        let db = CardDb {
-            cards: vec![
-                Card {
-                    name: "Ka-Zar of the Savage Land".into(),
-                    ..Default::default()
-                },
-                Card {
-                    name: "Red Hulk".into(),
-                    ..Default::default()
-                },
-                Card {
-                    name: "Ultron Drone".into(),
-                    ..Default::default()
-                },
-                Card {
-                    name: "Ultron, Artificial Malevolence".into(),
-                    ..Default::default()
-                },
-            ],
-        };
+        let db = CardDb::new(vec![
+            Card {
+                name: "Ka-Zar of the Savage Land".into(),
+                ..Default::default()
+            },
+            Card {
+                name: "Red Hulk".into(),
+                ..Default::default()
+            },
+            Card {
+                name: "Ultron Drone".into(),
+                ..Default::default()
+            },
+            Card {
+                name: "Ultron, Artificial Malevolence".into(),
+                ..Default::default()
+            },
+        ]);
         assert!(matches!(db.lookup("kazar"), Lookup::Found(c) if c.name.starts_with("Ka-Zar")));
         assert!(matches!(db.lookup("red hlk"), Lookup::NotFound(v) if v[0].name == "Red Hulk"));
         assert!(matches!(db.lookup("ultron"), Lookup::Ambiguous(v) if v.len() == 2));

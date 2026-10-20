@@ -20,8 +20,11 @@ See `dist/README-windows.txt` for a tour. To rebuild the zip from Linux: `tools/
 | Season & Rules | The Season 2 schedule; picking a session sets deck size (60/75) and singleton |
 | My Pool | Add/remove cards you own; copy your pool for Mana Mixer |
 
-Card images come from [Scryfall](https://scryfall.com) and are cached in `data/images`, so they work offline after the
-first download. If an image can't be fetched, the app draws a stand-in card face.
+Card images (full art, high resolution) come from [Scryfall](https://scryfall.com). Each one is downloaded the first
+time it's needed and saved in the `images` folder next to the program (`Card Name (MSH 123).jpg`); after that it is
+always read from disk. Grids use smooth reduced-size copies, the full-resolution image loads when you rest the mouse on
+a card (hover zoom) or inspect it, and only a few images are sent to the graphics card per frame so scrolling stays
+smooth. If an image can't be fetched, the app draws a stand-in card face.
 
 ## Running from source
 

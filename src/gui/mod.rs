@@ -77,10 +77,14 @@ const TYPE_FILTERS: [&str; 8] = [
 ];
 
 #[derive(Serialize, Deserialize)]
+#[serde(default)]
 struct Settings {
     real_images: bool,
     card_width: f32,
     visual_deck: bool,
+    /// Show a big, readable copy of a card while the mouse rests on it.
+    hover_zoom: bool,
+    zoom_width: f32,
 }
 
 impl Default for Settings {
@@ -89,6 +93,8 @@ impl Default for Settings {
             real_images: true,
             card_width: 140.0,
             visual_deck: true,
+            hover_zoom: true,
+            zoom_width: 400.0,
         }
     }
 }
@@ -130,6 +136,19 @@ struct CommanderRow {
     quality: f32,
 }
 
+/// Results of the slower calculations, kept until the deck, pool or rules change
+/// (`GuiApp::rev`), so redrawing the window stays cheap.
+#[derive(Default)]
+struct Memo {
+    rev: u64,
+    errors: Option<Vec<String>>,
+    scores: Option<std::collections::HashMap<String, f32>>,
+    suggestions: Option<Vec<(Card, f32, Vec<String>)>>,
+    draft: Option<(Vec<String>, Vec<(Card, f32, f32, u32, Vec<String>)>)>,
+    trade: Option<((u32, usize), Vec<(Card, u32, u32, String)>)>,
+    weakest: Option<Vec<(String, f32)>>,
+}
+
 pub struct GuiApp {
     data_dir: PathBuf,
     db: CardDb,
@@ -166,10 +185,38 @@ pub struct GuiApp {
     commanders: Option<Vec<CommanderRow>>,
     piper_pick: usize,
     error: Option<String>,
+    /// Bumped whenever the deck, pool or rules change; invalidates `memo`.
+    rev: u64,
+    memo: Memo,
 }
 
 fn settings_path(dir: &std::path::Path) -> PathBuf {
     dir.join("settings.json")
+}
+
+/// Earlier versions saved images as data/images/msh-149.jpg; move them to the new
+/// images folder under readable names so nothing is downloaded twice.
+fn migrate_old_images(data_dir: &std::path::Path, images_dir: &std::path::Path, db: &CardDb) {
+    let old = data_dir.join("images");
+    if !old.is_dir() || old == images_dir {
+        return;
+    }
+    let _ = std::fs::create_dir_all(images_dir);
+    for c in &db.cards {
+        let set = if c.set.is_empty() {
+            "msh".to_string()
+        } else {
+            c.set.to_lowercase()
+        };
+        if let Some(n) = &c.collector_number {
+            let from = old.join(format!("{}-{}.jpg", set, n));
+            let to = images_dir.join(images::file_name(c));
+            if from.exists() && !to.exists() {
+                let _ = std::fs::rename(&from, &to);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(&old); // only succeeds if now empty
 }
 
 impl GuiApp {
@@ -180,6 +227,10 @@ impl GuiApp {
         ctx.global_style_mut(|s| {
             s.spacing.item_spacing = vec2(8.0, 6.0);
             s.spacing.button_padding = vec2(8.0, 4.0);
+            // Hover zoom: appear quickly once the mouse rests, and allow a big card.
+            s.interaction.tooltip_delay = 0.25;
+            s.interaction.show_tooltips_only_when_still = true;
+            s.spacing.tooltip_width = 720.0;
             for (style, id) in s.text_styles.iter_mut() {
                 id.size = match style {
                     egui::TextStyle::Heading => 20.0,
@@ -195,14 +246,11 @@ impl GuiApp {
         let mut error = None;
         let db = CardDb::load(&data_dir.join("cards.json")).unwrap_or_else(|e| {
             error = Some(e);
-            CardDb { cards: Vec::new() }
+            CardDb::new(Vec::new())
         });
         let coll = Collection::load(&data_dir.join("collection.txt")).unwrap_or_else(|e| {
             error = Some(e);
-            Collection {
-                path: data_dir.join("collection.txt"),
-                counts: Default::default(),
-            }
+            Collection::new(data_dir.join("collection.txt"), Default::default())
         });
         let rules_path = data_dir.join("rules.json");
         let rules = if rules_path.exists() {
@@ -219,7 +267,9 @@ impl GuiApp {
         } else {
             deck.name.clone()
         };
-        let images = ImageCache::new(&paths::images_dir(&data_dir), ctx, settings.real_images);
+        let images_dir = paths::images_dir(&data_dir);
+        migrate_old_images(&data_dir, &images_dir, &db);
+        let images = ImageCache::new(&images_dir, ctx, settings.real_images);
         let mut app = GuiApp {
             data_dir,
             db,
@@ -256,6 +306,8 @@ impl GuiApp {
             commanders: None,
             piper_pick: 0,
             error,
+            rev: 1,
+            memo: Memo::default(),
         };
         app.deck.name = app.deck_name.clone();
         app.refresh_saved_decks();
@@ -313,13 +365,102 @@ impl GuiApp {
         }
     }
 
-    fn texture(&mut self, card: &Card) -> Option<TextureHandle> {
-        self.images.get(card).cloned()
+    /// Full-resolution image (or the thumbnail while it loads) for big views.
+    fn full_texture(&mut self, card: &Card) -> Option<TextureHandle> {
+        if self.settings.real_images {
+            self.images.full(card)
+        } else {
+            None
+        }
+    }
+
+    /// Draws a card: the official image when available (loaded only once it's on
+    /// screen), otherwise a drawn card face; plus the hover zoom.
+    fn show_card(&mut self, ui: &mut Ui, look: CardLook) -> egui::Response {
+        self.show_card_noted(ui, look, None)
+    }
+
+    fn show_card_noted(
+        &mut self,
+        ui: &mut Ui,
+        look: CardLook,
+        note: Option<String>,
+    ) -> egui::Response {
+        let (rect, resp) = ui.allocate_exact_size(card_size(look.width), Sense::click());
+        let card = look.card;
+        if ui.is_rect_visible(rect) {
+            let tex = if self.settings.real_images {
+                self.images.thumb(card)
+            } else {
+                None
+            };
+            paint_card(
+                ui,
+                rect,
+                &CardLook {
+                    image: tex.as_ref(),
+                    ..look
+                },
+                resp.hovered(),
+            );
+        }
+        self.with_zoom(resp, card, note)
+    }
+
+    /// While the mouse rests on a card, shows a large readable copy next to the pointer.
+    fn with_zoom(
+        &mut self,
+        resp: egui::Response,
+        card: &Card,
+        note: Option<String>,
+    ) -> egui::Response {
+        if !self.settings.hover_zoom {
+            return match note {
+                Some(n) => resp.on_hover_text(n),
+                None => resp,
+            };
+        }
+        if !resp.hovered() {
+            return resp;
+        }
+        let tex = self.full_texture(card);
+        let w = self.settings.zoom_width;
+        resp.on_hover_ui_at_pointer(|ui| {
+            card_widget(
+                ui,
+                CardLook {
+                    card,
+                    width: w,
+                    image: tex.as_ref(),
+                    badge: None,
+                    dimmed: false,
+                    selected: false,
+                },
+            );
+            if let Some(n) = &note {
+                ui.label(RichText::new(n).small());
+            }
+        })
     }
 
     // ------------------------------------------------------------------ actions
 
     fn apply(&mut self, actions: Vec<Action>, ctx: &egui::Context) {
+        let changes_data = actions.iter().any(|a| {
+            !matches!(
+                a,
+                Action::Select(_)
+                    | Action::Copy(..)
+                    | Action::Simulate
+                    | Action::NewHand
+                    | Action::Draw
+                    | Action::DraftAdd(_)
+                    | Action::DraftRemove(_)
+            )
+        });
+        if changes_data {
+            self.rev += 1;
+        }
         for a in actions {
             let before = self.deck.clone();
             match a {
@@ -708,13 +849,28 @@ impl GuiApp {
                 }
                 ui.label(
                     RichText::new(format!(
-                        "{} images ready, {} downloading, {} unavailable. Images are saved on this PC, so they work offline afterwards.",
+                        "{} images saved on this PC, {} downloading, {} unavailable. Each image is downloaded once and then always read from the images folder.",
                         self.images.loaded(),
                         self.images.pending(),
                         self.images.failures()
                     ))
                     .small(),
                 );
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.images.folder().display().to_string()).small().weak());
+                    if ui.small_button("Open folder").clicked() {
+                        let dir = self.images.folder().to_path_buf();
+                        let _ = std::fs::create_dir_all(&dir);
+                        let opener = if cfg!(windows) {
+                            "explorer"
+                        } else if cfg!(target_os = "macos") {
+                            "open"
+                        } else {
+                            "xdg-open"
+                        };
+                        let _ = std::process::Command::new(opener).arg(&dir).spawn();
+                    }
+                });
                 if let Some(e) = &self.images.last_error {
                     ui.label(RichText::new(format!("Last download problem: {}", e)).small().color(Color32::from_rgb(255, 170, 120)));
                 }
@@ -734,6 +890,19 @@ impl GuiApp {
                 if self.images.failures() > 0 && ui.button("Retry images that failed").clicked() {
                     self.images.retry_failed();
                 }
+                ui.separator();
+                if ui
+                    .checkbox(&mut self.settings.hover_zoom, "Zoom in on a card when the mouse rests on it")
+                    .changed()
+                {
+                    self.save_settings();
+                }
+                ui.add_enabled_ui(self.settings.hover_zoom, |ui| {
+                    ui.label("Zoomed card size");
+                    if ui.add(egui::Slider::new(&mut self.settings.zoom_width, 260.0..=620.0)).changed() {
+                        self.save_settings();
+                    }
+                });
                 ui.separator();
                 ui.label("Card size in lists");
                 if ui.add(egui::Slider::new(&mut self.settings.card_width, 100.0..=240.0)).changed() {
@@ -758,15 +927,21 @@ impl GuiApp {
         });
     }
 
-    fn deck_summary(&self, ui: &mut Ui) {
+    fn deck_summary(&mut self, ui: &mut Ui) {
         let total = self.deck.total_count(&self.rules);
         let size = self.rules.deck_size;
-        let problems = self.deck.validate(&self.db, &self.coll, &self.rules);
-        let errors: Vec<&String> = problems
-            .iter()
-            .filter(|p| p.severity == Severity::Error)
-            .map(|p| &p.message)
-            .collect();
+        let errors: Vec<String> = self
+            .memo
+            .errors
+            .get_or_insert_with(|| {
+                self.deck
+                    .validate(&self.db, &self.coll, &self.rules)
+                    .into_iter()
+                    .filter(|p| p.severity == Severity::Error)
+                    .map(|p| p.message)
+                    .collect()
+            })
+            .clone();
         ui.horizontal(|ui| {
             let frac = (total as f32 / size.max(1) as f32).min(1.0);
             ui.add(
@@ -844,8 +1019,15 @@ impl GuiApp {
                 let mut scored: Vec<(f32, &Card)> = cards
                     .into_iter()
                     .map(|c| {
+                        let s = self
+                            .memo
+                            .scores
+                            .as_ref()
+                            .and_then(|m| m.get(&c.name).copied());
                         (
-                            analysis::score_card(c, &self.deck, &self.db, &self.rules).0,
+                            s.unwrap_or_else(|| {
+                                analysis::score_card(c, &self.deck, &self.db, &self.rules).0
+                            }),
                             c,
                         )
                     })
@@ -982,13 +1164,12 @@ impl GuiApp {
                         } else {
                             Some(format!("{}/{}", avail.min(owned), owned))
                         };
-                        let tex = self.texture(card);
-                        let resp = card_widget(
+                        let resp = self.show_card(
                             ui,
                             CardLook {
                                 card,
                                 width: w,
-                                image: tex.as_ref(),
+                                image: None,
                                 badge,
                                 dimmed: avail == 0 || !fits,
                                 selected: self.selected.as_deref() == Some(card.name.as_str()),
@@ -1048,8 +1229,8 @@ impl GuiApp {
             return;
         };
         ScrollArea::vertical().id_salt("inspector").show(ui, |ui| {
-            let w = (ui.available_width() - 8.0).min(340.0);
-            let tex = self.texture(&card);
+            let w = (ui.available_width() - 8.0).min(420.0);
+            let tex = self.full_texture(&card);
             ui.vertical_centered(|ui| {
                 card_widget(
                     ui,
@@ -1182,18 +1363,17 @@ impl GuiApp {
             }
             for name in &commanders {
                 if let Some(card) = self.card(name).cloned() {
-                    let tex = self.texture(&card);
                     let badge = if *name == PIPER {
                         self.deck.piper_color.map(|c| format!("adds {}", c))
                     } else {
                         Some("Commander".into())
                     };
-                    let resp = card_widget(
+                    let resp = self.show_card(
                         ui,
                         CardLook {
                             card: &card,
                             width: cmd_w,
-                            image: tex.as_ref(),
+                            image: None,
                             badge,
                             dimmed: false,
                             selected: false,
@@ -1393,7 +1573,11 @@ impl GuiApp {
                             ui.scope_id().with(("deckcard", &card.name)),
                             Sense::click(),
                         );
-                        let tex = self.texture(card);
+                        let tex = if self.settings.real_images && ui.is_rect_visible(rect) {
+                            self.images.thumb(card)
+                        } else {
+                            None
+                        };
                         paint_card(
                             ui,
                             rect,
@@ -1418,17 +1602,21 @@ impl GuiApp {
                             acts.push(Action::Remove(card.name.clone(), 1));
                         }
                         let name = card.name.clone();
-                        resp.on_hover_text("Click to inspect · double-click to remove one")
-                            .context_menu(|ui| {
-                                if ui.button("Remove one").clicked() {
-                                    acts.push(Action::Remove(name.clone(), 1));
-                                    ui.close();
-                                }
-                                if ui.button("Add another").clicked() {
-                                    acts.push(Action::Add(name.clone(), 1));
-                                    ui.close();
-                                }
-                            });
+                        let resp = self.with_zoom(
+                            resp,
+                            card,
+                            Some("Click to inspect · double-click to remove one".into()),
+                        );
+                        resp.context_menu(|ui| {
+                            if ui.button("Remove one").clicked() {
+                                acts.push(Action::Remove(name.clone(), 1));
+                                ui.close();
+                            }
+                            if ui.button("Add another").clicked() {
+                                acts.push(Action::Add(name.clone(), 1));
+                                ui.close();
+                            }
+                        });
                     }
                 });
             }
@@ -1484,20 +1672,7 @@ impl GuiApp {
                         )
                         .sense(Sense::click()),
                     );
-                    let tex = self.texture(card);
-                    let resp = resp.on_hover_ui(|ui| {
-                        card_widget(
-                            ui,
-                            CardLook {
-                                card,
-                                width: 220.0,
-                                image: tex.as_ref(),
-                                badge: None,
-                                dimmed: false,
-                                selected: false,
-                            },
-                        );
-                    });
+                    let resp = self.with_zoom(resp, card, None);
                     if resp.clicked() {
                         acts.push(Action::Select(card.name.clone()));
                     }
@@ -1529,23 +1704,27 @@ impl GuiApp {
             );
             return;
         }
-        let picks: Vec<(Card, f32, Vec<String>)> =
-            analysis::suggestions(&self.deck, &self.db, &self.coll, &self.rules)
-                .into_iter()
-                .take(12)
-                .map(|s| (s.card.clone(), s.score, s.reasons))
-                .collect();
+        let picks: Vec<(Card, f32, Vec<String>)> = self
+            .memo
+            .suggestions
+            .get_or_insert_with(|| {
+                analysis::suggestions(&self.deck, &self.db, &self.coll, &self.rules)
+                    .into_iter()
+                    .take(12)
+                    .map(|s| (s.card.clone(), s.score, s.reasons))
+                    .collect()
+            })
+            .clone();
         ScrollArea::horizontal().id_salt("suggest").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for (card, score, why) in &picks {
                     ui.vertical(|ui| {
-                        let tex = self.texture(card);
-                        let resp = card_widget(
+                        let resp = self.show_card(
                             ui,
                             CardLook {
                                 card,
                                 width: 100.0,
-                                image: tex.as_ref(),
+                                image: None,
                                 badge: Some(format!("{:.1}", score)),
                                 dimmed: false,
                                 selected: self.selected.as_deref() == Some(card.name.as_str()),
@@ -1610,15 +1789,14 @@ impl GuiApp {
                         };
                         ui.allocate_ui(vec2(210.0, 470.0), |ui| {
                             ui.vertical(|ui| {
-                                let tex = self.texture(&card);
                                 let current =
                                     self.deck.commander.as_deref() == Some(r.name.as_str());
-                                let resp = card_widget(
+                                let resp = self.show_card(
                                     ui,
                                     CardLook {
                                         card: &card,
                                         width: 200.0,
-                                        image: tex.as_ref(),
+                                        image: None,
                                         badge: Some(format!("#{}", rank + 1)),
                                         dimmed: false,
                                         selected: current,
@@ -1780,26 +1958,31 @@ impl GuiApp {
                 }
             });
             ui.separator();
-            let pack: Vec<&Card> = self.draft_pack.iter().filter_map(|n| self.db.get(n)).collect();
-            let picks: Vec<(Card, f32, f32, u32, Vec<String>)> =
-                league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules)
+            let stale = self.memo.draft.as_ref().is_none_or(|(pack, _)| *pack != self.draft_pack);
+            if stale {
+                let pack: Vec<&Card> = self.draft_pack.iter().filter_map(|n| self.db.get(n)).collect();
+                let ranked = league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules)
                     .into_iter()
                     .map(|p| (p.card.clone(), p.total, p.fit, p.vp, p.reasons))
                     .collect();
+                self.memo.draft = Some((self.draft_pack.clone(), ranked));
+            }
+            let picks: Vec<(Card, f32, f32, u32, Vec<String>)> =
+                self.memo.draft.as_ref().map(|(_, r)| r.clone()).unwrap_or_default();
             ScrollArea::vertical().id_salt("draft_scroll").auto_shrink([false, false]).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(12.0, 12.0);
                     for (rank, (card, total, fit, vp, why)) in picks.iter().enumerate() {
                         ui.allocate_ui(vec2(190.0, 420.0), |ui| {
                             ui.vertical(|ui| {
-                                let tex = self.texture(card);
-                                let resp = card_widget(
+                                                                let resp = self.show_card(
                                     ui,
                                     CardLook {
                                         card,
                                         width: 180.0,
-                                        image: tex.as_ref(),
-                                        badge: Some(if rank == 0 { "Pick #1".into() } else { format!("#{}", rank + 1) }),
+                                        image: None,
+                                        badge: Some(if rank == 0 { "Pick #1".into() } else { format!("#{}", rank + 1) },
+                                ),
                                         dimmed: false,
                                         selected: rank == 0,
                                     },
@@ -1850,11 +2033,16 @@ impl GuiApp {
                 2 => Some("mythic"),
                 _ => None,
             };
-            let plan: Vec<(Card, u32, u32, String)> =
-                league::plan_trade_in(&self.deck, &self.db, &self.coll, &self.rules, self.trade_target, need)
+            let key = (self.trade_target, self.trade_need);
+            if self.memo.trade.as_ref().is_none_or(|(k, _)| *k != key) {
+                let plan = league::plan_trade_in(&self.deck, &self.db, &self.coll, &self.rules, self.trade_target, need)
                     .into_iter()
                     .map(|t| (t.card.clone(), t.copies, t.vp, t.why))
                     .collect();
+                self.memo.trade = Some((key, plan));
+            }
+            let plan: Vec<(Card, u32, u32, String)> =
+                self.memo.trade.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
             let total: u32 = plan.iter().map(|p| p.2).sum();
             ui.label(
                 RichText::new(format!("Plan: {} VP", total))
@@ -1868,10 +2056,9 @@ impl GuiApp {
                 ui.horizontal_wrapped(|ui| {
                     for (card, copies, vp, why) in &plan {
                         ui.vertical(|ui| {
-                            let tex = self.texture(card);
-                            let resp = card_widget(
+                                                        let resp = self.show_card(
                                 ui,
-                                CardLook { card, width: 130.0, image: tex.as_ref(), badge: Some(format!("{} VP", vp)), dimmed: false, selected: false },
+                                CardLook { card, width: 130.0, image: None, badge: Some(format!("{} VP", vp)), dimmed: false, selected: false },
                             );
                             if resp.clicked() {
                                 acts.push(Action::Select(card.name.clone()));
@@ -2062,14 +2249,22 @@ impl GuiApp {
                     // Weakest cards.
                     let ui = &mut cols[2];
                     ui.label(RichText::new("Weakest cards (cut candidates)").strong());
-                    for s in analysis::weakest(&self.deck, &self.db, &self.rules)
-                        .iter()
-                        .take(10)
-                    {
+                    let weakest = self
+                        .memo
+                        .weakest
+                        .get_or_insert_with(|| {
+                            analysis::weakest(&self.deck, &self.db, &self.rules)
+                                .iter()
+                                .take(10)
+                                .map(|s| (s.card.name.clone(), s.score))
+                                .collect()
+                        })
+                        .clone();
+                    for (name, score) in weakest {
                         ui.horizontal(|ui| {
-                            ui.label(format!("{:.1}", s.score));
-                            if ui.link(&s.card.name).clicked() {
-                                acts.push(Action::Select(s.card.name.clone()));
+                            ui.label(format!("{:.1}", score));
+                            if ui.link(&name).clicked() {
+                                acts.push(Action::Select(name.clone()));
                                 self.tab = Tab::Build;
                             }
                         });
@@ -2150,13 +2345,12 @@ impl GuiApp {
                     ui.horizontal_wrapped(|ui| {
                         for n in self.hand.clone() {
                             if let Some(c) = self.db.get(&n).cloned() {
-                                let tex = self.texture(&c);
-                                let resp = card_widget(
+                                let resp = self.show_card(
                                     ui,
                                     CardLook {
                                         card: &c,
                                         width: 140.0,
-                                        image: tex.as_ref(),
+                                        image: None,
                                         badge: None,
                                         dimmed: false,
                                         selected: false,
@@ -2332,27 +2526,14 @@ impl GuiApp {
                             }
                             match &card {
                                 Some(c) => {
-                                    let tex = self.texture(c);
-                                    let resp = ui
-                                        .add(
+                                    let resp =
+                                        ui.add(
                                             egui::Label::new(RichText::new(&name).color(
                                                 cards::lighten_for_text(cards::frame_color(c)),
                                             ))
                                             .sense(Sense::click()),
-                                        )
-                                        .on_hover_ui(|ui| {
-                                            card_widget(
-                                                ui,
-                                                CardLook {
-                                                    card: c,
-                                                    width: 220.0,
-                                                    image: tex.as_ref(),
-                                                    badge: None,
-                                                    dimmed: false,
-                                                    selected: false,
-                                                },
-                                            );
-                                        });
+                                        );
+                                    let resp = self.with_zoom(resp, c, None);
                                     if resp.clicked() {
                                         acts.push(Action::Select(name.clone()));
                                     }
@@ -2384,7 +2565,28 @@ impl GuiApp {
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let frame_start = std::time::Instant::now();
         self.images.poll(&ctx);
+        if self.memo.rev != self.rev {
+            self.memo = Memo {
+                rev: self.rev,
+                ..Default::default()
+            };
+        }
+        if self.sort == SortBy::Score && self.memo.scores.is_none() {
+            let scores = self
+                .db
+                .cards
+                .iter()
+                .map(|c| {
+                    (
+                        c.name.clone(),
+                        analysis::score_card(c, &self.deck, &self.db, &self.rules).0,
+                    )
+                })
+                .collect();
+            self.memo.scores = Some(scores);
+        }
         let mut acts: Vec<Action> = Vec::new();
         Panel::top("top").show(ui, |ui| {
             ui.add_space(4.0);
@@ -2404,7 +2606,7 @@ impl eframe::App for GuiApp {
                         let pending = self.images.pending();
                         let text = if pending > 0 {
                             format!(
-                                "Card images: {} ready, {} downloading · ",
+                                "Card images: {} saved, downloading {} more · ",
                                 self.images.loaded(),
                                 pending
                             )
@@ -2412,7 +2614,7 @@ impl eframe::App for GuiApp {
                             "Card images unavailable (offline?) - showing drawn cards · "
                                 .to_string()
                         } else {
-                            format!("Card images: {} ready · ", self.images.loaded())
+                            format!("Card images: {} saved · ", self.images.loaded())
                         };
                         ui.label(RichText::new(text).small().weak());
                     }
@@ -2465,6 +2667,12 @@ impl eframe::App for GuiApp {
         }
         if !acts.is_empty() {
             self.apply(acts, &ctx);
+        }
+        if std::env::var_os("MSH_PERF").is_some() {
+            eprintln!(
+                "frame {:.2} ms",
+                frame_start.elapsed().as_secs_f64() * 1000.0
+            );
         }
         let _ = Vec2::ZERO;
     }

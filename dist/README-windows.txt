@@ -5,9 +5,14 @@ MSH DECKBUILDER (Windows)
 2. Double-click "MSH Deckbuilder.exe".
    - If Windows shows "Windows protected your PC", click "More info" then "Run anyway"
      (the program isn't code-signed; that's the only reason for the warning).
-3. The first time it runs it downloads the official card images (full art) for your
-   pool from Scryfall in the background and saves them in data\images, so they work
-   offline afterwards. Before a draft, use Settings > "Download images for the whole set".
+3. Card images: the first time a card is needed, its official image (full art,
+   high resolution) is downloaded from Scryfall and saved in the "images" folder,
+   e.g. images\Red Hulk (MSH 149).jpg. After that it is always read from that folder,
+   never downloaded again, so it works offline. Images for your pool start downloading
+   as soon as the app opens; before a draft, use Settings > "Download images for the
+   whole set".
+4. Rest the mouse on any card to see a big, readable copy of it (Settings lets you
+   change the zoom size or turn it off).
 
 TABS
   Deck Builder     Your pool on the left (click = inspect, double-click = add,
@@ -31,7 +36,7 @@ The session picker at the top sets the rules (60 cards, singleton from Session 6
 YOUR FILES (keep these when you update the program)
   data\collection.txt   your league pool ("count name" per line).
   data\cards.json       card database (the whole Marvel Super Heroes set).
-  data\images\          downloaded card images.
+  images\               card images (downloaded once, reused forever).
   decks\                saved decks (plain text).
 
 "msh-cli (command line).exe" is the same tool as a typed command line, if you prefer it.

@@ -1321,7 +1321,7 @@ impl App {
             .map(|i| color_char(i).to_string())
             .collect();
         self.db.cards.push(card.clone());
-        self.db.cards.sort_by(|a, b| a.name.cmp(&b.name));
+        self.db.reindex();
         match self.db.save(&self.data_dir.join("cards.json")) {
             Ok(()) => println!("Saved {} to data/cards.json.", name),
             Err(e) => println!("{}", e),

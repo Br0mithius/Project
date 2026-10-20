@@ -348,37 +348,32 @@ mod tests {
     use std::path::PathBuf;
 
     fn db() -> CardDb {
-        CardDb {
-            cards: vec![
-                Card {
-                    name: "Red Hulk".into(),
-                    mana_cost: "{4}{R}{R}".into(),
-                    type_line: "Legendary Creature — Gamma Berserker Villain".into(),
-                    color_identity: vec!["R".into()],
-                    confidence: "verified".into(),
-                    ..Default::default()
-                },
-                Card {
-                    name: "Web Up".into(),
-                    mana_cost: "{2}{W}".into(),
-                    type_line: "Enchantment".into(),
-                    color_identity: vec!["W".into()],
-                    confidence: "verified".into(),
-                    ..Default::default()
-                },
-                Card::basic_land("Mountain", 'R'),
-            ],
-        }
+        CardDb::new(vec![
+            Card {
+                name: "Red Hulk".into(),
+                mana_cost: "{4}{R}{R}".into(),
+                type_line: "Legendary Creature — Gamma Berserker Villain".into(),
+                color_identity: vec!["R".into()],
+                confidence: "verified".into(),
+                ..Default::default()
+            },
+            Card {
+                name: "Web Up".into(),
+                mana_cost: "{2}{W}".into(),
+                type_line: "Enchantment".into(),
+                color_identity: vec!["W".into()],
+                confidence: "verified".into(),
+                ..Default::default()
+            },
+            Card::basic_land("Mountain", 'R'),
+        ])
     }
 
     fn coll() -> Collection {
         let mut counts = BTreeMap::new();
         counts.insert("Red Hulk".to_string(), 1);
         counts.insert("Web Up".to_string(), 2);
-        Collection {
-            path: PathBuf::new(),
-            counts,
-        }
+        Collection::new(PathBuf::new(), counts)
     }
 
     #[test]
