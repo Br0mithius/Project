@@ -807,6 +807,41 @@ impl<'a> Game<'a> {
         for id in untapping {
             self.emit(Ev::Untapped, a, Some(id));
         }
+        if self.log.is_some() {
+            let lands = self
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == a && x.is(T_LAND))
+                .count();
+            let creatures: Vec<String> = self
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == a && x.is_creature())
+                .map(|x| format!("{}/{}", x.p, x.t))
+                .collect();
+            let (life, hand, round) =
+                (self.players[a].life, self.players[a].hand.len(), self.round);
+            let names: Vec<String> = self.players[a]
+                .hand
+                .iter()
+                .map(|&c| {
+                    let c = &self.players[a].cards[c as usize];
+                    format!("{} {}", c.name, c.mv)
+                })
+                .collect();
+            self.note(|| {
+                format!(
+                    "-- P{} round {}: life {}, {} lands, hand {}, creatures [{}] | hand: {}",
+                    a,
+                    round,
+                    life,
+                    lands,
+                    hand,
+                    creatures.join(" "),
+                    names.join("; ")
+                )
+            });
+        }
         let hijacked = std::mem::take(&mut self.players[a].hijacked);
         self.phase_triggers(a, Phase::Upkeep);
         if !first_turn {

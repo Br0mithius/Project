@@ -175,6 +175,10 @@ impl<'a> Game<'a> {
                 self.emit_about(Ev::Blocks, snap.ctrl as usize, &snap);
             }
         }
+        let nblocks: usize = attacks.iter().map(|at| at.blockers.len()).sum();
+        if nblocks > 0 {
+            self.note(|| format!("AI blocks with {} creature(s)", nblocks));
+        }
         // Menace needs two or more blockers.
         for at in attacks.iter_mut() {
             let menace = self

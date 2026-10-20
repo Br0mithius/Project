@@ -1224,10 +1224,12 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
         })
         .max()
         .unwrap_or(0);
+    // Early on, opponents cast little worth an answer: developing the board matters more.
+    let stage = (0.8 + 0.4 * g.round as f32).min(4.0);
     if is_counter(c) {
-        4.0
+        stage
     } else if is_instant_removal(c) {
-        if opp_power > 0 { 3.5 } else { 1.5 }
+        if opp_power > 0 { stage.min(3.5) } else { 1.0 }
     } else if is_fog(c) {
         if opp_power * 2 >= g.players[p].life {
             4.0
@@ -1324,44 +1326,30 @@ fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
 fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     let mut out = Vec::new();
     let pl = &g.players[p];
-    let push_cast = |out: &mut Vec<(f32, u32, Act)>,
-                     src: Src,
-                     idx: u16,
-                     back: bool,
-                     commander: bool| {
-        let c = &pl.cards[idx as usize];
-        let opts = cast_opts(g, p, idx, back, post);
-        let Some(cost) = g.cast_cost(p, src, opts) else {
-            return;
-        };
-        if !g.can_pay(p, &cost) {
-            // Try without the extras.
-            let plain = CastOpts {
-                back,
-                ..Default::default()
+    let push_cast =
+        |out: &mut Vec<(f32, u32, Act)>, src: Src, idx: u16, back: bool, commander: bool| {
+            let opts = cast_opts(g, p, idx, back, post);
+            let Some(cost) = g.cast_cost(p, src, opts) else {
+                return;
             };
-            match g.cast_cost(p, src, plain) {
-                Some(c2) if g.can_pay(p, &c2) => {
-                    let v = spell_value(g, p, idx, back, commander);
-                    out.push((v, c2.total(), Act::Cast(src, plain)));
+            if !g.can_pay(p, &cost) {
+                // Try without the extras.
+                let plain = CastOpts {
+                    back,
+                    ..Default::default()
+                };
+                match g.cast_cost(p, src, plain) {
+                    Some(c2) if g.can_pay(p, &c2) => {
+                        let v = spell_value(g, p, idx, back, commander);
+                        out.push((v, c2.total(), Act::Cast(src, plain)));
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            return;
-        }
-        // Precombat: hold creatures that don't help this combat for after it.
-        if !post && !back && c.is(T_CREATURE) && c.kw & HASTE == 0 {
-            let helps = c.abilities.iter().any(|a| {
-                a.trig == Trig::Enters && a.effects.iter().any(|e| effect_value(e) >= 2.5)
-                    || a.trig == Trig::Static && a.effects.iter().any(|e| matches!(e, Effect::Pump { to, .. } | Effect::Grant { to, .. } if to.mass))
-            });
-            if !helps && !commander {
                 return;
             }
-        }
-        let v = spell_value(g, p, idx, back, commander);
-        out.push((v, cost.total(), Act::Cast(src, opts)));
-    };
+            let v = spell_value(g, p, idx, back, commander);
+            out.push((v, cost.total(), Act::Cast(src, opts)));
+        };
     for (h, &idx) in pl.hand.iter().enumerate() {
         let c = &pl.cards[idx as usize];
         if c.is(T_LAND) {
@@ -1513,7 +1501,39 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
 
 /// Picks the set of actions worth the most for the mana (a small knapsack); returns the
 /// best one to do first.
+/// Creature spells that don't help this turn's combat wait until after it (they can't attack
+/// yet, and holding them hides information and keeps mana up for tricks).
+fn waits_for_combat(g: &Game, p: usize, act: &Act) -> bool {
+    let Act::Cast(src, opts) = act else {
+        return false;
+    };
+    let Some((idx, back)) = g.spell_card(p, *src, *opts) else {
+        return false;
+    };
+    let c = &g.players[p].cards[idx as usize];
+    if back || !c.is(T_CREATURE) || c.kw & HASTE != 0 || matches!(src, Src::Command(_)) {
+        return false;
+    }
+    !c.abilities.iter().any(|a| {
+        a.trig == Trig::Enters && a.effects.iter().any(|e| effect_value(e) >= 2.5)
+            || a.trig == Trig::Static
+                && a.effects.iter().any(
+                    |e| matches!(e, Effect::Pump { to, .. } | Effect::Grant { to, .. } if to.mass),
+                )
+    })
+}
+
 fn plan(options: &[(f32, u32, Act)], budget: u32) -> Option<(usize, f32)> {
+    plan_where(options, budget, &|_| true)
+}
+
+/// The best set of actions for the mana (a small knapsack); returns the most valuable of
+/// them that `now` allows doing at this point, and the whole set's value.
+fn plan_where(
+    options: &[(f32, u32, Act)],
+    budget: u32,
+    now: &dyn Fn(usize) -> bool,
+) -> Option<(usize, f32)> {
     let items: Vec<usize> = (0..options.len()).filter(|&i| options[i].0 > 0.3).collect();
     if items.is_empty() {
         return None;
@@ -1545,6 +1565,7 @@ fn plan(options: &[(f32, u32, Act)], budget: u32) -> Option<(usize, f32)> {
         .take(64)
         .filter(|(k, _)| mask & (1 << k) != 0)
         .map(|(_, &i)| i)
+        .filter(|&i| now(i))
         .max_by(|&a, &b| options[a].0.partial_cmp(&options[b].0).unwrap())?;
     Some((first, total))
 }
@@ -1600,12 +1621,38 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
             return;
         }
         let avail = g.mana_available(p);
-        let reserve = if post { holdup(g, p, &opts, avail) } else { 0 };
-        let Some((i, _)) = plan(&opts, avail.saturating_sub(reserve)) else {
+        if g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok() {
+            let list: Vec<String> = opts
+                .iter()
+                .map(|o| {
+                    let what = match o.2 {
+                        Act::Cast(Src::Hand(h), _) => g.players[p].cards
+                            [g.players[p].hand[h] as usize]
+                            .name
+                            .clone(),
+                        other => format!("{:?}", other).chars().take(30).collect(),
+                    };
+                    format!("{} v{:.1} c{}", what, o.0, o.1)
+                })
+                .collect();
+            g.note(|| format!("   P{} options ({} mana): {}", p, avail, list.join(" | ")));
+        }
+        let reserve = holdup(g, p, &opts, avail);
+        if reserve > 0 {
+            g.note(|| format!("AI P{} holds up {} mana", p, reserve));
+        }
+        // The whole turn is planned together; before combat, only its pre-combat parts happen.
+        let Some((i, _)) = plan_where(&opts, avail.saturating_sub(reserve), &|i| {
+            post || !waits_for_combat(g, p, &opts[i].2)
+        }) else {
             return;
         };
         let act = opts[i].2;
-        if !do_act(g, p, act) {
+        let ok = do_act(g, p, act);
+        if g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok() {
+            g.note(|| format!("   P{} did {:?}: {}", p, act, ok));
+        }
+        if !ok {
             failed.push(format!("{:?}", act));
         }
     }
@@ -1615,6 +1662,10 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
 
 /// Casts an instant from hand aimed at `focus` (if any). True if it was cast.
 fn cast_instant(g: &mut Game, p: usize, h: usize, focus: Option<u32>) -> bool {
+    let name = g.players[p].cards[g.players[p].hand[h] as usize]
+        .name
+        .clone();
+    g.note(|| format!("AI P{} instant-speed: {}", p, name));
     g.focus = focus;
     let ok = g.cast(p, Src::Hand(h), CastOpts::default());
     g.focus = None;
@@ -1753,7 +1804,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
                 });
             }
         }
-        g.note(|| format!("P{} counters it", o));
+        g.note(|| format!("AI P{} counters it", o));
         // "Unless its controller pays {N}".
         if let Some(i) = text.find("pays {") {
             let n: u32 = text[i + 6..]
@@ -1855,6 +1906,7 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
             }
         }
         if let Some((_, h)) = best {
+            g.note(|| format!("AI P{} end-of-turn play", p));
             if g.cast(p, Src::Hand(h), CastOpts::default()) {
                 continue;
             }
@@ -2181,17 +2233,92 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                 .collect();
         }
     }
+    let goad_ok = |a: usize, o: usize| match g.perms[a].goad {
+        Some(gd) if opps.len() > 1 => gd as usize != o,
+        _ => true,
+    };
+    // Group plan: send a group at one opponent, predict their blocks with the blocking AI,
+    // drop attackers that would just die, and keep the best opponent's plan.
+    let mut best_plan: Option<(f32, usize, Vec<usize>)> = None;
+    for &o in &opps {
+        let w = weight(g, me, o);
+        let mut group: Vec<usize> = ready.iter().copied().filter(|&a| goad_ok(a, o)).collect();
+        for _ in 0..4 {
+            if group.is_empty() {
+                break;
+            }
+            let attacks: Vec<Attack> = group
+                .iter()
+                .map(|&a| Attack {
+                    attacker: g.perms[a].id,
+                    def: Def::Player(o),
+                    blockers: Vec::new(),
+                    blocked: false,
+                })
+                .collect();
+            let blocks = declare_blocks(g, o, &attacks);
+            let mut value = 0.0;
+            let mut bad = Vec::new();
+            for &a in &group {
+                let at = &g.perms[a];
+                let av = perm_value(g, a);
+                let bl: Vec<usize> = blocks
+                    .iter()
+                    .filter(|(_, x)| *x == at.id)
+                    .filter_map(|(b, _)| g.idx(*b))
+                    .collect();
+                if bl.is_empty() {
+                    value += dmg_of(at) as f32 * 0.6 * w;
+                    continue;
+                }
+                // Blocked: what dies on each side.
+                let (dies, killed) = if bl.len() == 1 {
+                    let (ad, bd) = fight(at, &g.perms[bl[0]]);
+                    (ad, if bd { perm_value(g, bl[0]) } else { 0.0 })
+                } else {
+                    let total: i16 = bl.iter().map(|&b| g.perms[b].p.max(0)).sum();
+                    let dt = bl.iter().any(|&b| g.perms[b].has(DEATHTOUCH));
+                    let dies = !at.has(INDESTRUCTIBLE) && (dt || total >= at.t - at.damage);
+                    let first = bl[0];
+                    let kills = at.has(DEATHTOUCH) || at.p >= g.perms[first].t;
+                    (dies, if kills { perm_value(g, first) } else { 0.0 })
+                };
+                let trample = if at.has(TRAMPLE) {
+                    (at.p - bl.iter().map(|&b| g.perms[b].t).sum::<i16>()).max(0) as f32 * 0.6 * w
+                } else {
+                    0.0
+                };
+                let net = killed + trample - if dies { av } else { 0.0 };
+                if dies && net < 0.0 && at.goad.is_none() {
+                    bad.push(a);
+                }
+                value += net;
+            }
+            if bad.is_empty() {
+                if value > 0.2 && best_plan.as_ref().is_none_or(|b| value > b.0) {
+                    best_plan = Some((value, o, group.clone()));
+                }
+                break;
+            }
+            group.retain(|a| !bad.contains(a));
+        }
+    }
     let mut out: Vec<(u32, Def)> = Vec::new();
     let mut gains: Vec<(f32, usize)> = Vec::new();
+    if let Some((v, o, group)) = &best_plan {
+        let each = v / group.len().max(1) as f32;
+        for &a in group {
+            out.push((g.perms[a].id, Def::Player(*o)));
+            gains.push((each, a));
+        }
+    }
+    // Everyone else: one at a time, at another player or a planeswalker.
     for &a in &ready {
+        if out.iter().any(|(id, _)| *id == g.perms[a].id) {
+            continue;
+        }
         let at = &g.perms[a];
-        // Goaded: must attack, and not the goader if possible.
-        let choices: Vec<usize> = match at.goad {
-            Some(gd) if opps.len() > 1 => {
-                opps.iter().copied().filter(|&o| o != gd as usize).collect()
-            }
-            _ => opps.clone(),
-        };
+        let choices: Vec<usize> = opps.iter().copied().filter(|&o| goad_ok(a, o)).collect();
         let mut best: Option<(f32, Def)> = None;
         for &o in &choices {
             let v = attack_gain(g, me, a, o, &[]);
@@ -2199,20 +2326,20 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                 best = Some((v, Def::Player(o)));
             }
             // Their planeswalkers.
-            for w in g
+            for wk in g
                 .perms
                 .iter()
                 .filter(|x| x.ctrl as usize == o && x.is(T_PLANESWALKER) && !x.is_creature())
             {
-                let wv = 2.0 + w.loyalty as f32 * 0.6;
-                let kill = at.p >= w.loyalty;
-                let v2 = if attack_gain(g, me, a, o, &[]) >= 0.0 {
+                let wv = 2.0 + wk.loyalty as f32 * 0.6;
+                let kill = at.p >= wk.loyalty;
+                let v2 = if v >= 0.0 {
                     if kill { wv } else { at.p as f32 * 0.6 }
                 } else {
                     -1.0
                 };
                 if best.is_none_or(|b| v2 > b.0) {
-                    best = Some((v2, Def::Walker(w.id)));
+                    best = Some((v2, Def::Walker(wk.id)));
                 }
             }
         }

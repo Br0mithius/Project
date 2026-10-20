@@ -51,7 +51,15 @@ fn main() {
             );
         }
         for line in log {
-            let key: String = line.chars().take(110).collect();
+            // Group by kind of event (strip card-specific detail for AI decisions).
+            let key: String = if line.starts_with("AI ") {
+                line.split(':')
+                    .next()
+                    .unwrap_or(&line)
+                    .replace(|c: char| c.is_ascii_digit(), "#")
+            } else {
+                line.chars().take(110).collect()
+            };
             *counts.entry(key).or_default() += 1;
         }
     }
