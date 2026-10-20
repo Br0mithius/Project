@@ -1,44 +1,37 @@
 # MSH Deckbuilder
 
-An interactive terminal deck builder, written in Rust, for building a **60-card, non-singleton commander deck** out of a
-**Marvel Super Heroes (MSH)** booster pool.
+A deck builder for the **Mulligans Island Commander League (Season 2)**: build a commander deck from your
+**Marvel Super Heroes** league pool, with official card images, league rules, a draft helper and trade planning.
 
 ## Windows
 
-Download `dist/MSH-Deckbuilder-windows.zip`, unzip it, and double-click `msh-deckbuilder.exe`.
-See `dist/README-windows.txt` for details. To rebuild the zip from Linux: `tools/build-windows.sh`.
+Download `dist/MSH-Deckbuilder-windows.zip`, unzip it, and double-click **MSH Deckbuilder.exe**.
+See `dist/README-windows.txt` for a tour. To rebuild the zip from Linux: `tools/build-windows.sh`.
 
-## Quick start (from source)
+## The app
 
-```bash
-cargo run --release
-```
+| Tab | What it does |
+| --- | --- |
+| Deck Builder | Pool browser (filters by colour, type, role, mana value), deck as card stacks or a list, card inspector, auto-build, basic-land controls, suggestions |
+| Commanders | Every legendary creature you own, ranked by how strong a deck your pool gives it; one-click build, Prismatic Piper option |
+| Draft Helper | Type a pack's cards and get them ranked for your deck (fit, VP value, raw strength); "I took it" adds to your pool |
+| Trades & VP | Trade-in plan for the 10 VP minimum (with the rarity floor), VP prices, Skill Tree costs, Shop |
+| Stats & Playtest | Mana curve vs. targets, colour sources, roles, weakest cards, 20,000-hand simulation, sample hands |
+| Season & Rules | The Season 2 schedule; picking a session sets deck size (60/75) and singleton |
+| My Pool | Add/remove cards you own; copy your pool for Mana Mixer |
 
-Then try:
+Card images come from [Scryfall](https://scryfall.com) and are cached in `data/images`, so they work offline after the
+first download. If an image can't be fetched, the app draws a stand-in card face.
 
-```
-commanders            # rank every legendary creature you own as a commander
-show madame hydra     # read a card (names can be partial; TAB completes)
-auto madame hydra     # build a full legal 60-card deck instantly
-auto thanos rb        # 3+ colour commanders: choose which colours to actually play
-stats                 # curve, colours, roles, land count advice
-cut                   # weakest cards in the deck
-suggest               # best cards you could still add
-sim                   # opening-hand / land-drop odds
-check                 # validate against the format rules and your collection
-save hydra            # writes decks/hydra.txt
-export                # paste-able list for Moxfield / Archidekt / Arena
-```
-
-Type `help` for every command, or `help pool` for the filter syntax
-(`pool c:r t:creature mv<=3 role:removal fits avail sort:score`).
-
-You can also run commands without the interactive prompt:
+## Running from source
 
 ```bash
-cargo run -- -c "auto red hulk" -c stats -c check
-printf 'auto thanos\nsim\n' | cargo run
+cargo run --release                 # the windowed app
+cargo run --release --bin msh-cli   # the same tools as a typed command line
 ```
+
+Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
+`trade 10 rare`, `export mixer`, `help`.
 
 ## Files
 
@@ -54,7 +47,9 @@ printf 'auto thanos\nsim\n' | cargo run
 | Rule | Default |
 | --- | --- |
 | `deck_size` | 60 |
-| `commander_counts_toward_size` | true (59 cards + the commander = 60) |
+| `commander_counts_toward_size` | true (the commander is one of the 60) |
+| `singleton` | false until Session 6 |
+| `piper_free` | true (The Prismatic Piper needn't be in your pool) |
 | `max_copies` | 0 = only limited by what you own |
 | `unlimited_basics` | true |
 | `enforce_color_identity` | true |
@@ -80,7 +75,7 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
 * **Scores** (`suggest`, `cut`, `auto`) add up rarity, roles found in the rules text (removal, card draw, counters,
   tokens, evasion...), creature stats for the mana cost, how well the card fills the mana curve, and synergy with your
   commander (for example, Villain cards for Madame Hydra). They are a heuristic to sort options, not a rule.
-* **Lands**: about 40% of the library, adjusted by average mana value; basics are split by coloured pips.
+* **Lands**: the league's 25-27 at 60 cards (scaled for 75), low end for cheap curves; basics are split by coloured pips.
 * **Simulation** shuffles the deck thousands of times to estimate opening-hand land counts, land drops by turn, and the
   odds of casting your commander on curve.
 

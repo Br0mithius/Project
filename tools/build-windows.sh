@@ -8,7 +8,8 @@ python3 - <<'PY'
 import zipfile
 out = "dist/MSH-Deckbuilder-windows.zip"
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-    z.write("target/x86_64-pc-windows-gnu/release/msh-deckbuilder.exe", "MSH-Deckbuilder/msh-deckbuilder.exe")
+    z.write("target/x86_64-pc-windows-gnu/release/msh-deckbuilder.exe", "MSH-Deckbuilder/MSH Deckbuilder.exe")
+    z.write("target/x86_64-pc-windows-gnu/release/msh-cli.exe", "MSH-Deckbuilder/msh-cli (command line).exe")
     z.write("data/cards.json", "MSH-Deckbuilder/data/cards.json")
     z.write("data/collection.txt", "MSH-Deckbuilder/data/collection.txt")
     z.write("dist/README-windows.txt", "MSH-Deckbuilder/README.txt")

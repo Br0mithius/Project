@@ -10,9 +10,15 @@ use std::path::Path;
 pub struct Deck {
     pub name: String,
     pub commander: Option<String>,
-    /// Main deck only; the commander is not in here.
+    /// Second commander: a Partner, or The Prismatic Piper under the league rule.
+    pub partner: Option<String>,
+    /// The colour The Prismatic Piper adds (league rule: a mono-colour commander's 2nd colour).
+    pub piper_color: Option<char>,
+    /// Main deck only; the commanders are not in here.
     pub cards: BTreeMap<String, u32>,
 }
+
+pub const PIPER: &str = "The Prismatic Piper";
 
 #[derive(Debug, PartialEq)]
 pub enum Severity {
@@ -37,13 +43,28 @@ impl Deck {
         self.cards.values().sum()
     }
 
+    pub fn commanders(&self) -> Vec<&String> {
+        self.commander.iter().chain(self.partner.iter()).collect()
+    }
+
     pub fn total_count(&self, rules: &Rules) -> u32 {
         self.main_count()
-            + if rules.commander_counts_toward_size && self.commander.is_some() {
-                1
+            + if rules.commander_counts_toward_size {
+                self.commanders().len() as u32
             } else {
                 0
             }
+    }
+
+    /// Library size this deck needs (deck size minus its commanders when they count).
+    pub fn main_target(&self, rules: &Rules) -> u32 {
+        if rules.commander_counts_toward_size {
+            rules
+                .deck_size
+                .saturating_sub(self.commanders().len().max(1) as u32)
+        } else {
+            rules.deck_size
+        }
     }
 
     pub fn count_of(&self, name: &str) -> u32 {
@@ -53,11 +74,11 @@ impl Deck {
     /// Copies of a card used by this deck, including the commander.
     pub fn used(&self, name: &str) -> u32 {
         self.count_of(name)
-            + if self.commander.as_deref() == Some(name) {
-                1
-            } else {
-                0
-            }
+            + self
+                .commanders()
+                .iter()
+                .filter(|c| c.as_str() == name)
+                .count() as u32
     }
 
     pub fn add(&mut self, name: &str, n: u32) {
@@ -75,18 +96,32 @@ impl Deck {
         take
     }
 
+    /// Combined colour identity of the commander(s), including The Prismatic Piper's colour.
     pub fn identity(&self, db: &CardDb) -> Option<ColorSet> {
-        self.commander
-            .as_ref()
-            .and_then(|c| db.get(c))
-            .map(|c| c.identity())
+        let main = self.commander.as_ref().and_then(|c| db.get(c))?.identity();
+        let extra = match self.partner.as_deref() {
+            Some(PIPER) => self
+                .piper_color
+                .map(ColorSet::from_char)
+                .unwrap_or_default(),
+            Some(p) => db.get(p).map(|c| c.identity()).unwrap_or_default(),
+            None => ColorSet(0),
+        };
+        Some(main.union(extra))
     }
 
     /// Text format understood by Arena/Moxfield/Archidekt importers.
     pub fn to_text(&self) -> String {
         let mut out = String::new();
-        if let Some(c) = &self.commander {
-            out.push_str(&format!("Commander\n1 {}\n\n", c));
+        if self.commander.is_some() {
+            out.push_str("Commander\n");
+            for c in self.commanders() {
+                out.push_str(&format!("1 {}\n", c));
+            }
+            if let Some(col) = self.piper_color {
+                out.push_str(&format!("# Prismatic Piper colour: {}\n", col));
+            }
+            out.push('\n');
         }
         out.push_str("Deck\n");
         for (name, n) in &self.cards {
@@ -99,6 +134,10 @@ impl Deck {
         let mut deck = Deck::new(name);
         let mut section = "deck";
         for line in text.lines() {
+            if let Some(col) = line.trim().strip_prefix("# Prismatic Piper colour:") {
+                deck.piper_color = col.trim().chars().next().map(|c| c.to_ascii_uppercase());
+                continue;
+            }
             let l = line.trim().to_lowercase();
             match l.trim_end_matches(':') {
                 "commander" => {
@@ -120,7 +159,8 @@ impl Deck {
             };
             let canonical = db.get(&raw).map(|c| c.name.clone()).unwrap_or(raw);
             match section {
-                "commander" => deck.commander = Some(canonical),
+                "commander" if deck.commander.is_none() => deck.commander = Some(canonical),
+                "commander" => deck.partner = Some(canonical),
                 "deck" => deck.add(&canonical, n),
                 _ => {}
             }
@@ -166,6 +206,44 @@ impl Deck {
                 _ => {}
             },
         }
+        if let Some(p) = &self.partner {
+            let main = self.commander.as_ref().and_then(|c| db.get(c));
+            if p == PIPER {
+                match main.map(|c| c.identity()) {
+                    Some(id) if id.count() != 1 => err(format!(
+                        "The Prismatic Piper can only partner with a mono-colour commander ({} is {}).",
+                        self.commander.clone().unwrap_or_default(),
+                        id
+                    )),
+                    Some(id) => match self.piper_color {
+                        None => err("Choose The Prismatic Piper's colour (`piper <colour>`).".into()),
+                        Some(c) if id.is_subset_of(ColorSet::from_char(c)) => err(
+                            "The Prismatic Piper must add a different colour than your commander's.".into(),
+                        ),
+                        _ => {}
+                    },
+                    None => {}
+                }
+            } else {
+                let has_partner = |n: &str| {
+                    db.get(n)
+                        .map(|c| c.oracle_text.contains("Partner"))
+                        .unwrap_or(false)
+                };
+                if !has_partner(p) || !self.commander.as_deref().is_some_and(has_partner) {
+                    err(format!(
+                        "{} and {} can only be commanded together if both have Partner.",
+                        self.commander.clone().unwrap_or_default(),
+                        p
+                    ));
+                }
+                if let Some(c) = db.get(p) {
+                    if !c.can_be_commander() {
+                        err(format!("{} can't be a commander.", p));
+                    }
+                }
+            }
+        }
         let total = self.total_count(rules);
         if total != rules.deck_size {
             err(format!(
@@ -180,9 +258,7 @@ impl Deck {
             ));
         }
         let mut names: Vec<&String> = self.cards.keys().collect();
-        if let Some(c) = &self.commander {
-            names.push(c);
-        }
+        names.extend(self.commanders());
         names.sort();
         names.dedup();
         let mut warnings = Vec::new();
@@ -195,7 +271,8 @@ impl Deck {
                 ));
                 continue;
             };
-            let basic_free = card.is_basic() && rules.unlimited_basics;
+            let basic_free = (card.is_basic() && rules.unlimited_basics)
+                || (card.name == PIPER && rules.piper_free);
             if rules.enforce_collection && !basic_free {
                 let owned = coll.owned(name);
                 if used > owned {
@@ -204,6 +281,12 @@ impl Deck {
                         name, used, owned
                     ));
                 }
+            }
+            if rules.singleton && !card.is_basic() && used > 1 {
+                err(format!(
+                    "{}: {} copies, but singleton is in effect (one of each card except basic lands).",
+                    name, used
+                ));
             }
             if rules.max_copies > 0 && !card.is_basic() && used > rules.max_copies {
                 err(format!(

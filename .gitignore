@@ -2,3 +2,6 @@
 data/.history
 decks/_current.txt
 tools/.forge-cache/
+data/images/
+data/settings.json
+data/rules.json

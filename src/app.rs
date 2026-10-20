@@ -4,6 +4,7 @@ use crate::analysis::{self, color_char, color_name, curve_label};
 use crate::card::{BASIC_FOR_COLOR, Card, ColorSet, Role};
 use crate::db::{CardDb, Collection, Lookup, Rules};
 use crate::deck::{Deck, Severity, find_in_deck};
+use crate::league;
 use crate::ui::{Style, bar, compact_cost, pad, pct, wrap};
 use std::fs;
 use std::path::PathBuf;
@@ -84,8 +85,38 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
     ("decks", "", "List saved decks"),
     (
         "export",
+        "[deck|pool|mixer]",
+        "Deck list for Moxfield/Archidekt; `pool` / `mixer` = Mana Mixer lists",
+    ),
+    (
+        "season",
+        "[1-13]",
+        "League schedule; `season 6` applies that session's rules (size, singleton)",
+    ),
+    (
+        "partner",
+        "<card>|none",
+        "Second commander: a Partner card, or The Prismatic Piper",
+    ),
+    (
+        "piper",
+        "<colour>",
+        "Choose the colour The Prismatic Piper adds (e.g. `piper r`)",
+    ),
+    (
+        "draft",
+        "<card>; <card>; ...",
+        "Rank a draft pack's cards for your deck (separate names with ;)",
+    ),
+    (
+        "trade",
+        "[vp] [rare|mythic]",
+        "Plan Public Pool trade-ins (default 10 VP minimum)",
+    ),
+    (
+        "vp",
         "",
-        "Print the deck as text you can paste into Moxfield/Archidekt/Arena",
+        "Value Point prices: your pool's trade-in values, Skill Tree costs",
     ),
     (
         "own",
@@ -142,8 +173,16 @@ impl App {
     pub fn new(data_dir: PathBuf, style: Style) -> Result<App, String> {
         let db = CardDb::load(&data_dir.join("cards.json"))?;
         let coll = Collection::load(&data_dir.join("collection.txt"))?;
-        let rules = Rules::load(&data_dir.join("rules.json"));
-        let current = decks_dir_for(&data_dir).join("_current.txt");
+        let rules_path = data_dir.join("rules.json");
+        let rules = if rules_path.exists() {
+            Rules::load(&rules_path)
+        } else {
+            // First run: use the rules for the next league session.
+            let mut r = Rules::default();
+            let _ = league::apply_session(&mut r, league::upcoming_session().number);
+            r
+        };
+        let current = crate::paths::decks_dir(&data_dir).join("_current.txt");
         let deck = if current.exists() {
             Deck::load(&current, &db).map(|mut d| {
                 d.name = "current".into();
@@ -165,7 +204,7 @@ impl App {
     }
 
     fn decks_dir(&self) -> PathBuf {
-        decks_dir_for(&self.data_dir)
+        crate::paths::decks_dir(&self.data_dir)
     }
 
     pub fn prompt(&self) -> String {
@@ -228,7 +267,13 @@ impl App {
             "save" => self.save(rest),
             "load" => self.load(rest),
             "decks" => self.list_decks(),
-            "export" => print!("{}", self.deck.to_text()),
+            "export" => self.export(rest),
+            "season" | "session" => self.season(rest),
+            "partner" => self.partner(rest),
+            "piper" => self.piper(rest),
+            "draft" | "pack" => self.draft(rest),
+            "trade" => self.trade(rest),
+            "vp" => self.vp(),
             "own" => self.own(rest, 1),
             "unown" => self.own(rest, -1),
             "newcard" => self.new_card(ask),
@@ -967,7 +1012,7 @@ impl App {
         }
         self.snapshot();
         let (mut deck, shortfall) =
-            analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules, Some(plays));
+            analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules, Some(plays), None);
         deck.name = self.deck.name.clone();
         self.deck = deck;
         println!(
@@ -1002,7 +1047,7 @@ impl App {
             "Average mana value {:.2} → about {} lands in a {}-card library.",
             st.avg_mv,
             rec,
-            self.rules.main_deck_size()
+            self.deck.main_target(&self.rules)
         );
         let basics_needed = rec.saturating_sub(nonbasic);
         let split = analysis::basic_split(&self.deck, &self.db, basics_needed);
@@ -1327,6 +1372,277 @@ impl App {
         );
         println!("  enforce_collection           {}", r.enforce_collection);
         println!("  starting_life                {}", r.starting_life);
+        println!("  singleton                    {}", r.singleton);
+        println!(
+            "  piper_free                   {} {}",
+            r.piper_free,
+            self.style
+                .dim("(The Prismatic Piper needn't be in your pool)")
+        );
+        match league::session(r.session) {
+            Some(s) => println!(
+                "{}",
+                self.style.dim(&format!(
+                    "These are the league rules for Session {} ({}).",
+                    s.number,
+                    s.date_label()
+                ))
+            ),
+            None => println!(
+                "{}",
+                self.style
+                    .dim("Custom rules. `season <n>` resets to a league session.")
+            ),
+        }
+    }
+
+    fn season(&mut self, arg: &str) {
+        let next = league::upcoming_session().number;
+        if let Ok(n) = arg.trim().parse::<u32>() {
+            match league::apply_session(&mut self.rules, n) {
+                Ok(s) => {
+                    let _ = self.rules.save(&self.data_dir.join("rules.json"));
+                    let (size, single) = s.deck_rules();
+                    println!(
+                        "Rules set for Session {} ({}): {} cards including commander(s), {}.",
+                        s.number,
+                        s.date_label(),
+                        size,
+                        if single { "singleton" } else { "no singleton" }
+                    );
+                    let dupes = league::singleton_conflicts(&self.deck, &self.db);
+                    if single && !dupes.is_empty() {
+                        let list: Vec<String> =
+                            dupes.iter().map(|(n, c)| format!("{}x {}", c, n)).collect();
+                        println!(
+                            "{} {}",
+                            self.style.warn("Singleton: cut extra copies of"),
+                            list.join(", ")
+                        );
+                    }
+                }
+                Err(e) => println!("{}", e),
+            }
+            return;
+        }
+        println!("{}", self.style.bold("Season 2 schedule"));
+        for s in &league::SESSIONS {
+            let (size, single) = s.deck_rules();
+            let marker = if s.number == self.rules.session {
+                self.style.good(" ◀ rules in use")
+            } else if s.number == next {
+                self.style.warn(" ◀ next")
+            } else {
+                String::new()
+            };
+            println!(
+                "  {:>2}  {:<13} {:>2} cards  {:<13} {}{}",
+                s.number,
+                s.date_label(),
+                size,
+                if single { "singleton" } else { "no singleton" },
+                s.label,
+                marker
+            );
+        }
+        println!("Use `season <n>` to build for a session.");
+    }
+
+    fn partner(&mut self, q: &str) {
+        let q = q.trim();
+        if q.is_empty() || q.eq_ignore_ascii_case("none") {
+            self.deck.partner = None;
+            self.deck.piper_color = None;
+            println!("Partner removed.");
+            return;
+        }
+        let Some(c) = self.resolve(q) else { return };
+        if c.name == crate::deck::PIPER {
+            let mono = self
+                .deck
+                .commander
+                .as_ref()
+                .and_then(|n| self.db.get(n))
+                .map(|m| m.identity().count() == 1);
+            if mono == Some(false) {
+                println!(
+                    "The Prismatic Piper can only join a mono-colour commander (league rule)."
+                );
+                return;
+            }
+        } else if !c.oracle_text.contains("Partner") {
+            println!(
+                "{} doesn't have Partner. Only Partner cards or The Prismatic Piper can be a second commander.",
+                c.name
+            );
+            return;
+        }
+        self.deck.remove(&c.name, 1);
+        self.deck.partner = Some(c.name.clone());
+        println!("Second commander: {}", self.style.name(&c));
+        if c.name == crate::deck::PIPER && self.deck.piper_color.is_none() {
+            println!("Now choose its colour with `piper <colour>` (e.g. `piper g`).");
+        }
+    }
+
+    fn piper(&mut self, arg: &str) {
+        let Some(col) = ColorSet::parse(arg).filter(|c| c.count() == 1) else {
+            println!("Give one colour: w, u, b, r or g.");
+            return;
+        };
+        if let Some(id) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|n| self.db.get(n))
+            .map(|m| m.identity())
+        {
+            if id.count() != 1 {
+                println!(
+                    "The Prismatic Piper can only join a mono-colour commander (league rule)."
+                );
+                return;
+            }
+            if col.is_subset_of(id) {
+                println!("Your commander is already {}; pick a different colour.", id);
+                return;
+            }
+        }
+        self.deck.partner = Some(crate::deck::PIPER.to_string());
+        self.deck.piper_color = col.to_string().chars().next();
+        println!(
+            "The Prismatic Piper adds {}. Deck identity: {}",
+            color_name(col.indices().next().unwrap()),
+            self.deck
+                .identity(&self.db)
+                .map(|i| i.to_string())
+                .unwrap_or_default()
+        );
+    }
+
+    fn draft(&self, arg: &str) {
+        let names: Vec<&str> = arg
+            .split([';', '\n'])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if names.is_empty() {
+            println!(
+                "List the pack's cards separated by semicolons, e.g. `draft red hulk; web up; truck toss`."
+            );
+            return;
+        }
+        let mut pack: Vec<&Card> = Vec::new();
+        for n in names {
+            match self.db.lookup(n) {
+                Lookup::Found(c) => pack.push(c),
+                _ => {
+                    self.resolve(n);
+                }
+            }
+        }
+        let picks = league::rank_pack(&pack, &self.deck, &self.db, &self.coll, &self.rules);
+        println!(
+            "{}",
+            self.style
+                .dim("  pick  score   fit  VP  card                              why")
+        );
+        for (i, p) in picks.iter().enumerate() {
+            println!(
+                "  {:>4} {:>6.1} {:>5.1} {:>3}  {} {}",
+                i + 1,
+                p.total,
+                p.fit,
+                p.vp,
+                self.style.name_padded(p.card, 33),
+                self.style.dim(&p.reasons.join("; "))
+            );
+        }
+    }
+
+    fn trade(&self, arg: &str) {
+        let mut target = 10;
+        let mut need = None;
+        for tok in arg.split_whitespace() {
+            match tok.to_lowercase().as_str() {
+                "rare" => need = Some("rare"),
+                "mythic" => need = Some("mythic"),
+                t => {
+                    if let Ok(n) = t.parse() {
+                        target = n
+                    }
+                }
+            }
+        }
+        let plan =
+            league::plan_trade_in(&self.deck, &self.db, &self.coll, &self.rules, target, need);
+        let total: u32 = plan.iter().map(|t| t.vp).sum();
+        println!(
+            "Suggested trade-ins ({} VP; the round minimum is 10):",
+            total
+        );
+        for t in &plan {
+            println!(
+                "  {}x {} {:>2} VP  {}",
+                t.copies,
+                self.style.name_padded(t.card, 33),
+                t.vp,
+                self.style.dim(&format!("{} ({})", t.why, t.card.rarity))
+            );
+        }
+        if total < target {
+            println!(
+                "{}",
+                self.style
+                    .warn("Not enough spare cards to reach that - the shortfall becomes debt.")
+            );
+        }
+        println!(
+            "{}",
+            self.style.dim(
+                "Only spare copies are suggested; cards in your current deck are kept. Claims cost 2x VP."
+            )
+        );
+    }
+
+    fn vp(&self) {
+        let mut rows: Vec<(&Card, u32)> = self
+            .coll
+            .counts
+            .iter()
+            .filter_map(|(n, c)| self.db.get(n).map(|x| (x, *c)))
+            .filter(|(c, _)| league::vp_value(c) > 0)
+            .collect();
+        rows.sort_by(|a, b| {
+            league::vp_value(b.0)
+                .cmp(&league::vp_value(a.0))
+                .then(a.0.name.cmp(&b.0.name))
+        });
+        let total: u32 = rows.iter().map(|(c, n)| league::vp_value(c) * n).sum();
+        println!(
+            "Your pool's trade-in value: {} VP (Mythic 8, Rare 4, Uncommon 2, Common 1).",
+            total
+        );
+        for (c, n) in rows.iter().filter(|(c, _)| league::vp_value(c) >= 4) {
+            println!(
+                "  {}x {} {} VP each",
+                n,
+                self.style.name_padded(c, 33),
+                league::vp_value(c)
+            );
+        }
+        println!(
+            "Skill Tree staples cost 5, 10, 15 ... 45 VP in the order you claim them (225 for all 9)."
+        );
+        println!("Shop items: 30 VP each, one purchase per session. Each win earns 5 VP.");
+    }
+
+    fn export(&self, arg: &str) {
+        match arg.trim().to_lowercase().as_str() {
+            "pool" | "collection" => print!("{}", league::export_pool(&self.db, &self.coll)),
+            "mixer" | "manamixer" => print!("{}", league::export_deck(&self.deck, &self.db)),
+            _ => print!("{}", self.deck.to_text()),
+        }
     }
 
     fn undo(&mut self) {
@@ -1348,14 +1664,6 @@ impl App {
         self.deck.cards.clear();
         println!("Main deck emptied (commander kept). `undo` to restore.");
     }
-}
-
-/// Decks live next to the data folder: <project>/decks.
-fn decks_dir_for(data_dir: &std::path::Path) -> PathBuf {
-    data_dir
-        .parent()
-        .map(|p| p.join("decks"))
-        .unwrap_or_else(|| PathBuf::from("decks"))
 }
 
 /// Accepts "{2}{R}{R}", "2RR" or "2 r r" and returns "{2}{R}{R}".

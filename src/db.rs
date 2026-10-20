@@ -214,6 +214,19 @@ pub struct Rules {
     /// Only allow cards from the collection file.
     pub enforce_collection: bool,
     pub starting_life: u32,
+    /// One copy of each card (basic lands excepted). Turned on by the league from Session 6.
+    #[serde(default)]
+    pub singleton: bool,
+    /// League session the rules were set for (0 = custom).
+    #[serde(default)]
+    pub session: u32,
+    /// The Prismatic Piper is available without owning it (league partner rule).
+    #[serde(default = "yes")]
+    pub piper_free: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Rules {
@@ -226,6 +239,9 @@ impl Default for Rules {
             enforce_color_identity: true,
             enforce_collection: true,
             starting_life: 30,
+            singleton: false,
+            session: 0,
+            piper_free: true,
         }
     }
 }
@@ -273,8 +289,12 @@ impl Rules {
             "enforce_color_identity" => self.enforce_color_identity = parse_bool(value)?,
             "enforce_collection" => self.enforce_collection = parse_bool(value)?,
             "starting_life" => self.starting_life = parse_num(value)?,
+            "singleton" => self.singleton = parse_bool(value)?,
+            "piper_free" => self.piper_free = parse_bool(value)?,
             _ => return Err(format!("unknown rule '{}'", key)),
         }
+        // Any manual change means the rules no longer match a league session exactly.
+        self.session = 0;
         Ok(())
     }
 }

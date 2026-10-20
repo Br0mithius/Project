@@ -6,8 +6,8 @@ use crate::deck::Deck;
 use std::collections::BTreeMap;
 
 /// Ideal number of nonland cards at each mana value (index 0 = MV 0-1, 5 = MV 6+)
-/// for a 60-card deck. Scaled for other sizes.
-const CURVE_TARGET_60: [f32; 6] = [3.0, 8.0, 9.0, 7.0, 5.0, 3.0];
+/// for a 60-card deck with ~26 lands (33 spells). Scaled for other sizes.
+const CURVE_TARGET_60: [f32; 6] = [3.0, 7.0, 8.0, 7.0, 5.0, 3.0];
 
 pub fn curve_bucket(mv: u32) -> usize {
     (mv.max(1) as usize - 1).min(5)
@@ -97,23 +97,25 @@ pub fn stats(deck: &Deck, db: &CardDb) -> Stats {
     s
 }
 
-/// Land count for the main deck: ~40% of the library, nudged by the curve.
+/// League guidance: 25-27 lands in a 60-card deck, scaled for other sizes (31-34 at 75).
+/// Low curves get the bottom of the range, high curves the top.
+pub fn land_range(rules: &Rules) -> (u32, u32) {
+    let scale = rules.deck_size as f32 / 60.0;
+    ((25.0 * scale).round() as u32, (27.0 * scale).round() as u32)
+}
+
 pub fn recommended_lands(avg_mv: f32, rules: &Rules) -> u32 {
-    let base = (rules.main_deck_size() as f32 * 0.40).round() as i32;
-    let adj = if avg_mv == 0.0 {
-        0
-    } else if avg_mv < 2.4 {
-        -2
-    } else if avg_mv < 2.8 {
-        -1
-    } else if avg_mv > 3.8 {
-        2
-    } else if avg_mv > 3.3 {
-        1
+    let (lo, hi) = land_range(rules);
+    let mid = (lo + hi) / 2;
+    if avg_mv == 0.0 {
+        mid
+    } else if avg_mv < 2.7 {
+        lo
+    } else if avg_mv > 3.4 {
+        hi
     } else {
-        0
-    };
-    (base + adj).max(0) as u32
+        mid
+    }
 }
 
 /// Splits `count` basic lands between the commander's colours in proportion to the
@@ -349,13 +351,19 @@ pub fn synergy(cmd: &Card, card: &Card) -> (f32, Vec<String>) {
 
 /// Owned copies not already used by `deck`.
 pub fn available(card: &Card, deck: &Deck, coll: &Collection, rules: &Rules) -> u32 {
+    let used = deck.used(&card.name);
     if card.is_basic() && rules.unlimited_basics {
         return 99;
     }
-    if !rules.enforce_collection {
-        return 99;
+    let cap = if rules.singleton {
+        1u32.saturating_sub(used)
+    } else {
+        99
+    };
+    if !rules.enforce_collection || (card.name == crate::deck::PIPER && rules.piper_free) {
+        return cap;
     }
-    coll.owned(&card.name).saturating_sub(deck.used(&card.name))
+    coll.owned(&card.name).saturating_sub(used).min(cap)
 }
 
 /// Nonland cards you could add right now, best first.
@@ -423,18 +431,30 @@ pub fn weakest<'a>(deck: &Deck, db: &'a CardDb, rules: &Rules) -> Vec<Scored<'a>
 /// Builds a full legal deck around `commander` from what you own. Also returns how many
 /// spell slots couldn't be filled because the pool ran out (those become extra basics).
 /// `colors` limits which of the commander's colours to play; `None` picks the best ones.
+/// `piper` pairs a mono-colour commander with The Prismatic Piper in that colour.
 pub fn autobuild(
     commander: &Card,
     db: &CardDb,
     coll: &Collection,
     rules: &Rules,
     colors: Option<ColorSet>,
+    piper: Option<char>,
 ) -> (Deck, u32) {
     let mut deck = Deck::new(&format!("auto-{}", commander.name));
     deck.commander = Some(commander.name.clone());
-    let identity = commander.identity();
-    let plays = colors.unwrap_or_else(|| best_colors(commander, db, coll, rules));
-    let main = rules.main_deck_size();
+    if piper.is_some() {
+        deck.partner = Some(crate::deck::PIPER.to_string());
+        deck.piper_color = piper;
+    }
+    let identity = deck.identity(db).unwrap_or_else(|| commander.identity());
+    let main = deck.main_target(rules);
+    let plays = colors.unwrap_or_else(|| {
+        if piper.is_some() {
+            identity
+        } else {
+            best_colors(commander, db, coll, rules)
+        }
+    });
 
     // Nonbasic lands that make our colours come first; they count toward the land total.
     for land in db.cards.iter().filter(|c| c.is_land() && !c.is_basic()) {
@@ -483,7 +503,7 @@ pub fn land_count(deck: &Deck, db: &CardDb) -> u32 {
 /// Tops the deck up to the required size with basics split by colour need.
 /// Returns how many of each basic were added.
 pub fn fill_basics(deck: &mut Deck, db: &CardDb, rules: &Rules) -> [u32; 5] {
-    let missing = rules.main_deck_size().saturating_sub(deck.main_count());
+    let missing = deck.main_target(rules).saturating_sub(deck.main_count());
     let split = basic_split(deck, db, missing);
     for i in 0..5 {
         if split[i] > 0 {
@@ -779,7 +799,7 @@ mod tests {
         let (db, coll) = setup();
         let rules = Rules::default();
         let boss = db.get("Boss").unwrap().clone();
-        let (deck, short) = autobuild(&boss, &db, &coll, &rules, None);
+        let (deck, short) = autobuild(&boss, &db, &coll, &rules, None, None);
         assert_eq!(short, 0);
         assert!(land_count(&deck, &db) < 30, "{}", deck.to_text());
         let problems: Vec<String> = deck
@@ -807,7 +827,7 @@ mod tests {
     fn simulation_runs() {
         let (db, coll) = setup();
         let rules = Rules::default();
-        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules, None);
+        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules, None, None);
         let r = simulate(&deck, &db, 2000);
         assert_eq!(r.land_hist.iter().sum::<u32>(), 2000);
         assert!(r.keepable > 0.5);

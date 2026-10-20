@@ -1,0 +1,511 @@
+//! Mulligans Island Commander League, Season 2: schedule, session rules, Value Points,
+//! draft-pick ranking, trade-in planning and Mana Mixer export.
+
+use crate::analysis::{self, available, score_card};
+use crate::card::Card;
+use crate::db::{CardDb, Collection, Rules};
+use crate::deck::Deck;
+
+pub struct Session {
+    pub number: u32,
+    pub date: (i32, u32, u32),
+    pub label: &'static str,
+}
+
+pub const SESSIONS: [Session; 13] = [
+    Session {
+        number: 1,
+        date: (2026, 10, 8),
+        label: "Kickoff - 9 starter packs, opened & built same day",
+    },
+    Session {
+        number: 2,
+        date: (2026, 10, 22),
+        label: "Starter set week 2 - 1 pack (drafted)",
+    },
+    Session {
+        number: 3,
+        date: (2026, 11, 5),
+        label: "Starter set week 3 - 1 pack (drafted)",
+    },
+    Session {
+        number: 4,
+        date: (2026, 11, 19),
+        label: "Starter set week 4 - 1 pack (drafted)",
+    },
+    Session {
+        number: 5,
+        date: (2026, 12, 3),
+        label: "Reality Fracture launch - 3 packs given",
+    },
+    Session {
+        number: 6,
+        date: (2026, 12, 17),
+        label: "Reality Fracture week 2 - singleton starts",
+    },
+    Session {
+        number: 7,
+        date: (2027, 1, 14),
+        label: "Reality Fracture week 3",
+    },
+    Session {
+        number: 8,
+        date: (2027, 1, 28),
+        label: "Reality Fracture week 4",
+    },
+    Session {
+        number: 9,
+        date: (2027, 2, 11),
+        label: "Nauctis launch - 3 packs given",
+    },
+    Session {
+        number: 10,
+        date: (2027, 2, 25),
+        label: "Nauctis week 2 - decks become 75 cards",
+    },
+    Session {
+        number: 11,
+        date: (2027, 3, 11),
+        label: "Nauctis week 3",
+    },
+    Session {
+        number: 12,
+        date: (2027, 3, 25),
+        label: "Nauctis week 4",
+    },
+    Session {
+        number: 13,
+        date: (2027, 4, 8),
+        label: "Season Finale tournament (75 cards)",
+    },
+];
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+impl Session {
+    pub fn date_label(&self) -> String {
+        let (y, m, d) = self.date;
+        format!("{} {}, {}", MONTHS[(m - 1) as usize], d, y)
+    }
+
+    /// Deck size and singleton for this session (§1 Format Progression).
+    pub fn deck_rules(&self) -> (u32, bool) {
+        match self.number {
+            1..=5 => (60, false),
+            6..=9 => (60, true),
+            _ => (75, true),
+        }
+    }
+}
+
+/// Days since 1970-01-01 for a calendar date (Howard Hinnant's algorithm).
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y } as i64;
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let m = m as i64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn today_days() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64 / 86400)
+        .unwrap_or(0)
+}
+
+/// The next session on or after today (the one you're building for); the finale after that.
+pub fn upcoming_session() -> &'static Session {
+    let today = today_days();
+    SESSIONS
+        .iter()
+        .find(|s| days_from_civil(s.date.0, s.date.1, s.date.2) >= today)
+        .unwrap_or(&SESSIONS[12])
+}
+
+pub fn session(n: u32) -> Option<&'static Session> {
+    SESSIONS.iter().find(|s| s.number == n)
+}
+
+/// Sets deck size / singleton for a session. Everything else (commander counts toward
+/// the 60, unlimited basics, colour identity, pool-only) is the same all season.
+pub fn apply_session(rules: &mut Rules, n: u32) -> Result<&'static Session, String> {
+    let s = session(n).ok_or_else(|| format!("Sessions are numbered 1-13 (got {}).", n))?;
+    let (size, singleton) = s.deck_rules();
+    rules.deck_size = size;
+    rules.singleton = singleton;
+    rules.max_copies = 0;
+    rules.commander_counts_toward_size = true;
+    rules.unlimited_basics = true;
+    rules.enforce_color_identity = true;
+    rules.enforce_collection = true;
+    rules.session = n;
+    Ok(s)
+}
+
+/// §4: Mythic 8, Rare 4, Uncommon 2, Common 1.
+pub fn vp_value(card: &Card) -> u32 {
+    match card.rarity.to_lowercase().as_str() {
+        "mythic" => 8,
+        "rare" => 4,
+        "uncommon" => 2,
+        "common" => 1,
+        _ => 0,
+    }
+}
+
+/// Claiming from the Public Pool costs twice the card's VP value.
+pub fn claim_cost(card: &Card) -> u32 {
+    vp_value(card) * 2
+}
+
+/// §5 Skill Tree: the k-th staple claimed (1-based) costs 5k VP.
+pub fn staple_cost(k: u32) -> u32 {
+    5 * k
+}
+
+pub const STAPLES: [&str; 9] = [
+    "Sol Ring",
+    "Arcane Signet",
+    "Command Tower",
+    "Thought Vessel",
+    "Mind Stone",
+    "Commander's Sphere",
+    "Felwar Stone",
+    "Exotic Orchard",
+    "Path of Ancestry",
+];
+
+/// §5 Shop: one copy of each, 30 VP, one purchase per session.
+pub const SHOP: [(&str, [&str; 3]); 7] = [
+    ("Land", ["Rogue's Passage", "Command Beacon", "Bojuka Bog"]),
+    (
+        "Colorless",
+        ["Swiftfoot Boots", "Chromatic Lantern", "Worn Powerstone"],
+    ),
+    (
+        "White",
+        ["Swords to Plowshares", "Austere Command", "Monologue Tax"],
+    ),
+    ("Blue", ["Counterspell", "Pongify", "Propaganda"]),
+    (
+        "Black",
+        ["Feed the Swarm", "Crux of Fate", "Phyrexian Arena"],
+    ),
+    ("Red", ["Blasphemous Act", "Chaos Warp", "Vandalblast"]),
+    ("Green", ["Lull", "Beast Within", "Cultivate"]),
+];
+
+pub struct DraftPick<'a> {
+    pub card: &'a Card,
+    pub total: f32,
+    pub fit: f32,
+    pub power: f32,
+    pub vp: u32,
+    pub reasons: Vec<String>,
+}
+
+/// Ranks the cards in a pack for the current deck. Fit to your deck dominates; trade value
+/// (VP) and raw card strength (worth taking so a table-mate can't) break ties.
+pub fn rank_pack<'a>(
+    pack: &[&'a Card],
+    deck: &Deck,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+) -> Vec<DraftPick<'a>> {
+    let blank = Deck::new("blank");
+    let identity = deck.identity(db);
+    // Without a commander, judge fit against your three best commander options.
+    let probes: Vec<Deck> = if deck.commander.is_some() {
+        vec![deck.clone()]
+    } else {
+        analysis::rank_commanders(db, coll, rules)
+            .iter()
+            .take(3)
+            .map(|o| {
+                let mut d = Deck::new("probe");
+                d.commander = Some(o.card.name.clone());
+                d
+            })
+            .collect()
+    };
+    let mut out: Vec<DraftPick> = pack
+        .iter()
+        .map(|&card| {
+            let mut reasons = Vec::new();
+            let power = score_card(card, &blank, db, rules).0;
+            let mut fit = f32::MIN;
+            let mut fit_reasons = Vec::new();
+            for probe in &probes {
+                let id = probe.identity(db).unwrap_or_default();
+                if !card.is_land() && !card.identity().is_subset_of(id) {
+                    continue;
+                }
+                let (s, why) = if card.is_land() {
+                    let useful = card.produces().0 & id.0 != 0;
+                    (
+                        if useful { 2.0 } else { 0.0 },
+                        vec!["mana for your colours".to_string()],
+                    )
+                } else {
+                    score_card(card, probe, db, rules)
+                };
+                if s > fit {
+                    fit = s;
+                    fit_reasons = why;
+                    if deck.commander.is_none() {
+                        fit_reasons.insert(
+                            0,
+                            format!("for {}", probe.commander.clone().unwrap_or_default()),
+                        );
+                    }
+                }
+            }
+            if fit == f32::MIN {
+                fit = 0.0;
+                reasons.push(match identity {
+                    Some(id) => format!("outside your colours ({})", id),
+                    None => "outside your best commanders' colours".into(),
+                });
+            } else {
+                reasons.append(&mut fit_reasons);
+            }
+            let owned = coll.owned(&card.name);
+            if rules.singleton && owned > 0 && !card.is_basic() {
+                fit *= 0.3;
+                reasons.push("you already own one (singleton)".into());
+            }
+            if card.can_be_commander() {
+                reasons.push("possible commander".into());
+            }
+            let vp = vp_value(card);
+            let total = fit + 0.25 * vp as f32 + 0.2 * power;
+            DraftPick {
+                card,
+                total,
+                fit,
+                power,
+                vp,
+                reasons,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.total.partial_cmp(&a.total).unwrap());
+    out
+}
+
+pub struct TradeIn<'a> {
+    pub card: &'a Card,
+    pub copies: u32,
+    pub vp: u32,
+    /// How much the card could still be worth to you (0 = dead weight).
+    pub keep_value: f32,
+    pub why: String,
+}
+
+/// Picks spare cards (owned copies the deck doesn't use) to trade into the Public Pool,
+/// reaching at least `target` VP while giving up as little as possible. `need_rarity`
+/// adds the §4 rarity floor for a claim you're planning ("rare" or "mythic").
+pub fn plan_trade_in<'a>(
+    deck: &Deck,
+    db: &'a CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    target: u32,
+    need_rarity: Option<&str>,
+) -> Vec<TradeIn<'a>> {
+    let identity = deck.identity(db);
+    let singleton_soon = !rules.singleton;
+    let blank = Deck::new("blank");
+    let mut spares: Vec<TradeIn> = Vec::new();
+    for card in db.cards.iter().filter(|c| !c.is_basic()) {
+        let owned = coll.owned(&card.name);
+        let used = deck.used(&card.name);
+        if owned <= used || vp_value(card) == 0 {
+            continue;
+        }
+        let fits = card.is_land()
+            || identity
+                .map(|id| card.identity().is_subset_of(id))
+                .unwrap_or(true);
+        // Off-colour cards still have some value: general strength, and they might lead or
+        // join a future deck as the pool grows.
+        let general = score_card(card, &blank, db, rules).0.max(0.0);
+        let mut keep = if fits && !card.is_land() {
+            score_card(card, deck, db, rules).0.max(0.0)
+        } else {
+            0.5 * general + if card.can_be_commander() { 1.5 } else { 0.0 }
+        };
+        let why = if !fits {
+            "outside your colours".to_string()
+        } else if used >= 1 && singleton_soon {
+            keep *= 0.3;
+            "extra copy - dead once singleton starts (Session 6)".to_string()
+        } else if used >= 1 {
+            keep *= 0.3;
+            "extra copy".to_string()
+        } else {
+            "not in your deck".to_string()
+        };
+        for _ in used..owned {
+            spares.push(TradeIn {
+                card,
+                copies: 1,
+                vp: vp_value(card),
+                keep_value: keep,
+                why: why.clone(),
+            });
+        }
+    }
+    // Cheapest loss per VP first.
+    spares.sort_by(|a, b| {
+        (a.keep_value / a.vp as f32)
+            .partial_cmp(&(b.keep_value / b.vp as f32))
+            .unwrap()
+            .then(b.vp.cmp(&a.vp))
+    });
+    let mut picked: Vec<TradeIn> = Vec::new();
+    // Rarity floor first, if a rare/mythic claim is planned.
+    let floor: Vec<(&str, usize)> = match need_rarity {
+        Some("mythic") => vec![("mythic", 1)],
+        Some("rare") => vec![("rare", 1)],
+        _ => vec![],
+    };
+    for (rarity, n) in floor {
+        let mut found: Vec<usize> = spares
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.card.rarity == rarity)
+            .map(|(i, _)| i)
+            .take(n)
+            .collect();
+        if found.is_empty() && rarity == "mythic" {
+            // 2 rares also satisfy a mythic claim.
+            found = spares
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.card.rarity == "rare")
+                .map(|(i, _)| i)
+                .take(2)
+                .collect();
+        }
+        for i in found.into_iter().rev() {
+            picked.push(spares.remove(i));
+        }
+    }
+    let floor_count = picked.len();
+    let mut total: u32 = picked.iter().map(|t| t.vp).sum();
+    for t in spares {
+        if total >= target {
+            break;
+        }
+        total += t.vp;
+        picked.push(t);
+    }
+    // Drop anything not needed to stay at the target, most valuable to keep first.
+    let mut order: Vec<usize> = (floor_count..picked.len()).collect();
+    order.sort_by(|&a, &b| {
+        picked[b]
+            .keep_value
+            .partial_cmp(&picked[a].keep_value)
+            .unwrap()
+    });
+    let mut drop = Vec::new();
+    for i in order {
+        if total - picked[i].vp >= target {
+            total -= picked[i].vp;
+            drop.push(i);
+        }
+    }
+    drop.sort_unstable_by(|a, b| b.cmp(a));
+    for i in drop {
+        picked.remove(i);
+    }
+    // Merge copies of the same card.
+    let mut merged: Vec<TradeIn> = Vec::new();
+    for t in picked {
+        match merged.iter_mut().find(|m| m.card.name == t.card.name) {
+            Some(m) => {
+                m.copies += 1;
+                m.vp += t.vp;
+            }
+            None => merged.push(t),
+        }
+    }
+    merged
+}
+
+/// Cards you'd have to cut when singleton starts (extra copies in the deck).
+pub fn singleton_conflicts(deck: &Deck, db: &CardDb) -> Vec<(String, u32)> {
+    deck.cards
+        .iter()
+        .filter(|(n, c)| **c > 1 && db.get(n).map(|x| !x.is_basic()).unwrap_or(true))
+        .map(|(n, c)| (n.clone(), *c))
+        .collect()
+}
+
+/// "1 Red Hulk (MSH) 149" lines - the ManaBox-style text list Mana Mixer takes.
+pub fn mana_mixer_line(card: Option<&Card>, name: &str, n: u32) -> String {
+    match card {
+        Some(c) if !c.set.is_empty() => match &c.collector_number {
+            Some(num) => format!("{} {} ({}) {}", n, c.name, c.set, num),
+            None => format!("{} {} ({})", n, c.name, c.set),
+        },
+        _ => format!("{} {}", n, name),
+    }
+}
+
+pub fn export_pool(db: &CardDb, coll: &Collection) -> String {
+    coll.counts
+        .iter()
+        .map(|(name, n)| mana_mixer_line(db.get(name), name, *n) + "\n")
+        .collect()
+}
+
+pub fn export_deck(deck: &Deck, db: &CardDb) -> String {
+    let mut out = String::new();
+    for c in deck.commanders() {
+        out += &(mana_mixer_line(db.get(c), c, 1) + "\n");
+    }
+    for (name, n) in &deck.cards {
+        out += &(mana_mixer_line(db.get(name), name, *n) + "\n");
+    }
+    out
+}
+
+/// How many more of a card you could take into the deck right now.
+pub fn can_add(card: &Card, deck: &Deck, coll: &Collection, rules: &Rules) -> u32 {
+    available(card, deck, coll, rules)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(
+            days_from_civil(2026, 10, 22) - days_from_civil(2026, 10, 8),
+            14
+        );
+        assert_eq!(session(6).unwrap().deck_rules(), (60, true));
+        assert_eq!(session(10).unwrap().deck_rules(), (75, true));
+        assert_eq!(session(3).unwrap().deck_rules(), (60, false));
+    }
+
+    #[test]
+    fn session_rules_apply() {
+        let mut r = Rules::default();
+        apply_session(&mut r, 11).unwrap();
+        assert_eq!((r.deck_size, r.singleton, r.session), (75, true, 11));
+        assert!(apply_session(&mut r, 14).is_err());
+        assert_eq!(staple_cost(9), 45);
+        assert_eq!((1..=9).map(staple_cost).sum::<u32>(), 225);
+    }
+}
