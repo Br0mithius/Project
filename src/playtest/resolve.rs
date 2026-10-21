@@ -311,12 +311,16 @@ impl<'a> Game<'a> {
             return;
         };
         let src_idx = pend.source.and_then(|id| self.idx(id));
-        let holds = match &ab.cond {
+        let eval = |c: &Cond| match c {
             Cond::Teamwork => pend.teamwork,
             Cond::Gift => pend.gift,
             Cond::CastFromGraveyard => pend.from_graveyard,
             Cond::Kicked => pend.kicked,
             c => self.cond_holds(c, me, src_idx),
+        };
+        let holds = match &ab.cond {
+            Cond::Not(inner) => !eval(inner),
+            c => eval(c),
         };
         if !holds {
             return;

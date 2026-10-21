@@ -45,7 +45,7 @@ fn number(word: &str, x_small: bool) -> Option<Amount> {
         "eight" => 8,
         "nine" => 9,
         "ten" => 10,
-        "x" | "that" | "many" => {
+        "x" | "that" | "many" | "that many" => {
             return Some(Amount {
                 n: if x_small { 1 } else { 3 },
                 x: true,
@@ -1165,7 +1165,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         };
         out.push(Effect::AddMana(Amount::fixed(n)));
     }
-    if s.contains("search your library") {
+    if s.contains("search your library") && !s.starts_with("if you search") {
         if s.contains("land card")
             || s.contains("basic land")
             || s.contains("forest")
@@ -1589,8 +1589,10 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
         }
     }
     if body.contains("graveyard") && body.contains("card") {
+        // "Search your library and/or graveyard for ... put it onto the battlefield" is a
+        // tutor (already read), not a separate reanimation.
         if (body.contains("to the battlefield") || body.contains("onto the battlefield"))
-            && !has(effects, |e| matches!(e, Effect::Reanimate))
+            && !has(effects, |e| matches!(e, Effect::Reanimate | Effect::Tutor))
         {
             effects.push(Effect::Reanimate);
         } else if (body.contains("to your hand") || body.contains("into your hand"))
@@ -1874,6 +1876,26 @@ pub fn parse(card: &Card) -> Parsed {
         }
         parsed.back = Some(Box::new(b));
     }
+    // "When you cast this spell, copy it X times": the spell's effects happen X+1 times
+    // (Photon Blast Barrage), rather than a separate "copy" worth little on its own.
+    if card.text_lower().contains("copy it x times") {
+        let spell_effects: Vec<Effect> = parsed
+            .abilities
+            .iter()
+            .filter(|a| a.when.contains(&When::Spell) && !a.effects.contains(&Effect::Copy))
+            .flat_map(|a| a.effects.iter().cloned())
+            .collect();
+        for a in parsed.abilities.iter_mut() {
+            if a.when.contains(&When::Spell) && a.effects.contains(&Effect::Copy) {
+                a.effects = spell_effects
+                    .iter()
+                    .cloned()
+                    .chain(spell_effects.iter().cloned())
+                    .collect();
+                a.optional = false;
+            }
+        }
+    }
     parsed
 }
 
@@ -2019,9 +2041,11 @@ fn split_instead(line: &str) -> (String, Option<String>) {
         return (line.to_string(), None);
     };
     let sentence = line[i + 2..].trim().trim_end_matches('.');
-    // "If <condition>, Y instead." and "If <condition>, instead Y." (Cruel Alliance).
+    // "If <condition>, Y instead." and "If <condition>, instead Y." (Cruel Alliance), or an
+    // extra "If <condition>, it also ..." (Repulsor Blast's teamwork bonus).
     let instead_form = sentence.ends_with("instead") || sentence.contains(", instead ");
-    if !instead_form || sentence.contains(" would ") || sentence.contains(". ") {
+    let also_form = sentence.contains(" also ");
+    if !(instead_form || also_form) || sentence.contains(" would ") || sentence.contains(". ") {
         return (line.to_string(), None);
     }
     let sentence = sentence.replace(", instead ", ", ");
@@ -2243,6 +2267,15 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
     }
     if harness || line.contains("activate only if") {
         ability.conditional = true;
+    }
+    // An Aura's "...that player draws a card" goes to the enchanted creature's controller -
+    // normally you (Super Intelligence).
+    if card.type_line.contains("Aura") && line.contains("enchanted creature") {
+        for e in ability.effects.iter_mut() {
+            if let Effect::Draw { you, .. } = e {
+                *you = true;
+            }
+        }
     }
     // Drawing that costs a card first ("{T}, Discard a card: Draw a card..."; "You may
     // sacrifice an artifact or discard a card. If you do, draw two cards") nets one card

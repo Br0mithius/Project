@@ -254,6 +254,8 @@ pub enum Cond {
     Treasures(u8),
     /// Can't be checked: happens this often.
     Chance(f32),
+    /// The other branch of an "X. If <c>, Y instead" / "X if <c>. Otherwise, Y" pair.
+    Not(Box<Cond>),
 }
 
 #[derive(Debug, Clone)]
@@ -780,6 +782,19 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
     for a in out.iter_mut() {
         if a.trig == Trig::Reflexive && a.counter_goal.is_none() {
             a.counter_goal = goal;
+        }
+    }
+    // Alternatives the card reader split in two: only one of them happens.
+    for i in 1..out.len() {
+        if out[i].trig != out[i - 1].trig {
+            continue;
+        }
+        if out[i].text.contains("if not, ") {
+            // "X if <c>. Otherwise, Y": Y when the condition fails.
+            out[i].cond = Cond::Not(Box::new(out[i - 1].cond.clone()));
+        } else if out[i].text.contains("instead") && out[i].cond != Cond::Always {
+            // "X. If <c>, Y instead": X only when the condition fails.
+            out[i - 1].cond = Cond::Not(Box::new(out[i].cond.clone()));
         }
     }
     out

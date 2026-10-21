@@ -494,6 +494,7 @@ impl<'a> Game<'a> {
                     .any(|x| x.is(T_EQUIPMENT) && x.attached == Some(id))
             }),
             Cond::Teamwork | Cond::Gift | Cond::CastFromGraveyard | Cond::Kicked => false,
+            Cond::Not(inner) => !self.cond_holds(inner, p, src),
             Cond::Storied => pl.enduring_story,
             Cond::AttackedThisTurn => pl.attacked_this_turn,
             Cond::CreatureDiedThisTurn => self.died_this_turn > 0,
