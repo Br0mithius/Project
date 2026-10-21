@@ -17,6 +17,7 @@ pub mod compile;
 pub mod probe;
 pub mod resolve;
 pub mod state;
+pub mod targets;
 #[cfg(test)]
 mod tests;
 
@@ -139,6 +140,10 @@ impl<'a> Game<'a> {
             resolved_this_action: 0,
             log: None,
             focus: None,
+            last_targets: Vec::new(),
+            last_ctrl: None,
+            targeted: false,
+            targeter: 0,
             tick: 1,
             vcache: Default::default(),
             tcache: std::cell::RefCell::new([(0, 0.0); 8]),
@@ -223,10 +228,15 @@ impl<'a> Game<'a> {
             if let Some((n, f)) = &self.card(r).cost_reduction {
                 let type_ok = f.types == 0 || types & f.types != 0;
                 let not_ok = f.not_types == 0 || types & f.not_types == 0;
-                let sub_ok = f
-                    .subtype
-                    .as_ref()
-                    .is_none_or(|s| subtypes.iter().any(|t| t == s));
+                // "Kithkin spells and Soldier spells", "Instant and sorcery spells".
+                let sub_ok = if f.restr.is_empty() {
+                    f.subtype
+                        .as_ref()
+                        .is_none_or(|s| subtypes.iter().any(|t| t == s))
+                } else {
+                    let d = self.dyn_values(&f.restr, None, p, Some(x.id));
+                    Game::card_ok(&f.restr, c, &d)
+                };
                 if type_ok && not_ok && sub_ok {
                     less += *n as u32;
                 }
@@ -928,6 +938,7 @@ impl<'a> Game<'a> {
         }
         for x in self.perms.iter_mut() {
             x.damage = 0;
+            x.dealt_damage = false;
             x.deathtouched = false;
             x.temp_p = 0;
             x.temp_t = 0;

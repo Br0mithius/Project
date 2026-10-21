@@ -407,21 +407,30 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     };
     let before = snap(&g);
     let snapshot = src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone());
+    let groups = ab.mode_groups();
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
-        Some(k) if k < ab.effects.len() || ab.cond != Cond::Always => {
+        Some(k) if k < groups.len() || ab.cond != Cond::Always => {
+            let (text, card_restr) = if k < groups.len() && ab.modal {
+                ab.mode_text(k)
+            } else {
+                (ab.text.as_str(), ab.card_restr)
+            };
             let ctx = Ctx {
                 ctrl: 0,
                 src,
                 snap: snapshot,
                 card: Some(&prep.cards[PROBED as usize]),
                 subject: Some(bear),
-                text: &ab.text,
+                text,
                 until_eot: ab.until_eot,
                 overload: false,
+                card_restr,
             };
-            if k < ab.effects.len() {
-                g.apply(&ctx, &ab.effects[k]);
+            if k < groups.len() {
+                for e in &ab.effects[groups[k].clone()] {
+                    g.apply(&ctx, e);
+                }
             } else {
                 for e in &ab.effects {
                     g.apply(&ctx, e);
@@ -493,8 +502,8 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
             out.push("      (static: shown under \"On entering\")".into());
             continue;
         }
-        if ab.modal && ab.effects.len() > 1 {
-            for m in 0..ab.effects.len() {
+        if ab.modal && ab.mode_groups().len() > 1 {
+            for m in 0..ab.mode_groups().len() {
                 for line in fire(prep, k, back, Some(m)) {
                     out.push(format!("      mode {}: {}", m + 1, line));
                 }

@@ -83,6 +83,7 @@ impl<'a> Game<'a> {
                 let pw = self.perms[i].p.max(1) as f32;
                 self.players[d].grudge[a] += pw;
             }
+            self.perms[i].attacking = true;
             attacks.push(Attack {
                 attacker: id,
                 def,
@@ -92,6 +93,7 @@ impl<'a> Game<'a> {
         }
         if attacks.is_empty() {
             self.in_combat = false;
+            self.end_combat();
             return;
         }
         self.players[a].attacked_this_turn = true;
@@ -122,6 +124,13 @@ impl<'a> Game<'a> {
             }
         }
         self.emit(Ev::OthersAttack, a, None);
+        // "Whenever a creature you control attacks": once per attacker, about it.
+        for at in &attacks {
+            if let Some(i) = self.idx(at.attacker) {
+                let x = self.perms[i].clone();
+                self.emit_about(Ev::EachAttacker, a, &x);
+            }
+        }
         self.run_pending();
         self.sba();
         attacks.retain(|at| self.idx(at.attacker).is_some());
@@ -169,6 +178,11 @@ impl<'a> Game<'a> {
             .iter()
             .flat_map(|at| at.blockers.iter().copied())
             .collect();
+        for &b in &blockers {
+            if let Some(bi) = self.idx(b) {
+                self.perms[bi].blocking = true;
+            }
+        }
         for b in blockers {
             if let Some(bi) = self.idx(b) {
                 let snap = self.perms[bi].clone();
@@ -220,8 +234,18 @@ impl<'a> Game<'a> {
             self.damage_step(a, &attacks, false);
         }
         self.in_combat = false;
+        self.end_combat();
         self.run_pending();
         self.sba();
+    }
+
+    /// Creatures stop attacking and blocking when combat ends.
+    pub fn end_combat(&mut self) {
+        for x in self.perms.iter_mut() {
+            x.attacking = false;
+            x.blocking = false;
+        }
+        self.recalc();
     }
 
     /// One combat damage step (`first` = the first-strike step).
@@ -315,6 +339,9 @@ impl<'a> Game<'a> {
                 continue;
             }
             self.damage_perm(ti, n, kw & DEATHTOUCH != 0);
+            if let Some(si) = self.idx(src) {
+                self.perms[si].dealt_damage = true;
+            }
             if kw & LIFELINK != 0 {
                 lifelink.push((ctrl as usize, n as i32));
             }
@@ -335,6 +362,9 @@ impl<'a> Game<'a> {
                 n
             };
             self.damage_player(a, p, n, toxic);
+            if let Some(si) = self.idx(src) {
+                self.perms[si].dealt_damage = true;
+            }
             if cmd > 0 {
                 self.players[p].cmd_damage[a][cmd as usize % 3] += n;
             }

@@ -183,6 +183,8 @@ pub enum Ev {
     LeavesGraveyard,
     Bounced,
     Blocks,
+    /// One creature attacking ("whenever a white creature you control attacks"), per attacker.
+    EachAttacker,
     Other,
 }
 
@@ -191,7 +193,7 @@ pub fn ev_bit(k: Ev) -> u32 {
 }
 
 /// "a Villain spell", "another creature you control", "an artifact": what an event needs.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Filter {
     /// Only your things (`Some(true)`), only opponents' (`Some(false)`), or anyone's.
     pub yours: Option<bool>,
@@ -206,6 +208,28 @@ pub struct Filter {
     /// "nontoken": real cards only; `token`: tokens only.
     pub nontoken: bool,
     pub token: bool,
+    /// Everything else the thing must be (attacking, power 4 or greater, a Gate, blue...).
+    pub restr: crate::restrict::Restr,
+}
+
+impl std::fmt::Debug for Filter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Filter {{ yours: {:?}, types: {}, not_types: {}, subtype: {:?}, other: {}, nontoken: {}, token: {}",
+            self.yours,
+            self.types,
+            self.not_types,
+            self.subtype,
+            self.other,
+            self.nontoken,
+            self.token
+        )?;
+        if !self.restr.is_empty() {
+            write!(f, ", restr: {:?}", self.restr)?;
+        }
+        write!(f, " }}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +314,13 @@ pub struct SimAbility {
     pub optional: bool,
     pub once: bool,
     pub modal: bool,
+    /// Effects per mode of a modal ability (see `SimAbility::mode_groups`).
+    pub modes: Vec<u8>,
+    /// Each mode's text after the ability's own ("when ~ enters, choose — destroy target
+    /// artifact"), read when that mode resolves.
+    pub mode_texts: Vec<String>,
+    /// Each mode's `card_restr`.
+    pub mode_restr: Vec<crate::restrict::Restr>,
     pub effects: Vec<Effect>,
     /// Lower-case rules text (for X values and details).
     pub text: String,
@@ -303,6 +334,35 @@ pub struct SimAbility {
     pub once_per_turn: bool,
     /// "Whenever you draw your second card each turn".
     pub second_draw: bool,
+    /// What the card it returns, finds or makes players sacrifice must be ("creature card
+    /// with mana value 2 or less", "a creature with the greatest mana value").
+    pub card_restr: crate::restrict::Restr,
+}
+
+impl SimAbility {
+    /// The text and card restriction mode `m` resolves with.
+    pub fn mode_text(&self, m: usize) -> (&str, crate::restrict::Restr) {
+        match (self.mode_texts.get(m), self.mode_restr.get(m)) {
+            (Some(t), Some(r)) if self.mode_texts.len() == self.mode_groups().len() => (t, *r),
+            _ => (&self.text, self.card_restr),
+        }
+    }
+
+    /// The effects of each mode of a modal ability, as index ranges into `effects` (one
+    /// effect per mode when the modes weren't recorded).
+    pub fn mode_groups(&self) -> Vec<std::ops::Range<usize>> {
+        let n = self.effects.len();
+        if self.modes.iter().map(|&m| m as usize).sum::<usize>() != n || self.modes.is_empty() {
+            return (0..n).map(|k| k..k + 1).collect();
+        }
+        let mut out = Vec::new();
+        let mut at = 0;
+        for &m in &self.modes {
+            out.push(at..at + m as usize);
+            at += m as usize;
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -470,14 +530,21 @@ pub fn filter_of(what: &str) -> Filter {
         || w.contains("your ")
         || w.starts_with("you ")
         || w.contains("you cast")
+        || w.starts_with("whenever you ")
     {
         f.yours = Some(true);
     } else if w.contains("opponent") {
         f.yours = Some(false);
     }
-    f.other = w.contains("another") || w.contains("other ");
-    f.nontoken = w.contains("nontoken");
-    f.token = !f.nontoken && w.contains("token");
+    // Whole words only: "orc" is not in "sorcery", "elf" not in "itself", "another Elf" is
+    // an Elf (not a subtype "other").
+    let words: Vec<&str> = w
+        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '\''))
+        .filter(|x| !x.is_empty())
+        .collect();
+    f.other = words.iter().any(|x| *x == "another" || *x == "other");
+    f.nontoken = words.iter().any(|x| *x == "nontoken" || *x == "nontokens");
+    f.token = !f.nontoken && words.iter().any(|x| *x == "token" || *x == "tokens");
     for (word, bit) in [
         ("creature", T_CREATURE),
         ("artifact", T_ARTIFACT),
@@ -489,23 +556,79 @@ pub fn filter_of(what: &str) -> Filter {
         ("equipment", T_EQUIPMENT),
         ("land", T_LAND),
     ] {
-        if w.contains(&format!("non{}", word)) {
+        let is = |x: &str| {
+            x == word || x.strip_suffix('s') == Some(word) || word == "sorcery" && x == "sorceries"
+        };
+        if words.iter().any(|x| {
+            x.strip_prefix("non-")
+                .or_else(|| x.strip_prefix("non"))
+                .is_some_and(is)
+        }) {
             f.not_types |= bit;
-        } else if w.contains(word) {
+        } else if words.iter().any(|x| is(x)) {
             f.types |= bit;
         }
     }
-    for sub in [
-        "hero", "villain", "robot", "human", "dwarf", "elf", "goblin", "hobbit", "halfling",
-        "wizard", "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant",
-        "avenger", "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
-    ] {
-        if w.contains(sub) {
-            f.subtype = Some(sub.to_string());
-            break;
-        }
+    let mut r = crate::restrict::Restr::read(&w);
+    if r.has(crate::restrict::SUB_OR_TYPE) || r.subtype_ids().count() >= 2 {
+        // "A Villain and/or artifact", "a noncreature or Dragon spell", "a Dwarf or
+        // Equipment": the restriction decides.
+        f.types = 0;
+        f.not_types = 0;
+    } else {
+        // The card types are checked above; the restriction keeps the rest.
+        r.any_types = 0;
+        r.qual_types = 0;
     }
+    f.subtype = r
+        .subtype_ids()
+        .next()
+        .map(|i| crate::restrict::subtype_name(i).to_string());
+    f.restr = r;
     f
+}
+
+/// "Whenever a creature you control attacks", "whenever an equipped creature you control
+/// attacks a player alone": a trigger about one attacking creature (not "whenever you attack"
+/// or "one or more creatures").
+fn one_attacker(trigger: &str) -> bool {
+    ["whenever a ", "whenever an ", "whenever another "]
+        .iter()
+        .any(|w| trigger.starts_with(w))
+        && trigger.contains(" attacks")
+        && !trigger.contains("one or more")
+}
+
+/// The trigger of a triggered ability ("whenever a nontoken, non-Angel creature you control
+/// dies") without its effect.
+pub fn trigger_part(text: &str) -> &str {
+    if !(text.starts_with("when") || text.starts_with("at ")) {
+        return text;
+    }
+    let mut from = 0;
+    while let Some(off) = text[from..].find(", ") {
+        let i = from + off;
+        let next = &text[i + 2..];
+        let word = next.split([' ', ',']).next().unwrap_or("");
+        // "a goblin, orc, or army you control dies", "a nontoken, non-angel creature".
+        let listed = next.starts_with("non")
+            || next.starts_with("or ")
+            || next.starts_with("and/or ")
+            || crate::restrict::subtype_word(word).is_some()
+            || [
+                "artifact",
+                "enchantment",
+                "creature",
+                "planeswalker",
+                "land",
+            ]
+            .contains(&word);
+        if !listed {
+            return &text[..i];
+        }
+        from = i + 2;
+    }
+    text
 }
 
 /// Reads the condition in an ability's text.
@@ -643,6 +766,13 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         When::Spell => Trig::Spell,
         When::Enters => Trig::Enters,
         When::Dies => Trig::Dies,
+        // An Aura's or Equipment's "whenever equipped creature attacks".
+        When::Attacks
+            if t.starts_with("whenever equipped creature")
+                || t.starts_with("whenever enchanted creature") =>
+        {
+            Trig::Event(Ev::EachAttacker, Filter::default())
+        }
         When::Attacks => Trig::Attacks,
         When::CombatDamage => Trig::CombatDamage,
         When::EachTurn => Trig::Phase {
@@ -661,18 +791,40 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         },
         When::Event(e) => {
             let (kind, what) = match e {
-                Event::Cast(what) => (Ev::Cast, what.as_str()),
+                // "You cast a spell that targets ..., during an opponent's turn": the
+                // spell is yours; what it targets or when isn't what it is.
+                Event::Cast(what) => (
+                    Ev::Cast,
+                    what.split(" that target")
+                        .next()
+                        .unwrap_or("")
+                        .split(" during ")
+                        .next()
+                        .unwrap_or(""),
+                ),
                 Event::OtherEnters(what) => (Ev::OtherEnters, what.as_str()),
                 Event::Landfall => (Ev::Landfall, "a land you control"),
-                Event::Death => (Ev::Death, t),
+                Event::Death => (Ev::Death, trigger_part(t)),
                 Event::GainLife => (Ev::GainLife, "you"),
-                Event::Draw => (Ev::Draw, "you"),
-                Event::Discard => (Ev::Discard, t),
+                // "Whenever an opponent draws ...", "whenever a player draws ...".
+                Event::Draw => (
+                    Ev::Draw,
+                    if trigger_part(t).contains("opponent") || trigger_part(t).contains("player") {
+                        trigger_part(t)
+                    } else {
+                        "you"
+                    },
+                ),
+                Event::Discard => (Ev::Discard, trigger_part(t)),
                 Event::Damaged => (Ev::Damaged, "~"),
-                Event::Counters => (Ev::Counters, t),
-                Event::Sacrifice => (Ev::Sacrifice, t),
+                Event::Counters => (Ev::Counters, trigger_part(t)),
+                Event::Sacrifice => (Ev::Sacrifice, trigger_part(t)),
                 Event::Tokens => (Ev::Tokens, "you"),
                 Event::Targeted => (Ev::Targeted, "~"),
+                // "Whenever a creature you control attacks (alone)": about each attacker.
+                Event::OthersAttack if one_attacker(trigger_part(t)) => {
+                    (Ev::EachAttacker, trigger_part(t))
+                }
                 Event::OthersAttack => (Ev::OthersAttack, "you"),
                 Event::Other(what) => {
                     let k = if what.contains("teamwork") {
@@ -719,6 +871,7 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                     | Ev::Draw
                     | Ev::Tokens
                     | Ev::OthersAttack
+                    | Ev::EachAttacker
                     | Ev::Landfall
                     | Ev::Scry
                     | Ev::LoyaltyActivated
@@ -738,6 +891,9 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             }
             if matches!(kind, Ev::Cast | Ev::LoyaltyActivated) && what.contains("opponent") {
                 f.yours = Some(false);
+            }
+            if matches!(e, Event::Cast(_)) {
+                f.yours = Some(true);
             }
             Trig::Event(kind, f)
         }
@@ -794,13 +950,41 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
             a.when.iter().collect()
         };
         for w in whens {
+            let trig = trig_of(w, a);
+            let event = matches!(trig, Trig::Event(..));
             out.push(SimAbility {
-                trig: trig_of(w, a),
+                trig,
                 cond: cond.clone(),
                 optional: a.optional,
                 once: a.once,
                 modal: a.modal,
-                effects: a.effects.clone(),
+                modes: a.modes.clone(),
+                mode_texts: a
+                    .mode_texts
+                    .iter()
+                    .map(|m| format!("{} — {}", a.text, m))
+                    .collect(),
+                mode_restr: a
+                    .mode_texts
+                    .iter()
+                    .map(|m| crate::restrict::object_restr(m))
+                    .collect(),
+                effects: {
+                    let mut effects = a.effects.clone();
+                    // A trigger about another creature: "it"/"that creature" may be that one
+                    // (not when the trigger is about the card itself: "whenever ~ is dealt
+                    // damage, put a counter on him").
+                    if event && !trigger_part(&a.text).contains('~') {
+                        for e in effects.iter_mut() {
+                            for t in e.targets_mut() {
+                                if t.restr.has(crate::restrict::PREV) {
+                                    t.restr.flags |= crate::restrict::SUBJECT;
+                                }
+                            }
+                        }
+                    }
+                    effects
+                },
                 text: a.text.clone(),
                 until_eot: a.text.contains("until end of turn"),
                 counter_goal: if *w == When::Reflexive {
@@ -809,8 +993,13 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                     None
                 },
                 filter: filter_of(&a.text),
-                once_per_turn: a.text.contains("only once each turn"),
+                // "Whenever an opponent casts their first noncreature spell each turn".
+                once_per_turn: a.text.contains("only once each turn")
+                    || a.text.starts_with("whenever ")
+                        && trigger_part(&a.text).contains(" first ")
+                        && trigger_part(&a.text).contains(" each turn"),
                 second_draw: a.text.contains("second card"),
+                card_restr: crate::restrict::object_restr(&a.text),
             });
         }
     }
@@ -1129,7 +1318,11 @@ fn static_value(c: &SimCard) -> f32 {
     for a in &c.abilities {
         let mut ab: f32 = a.effects.iter().map(effect_value).sum();
         if a.modal {
-            ab = a.effects.iter().map(effect_value).fold(0.0, f32::max);
+            ab = a
+                .mode_groups()
+                .into_iter()
+                .map(|r| a.effects[r].iter().map(effect_value).sum::<f32>())
+                .fold(0.0, f32::max);
         }
         let repeat = match &a.trig {
             Trig::Phase { .. } => 3.0,
