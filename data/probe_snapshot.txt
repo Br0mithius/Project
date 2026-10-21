@@ -2262,7 +2262,7 @@ On entering:
       itself: 5/3 trample
       -> (nothing changes)
 ABILITIES:
-  Static: "~ can't attack unless you control two or more other wolves."
+  Static [only if ControlCount(3, "wolf")]: "~ can't attack unless you control two or more other wolves."
       (no effects read)
   Phase { phase: Upkeep, any_player: false, opponents_only: false }: "at the beginning of your upkeep, create a 2/2 green wolf creature token."
       -> You gets 2/2 wolf token 2/2
@@ -12292,7 +12292,7 @@ ABILITIES:
 
 Theorist's Proxy | {1}{U} | Creature — Illusion | 0/3
 TEXT: Flash / When this creature enters, empower Jace 3. (Put three loyalty counters on a Jace token you control. If you don't control one, first create a blue Jace planeswalker token with "[-1]: Surveil 1" and "[-3]: Draw a card.") / {U}, Sacrifice this creature: The next spell you cast this turn can't be countered.
-SIM: keywords flash; can't be countered
+SIM: keywords flash
 On entering:
       itself: 0/3 flash
       -> You gets Jace token

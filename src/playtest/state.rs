@@ -747,7 +747,8 @@ impl<'a> Game<'a> {
             }
             for a in &self.card(r).abilities {
                 if a.trig == Trig::Static
-                    && (a.text.starts_with("equipped creature") || a.text.starts_with("enchanted creature"))
+                    && (a.text.starts_with("equipped creature")
+                        || a.text.starts_with("enchanted creature"))
                 {
                     if let Some(n) = a
                         .text
@@ -962,9 +963,13 @@ impl<'a> Game<'a> {
                     .count()
                     >= *n as usize
             }
-            Cond::ControlOtherPower(n) => mine()
-                .any(|x| x.is_creature() && x.p >= *n as i16 && src.is_none_or(|s| self.perms[s].id != x.id)),
-            Cond::LastLeftWasYours => self.last_left.as_ref().is_some_and(|x| x.ctrl as usize == p),
+            Cond::ControlOtherPower(n) => mine().any(|x| {
+                x.is_creature() && x.p >= *n as i16 && src.is_none_or(|s| self.perms[s].id != x.id)
+            }),
+            Cond::LastLeftWasYours => self
+                .last_left
+                .as_ref()
+                .is_some_and(|x| x.ctrl as usize == p),
             Cond::CounteredMvAtMost(n) => self.ext.countered_mv.is_some_and(|m| m <= *n),
             Cond::CounteredThisTurn => src.is_some_and(|s| self.perms[s].countered_turn),
             Cond::HadOtherCounters => src.is_some_and(|s| self.perms[s].other_counters > 0),
@@ -1610,7 +1615,9 @@ impl<'a> Game<'a> {
             let angels = self
                 .perms
                 .iter()
-                .filter(|y| y.ctrl as usize == ctrl && y.id != id && y.subtypes.iter().any(|s| s == "angel"))
+                .filter(|y| {
+                    y.ctrl as usize == ctrl && y.id != id && y.subtypes.iter().any(|s| s == "angel")
+                })
                 .count() as i16;
             self.perms[i].counters += givers * angels;
         }

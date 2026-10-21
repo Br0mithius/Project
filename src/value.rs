@@ -202,6 +202,11 @@ pub fn ability_value(a: &Ability) -> f32 {
         .iter()
         .map(|e| match e {
             Effect::Regrowth | Effect::Reanimate | Effect::Recast if only_itself => 0.5,
+            // "Destroy target permanent an opponent controls. They create a Treasure token"
+            // (Vraska): the opponent's consolation, a small cost.
+            Effect::ItemTokens { .. } if a.text.contains(". they create ") => {
+                -0.5 * effect_value(e)
+            }
             Effect::Draw { .. }
             | Effect::Loot
             | Effect::Tokens { .. }

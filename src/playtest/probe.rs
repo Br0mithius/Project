@@ -814,8 +814,16 @@ pub fn probe(card: &Card) -> String {
         }
         sim.push(format!(
             "that mana only for {}{}",
-            parts.join(" or ").replace("  ", " ").trim().replace("of  ", "of "),
-            if c.free_mask != 0 { " (its {C} for anything)" } else { "" }
+            parts
+                .join(" or ")
+                .replace("  ", " ")
+                .trim()
+                .replace("of  ", "of "),
+            if c.free_mask != 0 {
+                " (its {C} for anything)"
+            } else {
+                ""
+            }
         ));
     }
     if c.enters_tapped {

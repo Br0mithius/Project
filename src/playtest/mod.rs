@@ -218,7 +218,8 @@ impl<'a> Game<'a> {
                 .copied()
                 .filter(|&c| {
                     g.players[p].cards[c as usize].abilities.iter().any(|a| {
-                        a.text.contains("is in your opening hand, you may begin the game with")
+                        a.text
+                            .contains("is in your opening hand, you may begin the game with")
                     })
                 })
                 .collect();

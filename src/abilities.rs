@@ -3915,11 +3915,11 @@ impl Parsed {
     /// Creature tokens, Armies, and Treasure/Food/Clue/copy tokens ("tokens you control"
     /// payoffs count them all).
     pub fn makes_tokens(&self) -> bool {
-        self.effects().any(|(_, e)| {
-            matches!(
-                e,
-                Effect::Tokens { .. } | Effect::Amass(_) | Effect::ItemTokens { .. }
-            )
+        self.effects().any(|(a, e)| match e {
+            Effect::Tokens { .. } | Effect::Amass(_) => true,
+            // "They create a Treasure token" (Vraska): the opponent's.
+            Effect::ItemTokens { .. } => !a.text.contains(". they create "),
+            _ => false,
         })
     }
 

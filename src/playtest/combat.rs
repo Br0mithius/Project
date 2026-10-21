@@ -29,10 +29,15 @@ impl<'a> Game<'a> {
                 t.contains("~ can attack as though it didn't have defender")
             });
         // "~ can't attack unless you control two or more other Wolves".
-        let barred = self.statics_of(i).any(|(a, ok)| {
-            a.text.contains("~ can't attack unless") && !ok
-        });
-        x.is_creature() && !x.tapped && !(x.sick && !x.has(HASTE)) && !defender && !x.locked && !barred
+        let barred = self
+            .statics_of(i)
+            .any(|(a, ok)| a.text.contains("~ can't attack unless") && !ok);
+        x.is_creature()
+            && !x.tapped
+            && !(x.sick && !x.has(HASTE))
+            && !defender
+            && !x.locked
+            && !barred
     }
 
     /// Permanent `i`'s own static abilities, each with whether its condition holds.
@@ -52,7 +57,8 @@ impl<'a> Game<'a> {
 
     /// "Attacks each combat if able" (or goaded).
     pub fn must_attack(&self, i: usize) -> bool {
-        self.perms[i].goad.is_some() || self.static_holds(i, |t| t.contains("attacks each combat if able"))
+        self.perms[i].goad.is_some()
+            || self.static_holds(i, |t| t.contains("attacks each combat if able"))
     }
 
     /// "~ can't be blocked by Walls / Humans / creatures with power 2 or less".

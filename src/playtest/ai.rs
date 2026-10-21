@@ -703,20 +703,20 @@ pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool, r: &Restr) {
     let best = (0..top.len())
         .filter(|&k| Game::card_ok(r, &g.players[p].cards[top[k] as usize], &d))
         .max_by(|&a, &b| {
-        let ca = &g.players[p].cards[top[a] as usize];
-        let cb = &g.players[p].cards[top[b] as usize];
-        let va = if ca.is(T_LAND) && !lands_ok {
-            -1.0
-        } else {
-            card_worth(g, p, ca)
-        };
-        let vb = if cb.is(T_LAND) && !lands_ok {
-            -1.0
-        } else {
-            card_worth(g, p, cb)
-        };
-        va.partial_cmp(&vb).unwrap()
-    });
+            let ca = &g.players[p].cards[top[a] as usize];
+            let cb = &g.players[p].cards[top[b] as usize];
+            let va = if ca.is(T_LAND) && !lands_ok {
+                -1.0
+            } else {
+                card_worth(g, p, ca)
+            };
+            let vb = if cb.is(T_LAND) && !lands_ok {
+                -1.0
+            } else {
+                card_worth(g, p, cb)
+            };
+            va.partial_cmp(&vb).unwrap()
+        });
     for (i, c) in top.into_iter().enumerate() {
         if Some(i) == best {
             g.players[p].hand.push(c);
@@ -2077,7 +2077,10 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
         g.players[o].graveyard.push(counter_idx);
         // "If that spell's mana value was 2 or less, recruit" (Sound the Trumpets).
         g.ext.countered_mv = Some(if back {
-            spell.back.as_ref().map_or(spell.mv, |b| b.cost.total() as u8)
+            spell
+                .back
+                .as_ref()
+                .map_or(spell.mv, |b| b.cost.total() as u8)
         } else {
             spell.mv
         });

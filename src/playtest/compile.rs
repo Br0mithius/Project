@@ -460,7 +460,8 @@ fn spend_only_of(abilities: &[SimAbility]) -> Option<SpendOnly> {
     let a = abilities.iter().find(|a| {
         a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))
             && (a.text.contains("spend this mana only to")
-                || a.text.contains("can't be spent to cast spells from your hand"))
+                || a.text
+                    .contains("can't be spent to cast spells from your hand"))
     })?;
     let t = a.text.as_str();
     if t.contains("can't be spent to cast spells from your hand") {
@@ -1241,7 +1242,11 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     // creature card ... If cast using teamwork, put any number ... instead": teamwork only
     // changes how much it does (checked as it resolves).
     if t.contains("teamwork") && t.contains("instead") && !t.starts_with("if ") {
-        let before = t.split("if ~ was cast using teamwork").next().unwrap_or("").trim();
+        let before = t
+            .split("if ~ was cast using teamwork")
+            .next()
+            .unwrap_or("")
+            .trim();
         if !before.is_empty() && !before.ends_with(',') {
             return Cond::Always;
         }
@@ -1297,9 +1302,14 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
         return Cond::Always;
     }
     // "When ~ enters, if you cast it": not when it's put onto the battlefield.
-    if ["if you cast it", "if you cast him", "if you cast her", "if you cast them"]
-        .iter()
-        .any(|w| t.contains(w))
+    if [
+        "if you cast it",
+        "if you cast him",
+        "if you cast her",
+        "if you cast them",
+    ]
+    .iter()
+    .any(|w| t.contains(w))
     {
         return Cond::WasCast;
     }
@@ -1369,7 +1379,8 @@ fn cond_from(t: &str) -> Cond {
     // "If you control at least five other Forests": the one entering and five more.
     if let Some(rest) = t.split("control at least ").nth(1) {
         let mut w = rest.split_whitespace();
-        if let (Some(n), Some("other"), Some(what)) = (w.next().and_then(number_word), w.next(), w.next())
+        if let (Some(n), Some("other"), Some(what)) =
+            (w.next().and_then(number_word), w.next(), w.next())
         {
             return Cond::ControlCount(n + 1, singular(what.trim_end_matches([',', '.'])));
         }
@@ -1397,8 +1408,7 @@ fn cond_from(t: &str) -> Cond {
     if t.contains("another creature with power") && t.contains("or greater") {
         return Cond::ControlOtherPower(number_after(t, "with power").unwrap_or(4));
     }
-    if t.contains("he's equipped") || t.contains("she's equipped") || t.contains("it's equipped")
-    {
+    if t.contains("he's equipped") || t.contains("she's equipped") || t.contains("it's equipped") {
         return Cond::Equipped;
     }
     if t.contains("isn't a token") || t.contains("not a token") {
@@ -1532,8 +1542,10 @@ fn cond_from(t: &str) -> Cond {
     }
     if t.contains("you control") && t.contains(" or more ") {
         // "Two or more other Wolves": besides this one (itself a Wolf).
-        if let (Some(n), Some(w)) = (number_before(t, " or more other "), word_after(t, " or more other "))
-        {
+        if let (Some(n), Some(w)) = (
+            number_before(t, " or more other "),
+            word_after(t, " or more other "),
+        ) {
             return Cond::ControlCount(n + 1, singular(w));
         }
         if let (Some(n), Some(w)) = (
@@ -2201,7 +2213,14 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
     let mut out = Vec::new();
     let mut instead: Vec<bool> = Vec::new();
     for a in &parsed.abilities {
-        let cond = cond_of(&a.text, a.conditional);
+        let mut cond = cond_of(&a.text, a.conditional);
+        // "~ can't attack unless you control two or more other Wolves": the condition under
+        // which it may attack (see `Game::can_attack`).
+        if a.when.iter().all(|w| *w == When::Static)
+            && let Some(rest) = a.text.split("~ can't attack unless ").nth(1)
+        {
+            cond = cond_from(rest);
+        }
         let whens: Vec<&When> = if a.when.is_empty() {
             vec![&When::Static]
         } else {
@@ -2295,15 +2314,21 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
             .split("if that creature is ")
             .nth(1)
             .and_then(|r| r.split(',').next())
-            .map(|w| w.trim_start_matches("an ").trim_start_matches("a ").to_string());
+            .map(|w| {
+                w.trim_start_matches("an ")
+                    .trim_start_matches("a ")
+                    .to_string()
+            });
         let (Some(what), true) = (what, instead[i] && out[i].trig == out[i - 1].trig) else {
             continue;
         };
         let (
             [Effect::PlusCounters { amount: a, .. }],
-            [Effect::PlusCounters {
-                amount: b, to: bt, ..
-            }],
+            [
+                Effect::PlusCounters {
+                    amount: b, to: bt, ..
+                },
+            ],
         ) = (&out[i - 1].effects[..], &out[i].effects[..])
         else {
             continue;
@@ -2393,7 +2418,10 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
     // the condition is the payment's, not the whole ability's ("create a Treasure" always
     // happens).
     for a in out.iter_mut() {
-        if a.pay.as_ref().is_some_and(|p| p.cond.as_ref() == Some(&a.cond) && p.skip_from > 0) {
+        if a.pay
+            .as_ref()
+            .is_some_and(|p| p.cond.as_ref() == Some(&a.cond) && p.skip_from > 0)
+        {
             a.cond = Cond::Always;
         }
     }
@@ -2904,7 +2932,9 @@ pub fn compile(card: &Card) -> SimCard {
     sc.spend_only = spend_only_of(&sc.abilities);
     if sc.spend_only.is_some() {
         // Its unrestricted mana: "{T}: Add {C}." next to the restricted one.
-        sc.free_mask = if own_text.contains("{t}: add {c}.") && !own_text.contains("{t}: add {c}. this mana") {
+        sc.free_mask = if own_text.contains("{t}: add {c}.")
+            && !own_text.contains("{t}: add {c}. this mana")
+        {
             COLORLESS
         } else {
             0

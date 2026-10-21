@@ -1029,9 +1029,14 @@ pub fn object_restr(text: &str) -> Restr {
         }
         // "Return the chosen card / that card": the one chosen before.
         let moves = verb.starts_with("return") || verb.starts_with("put");
-        let back = ["the chosen card", "that card", "those cards", "the exiled card"]
-            .iter()
-            .any(|w| phrase.trim().starts_with(w));
+        let back = [
+            "the chosen card",
+            "that card",
+            "those cards",
+            "the exiled card",
+        ]
+        .iter()
+        .any(|w| phrase.trim().starts_with(w));
         if moves && best.is_some() && back {
             break;
         }

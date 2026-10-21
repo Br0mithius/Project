@@ -1769,7 +1769,10 @@ fn resolution_counts_and_delayed_triggers() {
     let k = ability(&d, 2, "first time");
     let (life, hand) = (g.players[0].life, g.players[0].hand.len());
     fire_card(&mut g, 2, k, Some(bella));
-    assert_eq!((g.players[0].life, g.players[0].hand.len()), (life + 1, hand));
+    assert_eq!(
+        (g.players[0].life, g.players[0].hand.len()),
+        (life + 1, hand)
+    );
     fire_card(&mut g, 2, k, Some(bella));
     assert_eq!(
         (g.players[0].life, g.players[0].hand.len()),
@@ -1809,10 +1812,11 @@ fn resolution_counts_and_delayed_triggers() {
     assert!(!g.perms.iter().any(|x| x.tok != Tok::None));
     g.run_delayed(Phase::Upkeep);
     g.run_pending();
-    assert!(g
-        .perms
-        .iter()
-        .any(|x| x.tok != Tok::None && x.ctrl == 0 && x.p == 4 && x.has(FLYING)));
+    assert!(
+        g.perms
+            .iter()
+            .any(|x| x.tok != Tok::None && x.ctrl == 0 && x.p == 4 && x.has(FLYING))
+    );
 }
 
 #[test]
@@ -1847,12 +1851,7 @@ fn life_thresholds_sacrifices_and_amass() {
     let lili = put(&mut g, 0, 3);
     let k = ability(&d, 3, "each permanent type");
     fire_card(&mut g, 3, k, Some(lili));
-    let theirs = |g: &Game, t: u16| {
-        g.perms
-            .iter()
-            .filter(|x| x.ctrl == 1 && x.is(t))
-            .count()
-    };
+    let theirs = |g: &Game, t: u16| g.perms.iter().filter(|x| x.ctrl == 1 && x.is(t)).count();
     assert_eq!((theirs(&g, T_CREATURE), theirs(&g, T_LAND)), (1, 1));
     // Azog: the destroyed creature's controller amasses Goblins equal to its power; no card
     // for us (we didn't control it).
@@ -1936,7 +1935,11 @@ fn spending_restrictions_cast_conditions_and_odd_costs() {
     g.players[0].hand = vec![5];
     assert_eq!(g.discard_for_cost(0, text), Some(Some(0)));
     g.players[0].hand = vec![3];
-    assert_eq!(g.discard_for_cost(0, text), None, "no Proft on the battlefield");
+    assert_eq!(
+        g.discard_for_cost(0, text),
+        None,
+        "no Proft on the battlefield"
+    );
 }
 
 #[test]

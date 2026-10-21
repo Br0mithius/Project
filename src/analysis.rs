@@ -823,10 +823,10 @@ const MECHANICS: &[Mechanic] = &[
         enabler: |c| {
             (yes(c.type_line.contains("Artifact"))
                 + 0.6
-                    * yes(c
-                        .parsed()
-                        .effects()
-                        .any(|(_, e)| matches!(e, AbEffect::ItemTokens { .. }))))
+                    * yes(c.parsed().effects().any(|(a, e)| {
+                        matches!(e, AbEffect::ItemTokens { .. })
+                            && !a.text.contains(". they create ")
+                    })))
             .min(1.0)
         },
     },
