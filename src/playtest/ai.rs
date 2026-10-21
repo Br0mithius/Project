@@ -9,7 +9,7 @@ use super::combat::{Attack, Def};
 use super::compile::*;
 use super::resolve::Ctx;
 use super::state::*;
-use super::{CastOpts, Src};
+use super::{CastOpts, ExtraPay, Src};
 use crate::abilities::{Effect, Kind, Whose};
 
 // ------------------------------------------------------------ values
@@ -383,6 +383,22 @@ pub fn fodder(g: &Game, p: usize, types: u16, src_id: u32) -> Option<usize> {
         .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap())
 }
 
+/// What `p` sacrifices to pay a cost that must be paid ("as an additional cost to cast this
+/// spell, sacrifice a creature"): spare fodder, else the least valuable one (never the
+/// commander).
+pub fn sac_for_cost(g: &Game, p: usize, types: u16) -> Option<usize> {
+    fodder(g, p, types, u32::MAX).or_else(|| {
+        (0..g.perms.len())
+            .filter(|&i| {
+                let x = &g.perms[i];
+                x.ctrl as usize == p
+                    && x.commander == 0
+                    && (x.types & types != 0 || (types & T_CREATURE != 0 && x.is_creature()))
+            })
+            .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap())
+    })
+}
+
 pub fn untap_choice(g: &Game, me: usize, cands: &[usize]) -> Option<usize> {
     let tapped: Vec<usize> = cands
         .iter()
@@ -641,6 +657,7 @@ pub fn scry(g: &mut Game, p: usize, k: usize, surveil: bool) {
             g.players[p].library.insert(0, c);
         }
     }
+    g.players[p].scried_turn = true;
     g.emit(Ev::Scry, p, None);
 }
 
@@ -918,6 +935,8 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         text,
         until_eot: false,
         overload: false,
+        x: None,
+        paid: None,
     };
     let opp_value = |t: &crate::abilities::Target, kill: &dyn Fn(&Perm) -> bool| -> f32 {
         let cands = g.candidates(&ctx, t, true);
@@ -1092,6 +1111,8 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
             ) * 0.3
         }
         Effect::Untap(_) => 0.4,
+        // Nothing to find, nothing gained.
+        Effect::Tutor if tutor_choice(g, p, text).is_none() => 0.0,
         Effect::Attach => {
             if equip_target(g, p, 0).is_some() {
                 0.8
@@ -1112,7 +1133,11 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
         .collect();
     if a.modal {
         let two = a.text.contains("choose two");
-        let mut v = vals.clone();
+        let mut v: Vec<f32> = a
+            .mode_ranges()
+            .into_iter()
+            .map(|r| vals[r].iter().sum())
+            .collect();
         v.sort_by(|a, b| b.partial_cmp(a).unwrap());
         v.iter().take(if two { 2 } else { 1 }).sum()
     } else {
@@ -1120,18 +1145,24 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
     }
 }
 
+/// The effects of the best mode (or two) of a modal ability.
 pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility) -> Vec<usize> {
     let two = ab.text.contains("choose two");
-    let mut v: Vec<(f32, usize)> = ab
-        .effects
-        .iter()
-        .enumerate()
-        .map(|(k, e)| (effect_now(g, ctx.ctrl, e, &ab.text, ctx.src), k))
+    let mut v: Vec<(f32, std::ops::Range<usize>)> = ab
+        .mode_ranges()
+        .into_iter()
+        .map(|r| {
+            let val = ab.effects[r.clone()]
+                .iter()
+                .map(|e| effect_now(g, ctx.ctrl, e, &ab.text, ctx.src))
+                .sum();
+            (val, r)
+        })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     v.into_iter()
         .take(if two { 2 } else { 1 })
-        .map(|(_, k)| k)
+        .flat_map(|(_, r)| r)
         .collect()
 }
 
@@ -1147,6 +1178,74 @@ pub fn wants_optional(g: &Game, ctx: &Ctx, ab: &SimAbility) -> bool {
         return g.players[ctx.ctrl].life > 10 || !t.contains("life");
     }
     ability_now(g, ctx.ctrl, ab, ctx.src) >= 0.0
+}
+
+/// Is paying a cost while an ability resolves ("you may sacrifice another creature. If you
+/// do, ...") worth what it gets?
+pub fn wants_to_pay(g: &Game, ctx: &Ctx, ab: &SimAbility, pc: &PayCost) -> bool {
+    let p = ctx.ctrl;
+    let gain: f32 = ab
+        .effects
+        .iter()
+        .skip(pc.first as usize)
+        .map(|e| effect_now(g, p, e, &ab.text, ctx.src))
+        .sum();
+    let src = ctx.src.unwrap_or(u32::MAX);
+    let pl = &g.players[p];
+    let price = match &pc.cost {
+        ResCost::Free | ResCost::SacrificeSelf | ResCost::ExileSelf | ResCost::ExileNamed(_) => {
+            return gain >= 0.0;
+        }
+        ResCost::Sacrifice { types, other } => {
+            match fodder(g, p, *types, if *other { src } else { u32::MAX }) {
+                Some(i) => perm_value(g, i) * 0.8,
+                None => return false,
+            }
+        }
+        ResCost::SacrificeOrDiscard(types) => match fodder(g, p, *types, src) {
+            Some(i) => perm_value(g, i) * 0.8,
+            None if !pl.hand.is_empty() => 1.0,
+            None => return false,
+        },
+        ResCost::Mana(m) => {
+            if !g.can_pay(p, m) {
+                return false;
+            }
+            m.total() as f32 * 0.3
+        }
+        ResCost::Life(n) => {
+            if pl.life <= *n as i32 + 5 {
+                return false;
+            }
+            *n as f32 * if pl.life < 15 { 0.3 } else { 0.1 }
+        }
+        ResCost::Discard => {
+            if pl.hand.is_empty() {
+                return false;
+            }
+            discard_choice(g, p)
+                .map(|h| card_worth(g, p, &pl.cards[pl.hand[h] as usize]) * 0.5)
+                .unwrap_or(1.0)
+        }
+        ResCost::RemoveCounter { plus } => {
+            let Some(x) = ctx.src.and_then(|id| g.idx(id)).map(|i| &g.perms[i]) else {
+                return false;
+            };
+            if *plus {
+                // Not the last counter keeping it alive.
+                if x.counters < 1 || x.t <= 1 {
+                    return false;
+                }
+                0.8
+            } else {
+                if x.other_counters < 1 {
+                    return false;
+                }
+                0.0
+            }
+        }
+    };
+    gain > price
 }
 
 /// What casting a spell is worth to `p` right now.
@@ -1242,6 +1341,22 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
         }
         // Card advantage aside, a sorcery that does nothing now waits.
     }
+    // "As an additional cost to cast this spell, sacrifice a creature / discard a card".
+    let extra = if back {
+        c.back.as_ref().and_then(|b| b.extra_cost.as_ref())
+    } else {
+        c.extra_cost.as_ref()
+    };
+    if let Some(e) = extra {
+        match g.extra_payment(p, e, &c.cost, true) {
+            Some(ExtraPay::Sacrifice(id)) => {
+                v -= g.idx(id).map(|i| perm_value(g, i)).unwrap_or(0.0);
+            }
+            Some(ExtraPay::Discard) => v -= 1.0,
+            Some(_) => {}
+            None => return 0.0,
+        }
+    }
     v
 }
 
@@ -1288,6 +1403,8 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
 enum Act {
     Cast(Src, CastOpts),
     Activate(u32, usize),
+    /// An ability of a card in the graveyard: (graveyard slot, ability).
+    ActivateGy(usize, usize),
     Equip(u32, u32),
     Cycle(usize),
 }
@@ -1428,6 +1545,31 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         if pl.recast.contains(&idx) || pl.cards[idx as usize].flashback.is_some() {
             push_cast(&mut out, Src::Graveyard(k), idx, false, false);
         }
+        // Abilities that work from the graveyard ("{3}{B}, Exile this card from your
+        // graveyard: ...", Gallia returning herself).
+        for (a, ab) in pl.cards[idx as usize].abilities.iter().enumerate() {
+            let Some(cost) = g.graveyard_activation_cost(p, k, a) else {
+                continue;
+            };
+            if g.can_pay(p, &cost) {
+                let v = if ab.text.contains("return ~ from your graveyard") {
+                    // The card itself comes back (to the battlefield, or to hand).
+                    pl.cards[idx as usize].value
+                        * if ab.effects.contains(&Effect::Reanimate) {
+                            1.0
+                        } else {
+                            0.6
+                        }
+                } else {
+                    ability_now(g, p, ab, None)
+                };
+                out.push((
+                    v - 0.1 * cost.total() as f32,
+                    cost.total(),
+                    Act::ActivateGy(k, a),
+                ));
+            }
+        }
     }
     for (i, x) in g.perms.iter().enumerate() {
         if x.ctrl as usize != p {
@@ -1489,15 +1631,18 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 Trig::Activated {
                     sorcery: _,
                     sac_self,
+                    extra,
                     ..
                 } => {
-                    if *sac_self {
+                    if *sac_self || extra.exile_self || extra.return_self {
                         // Clues and Food when there's mana to spare; other sacrifices when worth it.
                         v -= perm_value(g, i) * 0.5;
                     }
                     if a.text.contains("pay") && a.text.contains("life") {
                         v -= 0.5;
                     }
+                    // Tapping helpers and spending counters aren't free either.
+                    v -= 0.3 * extra.tap_others as f32 + 0.2 * extra.remove as f32;
                 }
                 Trig::PowerUp(_) => {
                     // Cheapest the turn it enters.
@@ -1520,10 +1665,12 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         if x.is(T_EQUIPMENT) && (!post || x.attached.is_none()) {
             if let (Some(r), Some(t)) = (x.card, equip_target(g, p, x.id)) {
                 let tid = g.perms[t].id;
-                let cost = Mana::generic(g.card(r).equip.unwrap_or(2) as u32);
+                let cost = g.card(r).equip.unwrap_or(Mana::generic(2));
+                let life = g.card(r).equip_life as i32;
                 if x.attached != Some(tid)
                     && x.attached.is_none_or(|a| g.idx(a).is_none())
                     && g.can_pay(p, &cost)
+                    && (life == 0 || g.players[p].life > life + 5)
                 {
                     let bonus = g
                         .card(r)
@@ -1616,6 +1763,7 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
     match act {
         Act::Cast(src, opts) => g.cast(p, src, opts),
         Act::Activate(id, k) => g.activate(p, id, k),
+        Act::ActivateGy(gk, k) => g.activate_from_graveyard(p, gk, k),
         Act::Equip(e, t) => g.equip(p, e, t),
         Act::Cycle(h) => g.cycle(p, h),
     }
@@ -1843,6 +1991,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
                     from_graveyard: false,
                     kicked: false,
                     overloaded: false,
+                    x: None,
                 });
             }
         }

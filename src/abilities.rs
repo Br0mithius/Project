@@ -510,6 +510,12 @@ pub struct Ability {
     pub once: bool,
     /// "Choose one —": the effects are alternatives.
     pub modal: bool,
+    /// The "Y instead" half of "X. If <condition>, Y instead.": it replaces the ability
+    /// before it when the condition holds.
+    pub instead: bool,
+    /// For modal abilities: how many of `effects` each mode has, in order ("You lose 2
+    /// life. Destroy target creature." is one mode of two effects). Empty otherwise.
+    pub modes: Vec<u8>,
     pub text: String,
 }
 
@@ -2315,6 +2321,7 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                 for m in &modes {
                     let mut e = read_effects(m);
                     body_effects(m, &mut e);
+                    a.modes.push(e.len().min(255) as u8);
                     a.effects.extend(e);
                 }
                 // Modes that only pick targets ("• Target creature card.") with the effect in
@@ -2333,8 +2340,13 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                         }
                     }
                     a.modal = false;
+                    a.modes.clear();
                 } else {
                     a.modal = true;
+                    // Modes of one effect each need no grouping.
+                    if a.modes.iter().all(|&n| n == 1) {
+                        a.modes.clear();
+                    }
                 }
                 // A mode with a cost of its own ("Remove a counter ... If you do, draw a card").
                 if modes.iter().any(|m| m.contains("if you do")) {
@@ -2353,23 +2365,35 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
         // "X. If <condition>, Y instead." - Y replaces X when the condition holds (Tidings of
         // War: amass 1, or 3 if cast from a graveyard). Read as the plain ability plus a
         // conditional alternative, so the two aren't added together.
-        let (base_line, alternative) = split_instead(&line);
-        if let Some(alt) = alternative.and_then(|alt| read_line(&alt, card, is_spell)) {
-            if !alt.effects.is_empty() {
-                if let Some(base) =
-                    read_line(&base_line, card, is_spell).filter(|a| !a.effects.is_empty())
-                {
-                    let mut base = base;
+        let (base_line, alternative, instead) = split_instead(&line);
+        if let Some(alt_line) = alternative {
+            let base = read_line(&base_line, card, is_spell).filter(|a| !a.effects.is_empty());
+            if let (Some(mut base), Some(mut alt)) = (base, read_line(&alt_line, card, is_spell)) {
+                // "Deals 2 damage to any target. If ~ was kicked, it deals 4 damage instead":
+                // the alternative says only what changes, so it's the same effects changed.
+                if alt.effects.is_empty() && instead {
+                    alt.effects = changed_effects(&base.effects, &alt_line);
+                }
+                if !alt.effects.is_empty() {
                     // "X if <condition>. Otherwise, Y": X needs the condition too.
                     if lines[i - 1].contains(". otherwise, ") {
                         base.conditional = true;
                     }
                     out.abilities.push(base);
-                    let mut alt = alt;
                     alt.conditional = true;
+                    alt.instead = instead;
                     out.abilities.push(alt);
                     continue;
                 }
+            }
+        } else if base_line != line {
+            // "Choose target creature card with mana value 4 or less. If ~ was cast using
+            // teamwork, instead choose target creature card. Return the chosen card ...":
+            // the condition only widens the choice; the rest always happens.
+            if let Some(a) = read_line(&base_line, card, is_spell).filter(|a| !a.effects.is_empty())
+            {
+                out.abilities.push(a);
+                continue;
             }
         }
         match read_line(&line, card, is_spell) {
@@ -2419,7 +2443,10 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
 /// "X. If <condition>, Y instead." -> ("X.", Some("<same trigger/cost>, if <condition>, Y
 /// instead")). Replacement effects ("if ... would ..., ... instead") are left alone: they
 /// aren't alternatives to an earlier sentence.
-fn split_instead(line: &str) -> (String, Option<String>) {
+/// The third value says the alternative replaces the base ("instead") rather than adding
+/// to it. A base different from `line` with no alternative is the line without a sentence
+/// that only widened a choice.
+fn split_instead(line: &str) -> (String, Option<String>, bool) {
     // "X if <condition>. Otherwise, Y." - two alternatives (HYDRA Troopers).
     if let Some(i) = line.find(". otherwise, ") {
         let sentence = line[i + 2..].trim().trim_end_matches('.');
@@ -2429,11 +2456,12 @@ fn split_instead(line: &str) -> (String, Option<String>) {
             return (
                 base.clone(),
                 Some(with_same_start(&base, &format!("if not, {}", alt_body))),
+                false,
             );
         }
     }
     let Some(i) = line.find(". if ").or_else(|| line.find(". then if ")) else {
-        return (line.to_string(), None);
+        return (line.to_string(), None, false);
     };
     let sentence = line[i + 2..].trim().trim_end_matches('.');
     // "If <condition>, Y instead." and "If <condition>, instead Y." (Cruel Alliance), or an
@@ -2443,7 +2471,21 @@ fn split_instead(line: &str) -> (String, Option<String>) {
     if (instead_form || also_form) && !sentence.contains(" would ") && !sentence.contains(". ") {
         let sentence = sentence.replace(", instead ", ", ");
         let base = format!("{}.", &line[..i]);
-        return (base.clone(), Some(with_same_start(&base, &sentence)));
+        return (
+            base.clone(),
+            Some(with_same_start(&base, &sentence)),
+            instead_form,
+        );
+    }
+    // "Choose target creature you own. If ~ was kicked, instead choose any number of target
+    // creatures you own. Return each chosen creature ...": the condition only widens the
+    // choice, and the sentences after it happen either way.
+    if sentence.starts_with("if ") && !sentence.contains(" would ") {
+        if let Some((head, tail)) = sentence.split_once(". ") {
+            if head.contains(", instead ") && !tail.is_empty() {
+                return (format!("{}. {}.", &line[..i], tail), None, false);
+            }
+        }
     }
     // Any other later "If <condition>, Y." only gates Y: "Draw a card. If you control a
     // Wizard, scry 2." The rest of the line happens regardless. Conditions that look back
@@ -2481,14 +2523,83 @@ fn split_instead(line: &str) -> (String, Option<String>) {
         || LOOKS_BACK.iter().any(|l| head.starts_with(l))
         || !head.contains(", ")
     {
-        return (line.to_string(), None);
+        return (line.to_string(), None, false);
+    }
+    // "Then if you control four or more Treasures, sacrifice ~. If you do, create a Dragon":
+    // the "if you do" belongs with the conditional part.
+    if tail.starts_with("if you do") || tail.starts_with("when you do") {
+        let base = format!("{}.", &line[..i]);
+        let alt = format!("{}. {}", head, tail);
+        return (base.clone(), Some(with_same_start(&base, &alt)), false);
     }
     let base = if tail.is_empty() {
         format!("{}.", &line[..i])
     } else {
         format!("{}. {}.", &line[..i], tail)
     };
-    (base.clone(), Some(with_same_start(&base, head)))
+    (base.clone(), Some(with_same_start(&base, head)), false)
+}
+
+/// The effects of "..., it deals 4 damage instead" / "..., create five of those tokens
+/// instead": the base effects with the new number.
+fn changed_effects(base: &[Effect], alt: &str) -> Vec<Effect> {
+    let damage = Regex::new(r"deals? (\d+) damage")
+        .ok()
+        .and_then(|re| re.captures(alt))
+        .and_then(|c| c[1].parse::<i32>().ok());
+    let times = Regex::new(r"create ([a-z]+|\d+) of those")
+        .ok()
+        .and_then(|re| re.captures(alt))
+        .and_then(|c| number(&c[1]))
+        .map(|a| a.n.clamp(1, 10) as usize)
+        .unwrap_or(1);
+    // "That creature gets -13/-13 instead".
+    let shrink = Regex::new(r"gets? -(\d+)/-\d+")
+        .ok()
+        .and_then(|re| re.captures(alt))
+        .and_then(|c| c[1].parse::<i32>().ok());
+    let mut out = Vec::new();
+    for _ in 0..times {
+        for e in base {
+            out.push(match (e, damage, shrink) {
+                (Effect::Damage { to, .. }, Some(n), _) => Effect::Damage {
+                    amount: Amount::fixed(n),
+                    to: *to,
+                },
+                (Effect::Shrink { to, until_eot, .. }, _, Some(n)) => Effect::Shrink {
+                    amount: Amount::fixed(n),
+                    to: *to,
+                    until_eot: *until_eot,
+                },
+                _ => e.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// How many effects the parser reads from `text`: the start of an ability's text (trigger,
+/// cost or label, then sentences). The simulator uses it to tell which effects come after a
+/// cost paid while the ability resolves ("... you may sacrifice a creature. If you do, ...").
+pub fn effects_count(text: &str) -> usize {
+    let mut body = text.trim();
+    if let Some((label, rest)) = body.split_once(" — ") {
+        if label.split_whitespace().count() <= 4 && !label.contains(':') && !label.contains('{') {
+            body = rest;
+        }
+    }
+    if let Some(rest) = body.strip_prefix('[') {
+        body = rest.split_once("]:").map(|x| x.1).unwrap_or(rest);
+    } else if body.starts_with("when ") || body.starts_with("whenever ") || body.starts_with("at ")
+    {
+        body = split_trigger(body).1;
+        if let Some(cond) = body.strip_prefix("if ") {
+            body = cond.split_once(", ").map(|x| x.1).unwrap_or("");
+        }
+    } else if let Some((_, effect)) = activated_split(body) {
+        body = effect;
+    }
+    sentences(body).iter().map(|s| read_effects(s).len()).sum()
 }
 
 /// Puts `sentence` behind the same trigger or cost as `base` ("When ~ enters, " / "{2}: ").
@@ -2689,6 +2800,8 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
                     conditional: rest.starts_with("if ") || rest.contains(" if "),
                     once: false,
                     modal: false,
+                    instead: false,
+                    modes: Vec::new(),
                     text: line.clone(),
                 });
             }
@@ -2707,6 +2820,8 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
             || exhaust
             || line.contains("activate only once") && !line.contains("only once each turn"),
         modal: false,
+        instead: false,
+        modes: Vec::new(),
         text: line.clone(),
     };
     let body: String;
@@ -2849,6 +2964,12 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
                 }
             };
         }
+    }
+    // Boast's rules live in reminder text (stripped): keep them with the ability.
+    if boast {
+        ability
+            .text
+            .push_str(" activate only if ~ attacked this turn and only once each turn.");
     }
     let _ = card;
     Some(ability)

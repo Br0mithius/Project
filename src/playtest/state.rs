@@ -73,6 +73,17 @@ pub struct Perm {
     pub activations: u8,
     /// Once-each-turn triggers that already fired this turn (bit per ability).
     pub fired: u32,
+    /// Declared as an attacker in the current combat.
+    pub attacking: bool,
+    /// Attacked this turn / entered the battlefield this turn.
+    pub attacked_turn: bool,
+    pub entered_turn: bool,
+    /// Players it dealt combat damage to this turn (bit per player).
+    pub hit_turn: u8,
+    /// It has dealt combat damage at some point.
+    pub ever_hit: bool,
+    /// The last source that dealt damage to it this turn.
+    pub hurt_by: u32,
     // Values after static effects (`Game::recalc`).
     pub p: i16,
     pub t: i16,
@@ -124,6 +135,10 @@ pub struct Player<'a> {
     pub attacked_this_turn: bool,
     pub gained_life_turn: bool,
     pub lost_life_turn: bool,
+    /// Lost life during the previous turn.
+    pub lost_life_last_turn: bool,
+    pub scried_turn: bool,
+    pub loyalty_turn: bool,
     pub enduring_story: bool,
     /// An opponent controls this player's next turn (MSH Plans).
     pub hijacked: bool,
@@ -154,6 +169,8 @@ pub struct Pending {
     pub kicked: bool,
     /// Cast for its overload cost: "target" means "each".
     pub overloaded: bool,
+    /// The X paid for the spell or ability.
+    pub x: Option<i32>,
 }
 
 /// Context for resolving a spell's own abilities.
@@ -173,6 +190,13 @@ pub struct Game<'a> {
     pub rng: Rng,
     pub start_life: i32,
     pub died_this_turn: u8,
+    /// Creatures that died this turn, as they last were (for "if it was attacking").
+    pub dead: Vec<Perm>,
+    /// Excess damage dealt by the last damaging effect ("if excess damage was dealt").
+    pub last_excess: i32,
+    /// The card the resolving ability last dealt with (returned, destroyed, revealed), for
+    /// "if it's a Zombie card, ...".
+    pub focus_card: Option<CardRef>,
     pub pending: Vec<Pending>,
     pub fog: bool,
     pub in_combat: bool,
@@ -214,18 +238,22 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
                 discard: text.contains("discard"),
                 life: 0,
                 sorcery: false,
+                extra: ActCost::default(),
             },
             cond: Cond::Always,
             optional: false,
             once: false,
             modal: false,
             effects,
+            modes: Vec::new(),
             text: text.to_string(),
             until_eot: false,
             counter_goal: None,
             filter: Filter::default(),
             once_per_turn: false,
             second_draw: false,
+            pay: None,
+            gate: None,
         };
         let it = Target {
             kind: crate::abilities::Kind::Creature,
@@ -242,12 +270,15 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             once: false,
             modal: false,
             effects,
+            modes: Vec::new(),
             text: String::new(),
             until_eot: false,
             counter_goal: None,
             filter: Filter::default(),
             once_per_turn: false,
             second_draw: false,
+            pay: None,
+            gate: None,
         };
         vec![
             (
@@ -523,6 +554,7 @@ impl<'a> Game<'a> {
                             "planeswalker" => x.is(T_PLANESWALKER),
                             "legendary" => x.is(T_LEGENDARY),
                             "basic" => x.is(T_BASIC),
+                            "equipment" => x.is(T_EQUIPMENT),
                             _ => false,
                         })
             }),
@@ -545,6 +577,85 @@ impl<'a> Game<'a> {
             Cond::PowerAtMost(n) => src.is_some_and(|s| self.perms[s].p <= *n),
             Cond::HasShield => src.is_some_and(|s| self.perms[s].shield > 0),
             Cond::Treasures(n) => mine().filter(|x| x.tok == Tok::Treasure).count() >= *n as usize,
+            Cond::ControlCount(n, what) => {
+                mine()
+                    .filter(|x| match what.as_str() {
+                        "creature" => x.is_creature(),
+                        "artifact" => x.is(T_ARTIFACT),
+                        "enchantment" => x.is(T_ENCHANTMENT),
+                        "permanent" => true,
+                        w => x.subtypes.iter().any(|s| s == w),
+                    })
+                    .count()
+                    >= *n as usize
+            }
+            Cond::TotalPower(n) => {
+                mine()
+                    .filter(|x| x.is_creature())
+                    .map(|x| x.p.max(0) as i32)
+                    .sum::<i32>()
+                    >= *n as i32
+            }
+            Cond::PowerAtLeast(n) => src.is_some_and(|s| self.perms[s].p >= *n),
+            Cond::CreaturesDied(n) => self.died_this_turn >= *n,
+            Cond::OpponentCastSpell => self
+                .players
+                .iter()
+                .enumerate()
+                .any(|(i, o)| i != p && o.spells_this_turn > 0),
+            Cond::OpponentLostLifeLastTurn => self
+                .players
+                .iter()
+                .enumerate()
+                .any(|(i, o)| i != p && o.alive && o.lost_life_last_turn),
+            Cond::OpponentLifeExactly(n) => self
+                .players
+                .iter()
+                .enumerate()
+                .any(|(i, o)| i != p && o.alive && o.life == *n),
+            // Need the event or the payment: checked where the ability resolves.
+            Cond::XAtLeast(_)
+            | Cond::SubjectBigger
+            | Cond::SubjectWasAttacking
+            | Cond::SubjectHurtBySource => false,
+            Cond::SourceNotCreature => src.is_some_and(|s| !self.perms[s].is_creature()),
+            Cond::SourceSubtype(w) => src.is_some_and(|s| self.perms[s].subtypes.contains(w)),
+            Cond::JaceLoyalty(n) => {
+                mine()
+                    .filter(|x| x.is(T_PLANESWALKER) && x.subtypes.iter().any(|s| s == "jace"))
+                    .map(|x| x.loyalty)
+                    .sum::<i16>()
+                    >= *n
+            }
+            Cond::LoyaltyActivated => pl.loyalty_turn,
+            Cond::AnyPermanentColor(m) => self.perms.iter().any(|x| x.colors & m != 0),
+            Cond::OtherCountersAtLeast(n) => {
+                src.is_some_and(|s| self.perms[s].other_counters >= *n)
+            }
+            Cond::SourceAttacking => src.is_some_and(|s| self.perms[s].attacking),
+            Cond::SourceHitThisTurn => src.is_some_and(|s| self.perms[s].hit_turn != 0),
+            Cond::SourceNeverHit => src.is_some_and(|s| !self.perms[s].ever_hit),
+            Cond::Scried => pl.scried_turn,
+            Cond::AttacksAlone => mine().filter(|x| x.attacking).count() == 1,
+            Cond::AttackedOrEntered(w) => {
+                mine().any(|x| x.subtypes.contains(w) && (x.attacked_turn || x.entered_turn))
+            }
+            Cond::AttackersAtLeast(n) => mine().filter(|x| x.attacking).count() >= *n as usize,
+            Cond::AttackerSubtype(w) => mine().any(|x| x.attacking && x.subtypes.contains(w)),
+            Cond::AttackingPower(n) => {
+                mine()
+                    .filter(|x| x.attacking)
+                    .map(|x| x.p.max(0) as i32)
+                    .sum::<i32>()
+                    >= *n as i32
+            }
+            Cond::CanBeholdJace => {
+                mine().any(|x| x.subtypes.iter().any(|s| s == "jace"))
+                    || pl
+                        .hand
+                        .iter()
+                        .any(|&c| pl.cards[c as usize].subtypes.iter().any(|s| s == "jace"))
+            }
             // Can't be checked: decided once per check, deterministically from the round.
             Cond::Chance(f) => {
                 ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f
@@ -779,6 +890,7 @@ impl<'a> Game<'a> {
         let to_gy = matches!(to, Zone::Graveyard);
         if creature && to_gy {
             self.died_this_turn += 1;
+            self.dead.push(perm.clone());
         }
         // Dies / leaves triggers of the permanent itself.
         if let Some(r) = perm.card {
@@ -799,6 +911,7 @@ impl<'a> Game<'a> {
                             from_graveyard: false,
                             kicked: false,
                             overloaded: false,
+                            x: None,
                         });
                     }
                 }
@@ -947,6 +1060,12 @@ impl<'a> Game<'a> {
             holding: Vec::new(),
             activations: 0,
             fired: 0,
+            attacking: false,
+            attacked_turn: false,
+            entered_turn: true,
+            hit_turn: 0,
+            ever_hit: false,
+            hurt_by: 0,
             p,
             t,
             eff_kw: kw,
@@ -987,7 +1106,9 @@ impl<'a> Game<'a> {
         let i = self.new_perm(ctrl, list, Some(r), Tok::None);
         let id = self.perms[i].id;
         let c = self.card(r);
-        if c.is(T_LAND) && c.enters_tapped {
+        // "As this land enters, you may behold a Jace. If you don't, it enters tapped."
+        let beheld = c.behold_untapped && self.cond_holds(&Cond::CanBeholdJace, ctrl, None);
+        if c.is(T_LAND) && c.enters_tapped && !beheld {
             self.perms[i].tapped = true;
         }
         if c.is(T_PLANESWALKER) {
@@ -1035,6 +1156,7 @@ impl<'a> Game<'a> {
                         from_graveyard: false,
                         kicked: false,
                         overloaded: false,
+                        x: None,
                     });
                 }
             }
@@ -1087,13 +1209,17 @@ impl<'a> Game<'a> {
                 let Trig::Event(kind, f) = &a.trig else {
                     continue;
                 };
-                if *kind != ev {
+                if *kind != ev || a.graveyard_only() {
                     continue;
                 }
                 if a.once_per_turn && ai < 32 && src.fired & (1 << ai) != 0 {
                     continue;
                 }
                 if a.second_draw && ev == Ev::Draw && self.players[p].drawn_this_turn != 2 {
+                    continue;
+                }
+                // "Whenever an opponent casts their second spell each turn".
+                if a.second_draw && ev == Ev::Cast && self.players[p].spells_this_turn != 2 {
                     continue;
                 }
                 let mine = src.ctrl as usize == p;
@@ -1171,11 +1297,57 @@ impl<'a> Game<'a> {
                     from_graveyard: false,
                     kicked: false,
                     overloaded: false,
+                    x: None,
                 });
             }
         }
         for (si, ai) in fired {
             self.perms[si].fired |= 1 << ai;
+        }
+        // Cards that work from the graveyard ("whenever a land you control enters, you may
+        // pay {1}{G}{U}. If you do, return ~ from your graveyard to your hand").
+        for (o, pl) in self.players.iter().enumerate() {
+            if !pl.alive {
+                continue;
+            }
+            for &c in &pl.graveyard {
+                let card = &pl.cards[c as usize];
+                if card.ev_mask & bit == 0 {
+                    continue;
+                }
+                for (k, a) in card.abilities.iter().enumerate() {
+                    let Trig::Event(kind, f) = &a.trig else {
+                        continue;
+                    };
+                    if *kind != ev || !a.graveyard_only() || f.yours.is_some_and(|y| y != (o == p))
+                    {
+                        continue;
+                    }
+                    if let Some(s) = subject {
+                        if f.types != 0 && s.types & f.types == 0
+                            || f.subtype.as_ref().is_some_and(|t| !s.subtypes.contains(t))
+                            || f.nontoken && s.is_token()
+                        {
+                            continue;
+                        }
+                    }
+                    add.push(Pending {
+                        ctrl: o as u8,
+                        source: None,
+                        card: (o as u8, c),
+                        back: false,
+                        ability: k as u16,
+                        snapshot: None,
+                        subject: subject.map(|s| s.id),
+                        teamwork: false,
+                        gift: false,
+                        from_graveyard: false,
+                        kicked: false,
+                        overloaded: false,
+                        x: None,
+                    });
+                }
+            }
         }
         self.pending.extend(add);
     }
@@ -1259,6 +1431,12 @@ impl<'a> Game<'a> {
             holding: Vec::new(),
             activations: 0,
             fired: 0,
+            attacking: false,
+            attacked_turn: false,
+            entered_turn: false,
+            hit_turn: 0,
+            ever_hit: false,
+            hurt_by: 0,
             p: 0,
             t: 0,
             eff_kw: 0,
