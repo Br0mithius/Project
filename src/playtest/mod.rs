@@ -115,6 +115,9 @@ impl<'a> Game<'a> {
                 attacked_this_turn: false,
                 gained_life_turn: false,
                 lost_life_turn: false,
+                life_gained_turn: 0,
+                discarded_turn: 0,
+                extra_lands: 0,
                 enduring_story: false,
                 hijacked: false,
                 pool: 0,
@@ -154,6 +157,9 @@ impl<'a> Game<'a> {
             last_left: None,
             last_discarded: 0,
             last_countered: Vec::new(),
+            last_destroyed: 0,
+            last_drawn: 0,
+            last_targets: Vec::new(),
         };
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
@@ -1017,6 +1023,9 @@ impl<'a> Game<'a> {
             pl.attacked_this_turn = false;
             pl.gained_life_turn = false;
             pl.lost_life_turn = false;
+            pl.life_gained_turn = 0;
+            pl.discarded_turn = 0;
+            pl.extra_lands = 0;
             for g in pl.grudge.iter_mut() {
                 *g *= 0.8;
             }
@@ -1029,13 +1038,37 @@ impl<'a> Game<'a> {
             x.fired = 0;
         }
         // Untap.
+        // "~ doesn't untap during your untap step" (Bombur: unless an enduring story).
+        let storied = self.players[a].enduring_story;
+        let stays: Vec<u32> = self
+            .perms
+            .iter()
+            .filter(|x| x.ctrl as usize == a && !x.no_abilities)
+            .filter(|x| {
+                x.card.is_some_and(|r| {
+                    let c = self.card(r);
+                    c.no_untap
+                        && !(storied
+                            && c.abilities
+                                .iter()
+                                .any(|ab| ab.text.contains("unless you have an enduring story")))
+                })
+            })
+            .map(|x| x.id)
+            .collect();
         let untapping: Vec<u32> = self
             .perms
             .iter()
-            .filter(|x| x.ctrl as usize == a && x.tapped && x.stun == 0)
+            .filter(|x| x.ctrl as usize == a && x.tapped && x.stun == 0 && !stays.contains(&x.id))
             .map(|x| x.id)
             .collect();
         for x in self.perms.iter_mut().filter(|x| x.ctrl as usize == a) {
+            if stays.contains(&x.id) {
+                x.sick = false;
+                x.loyalty_used = false;
+                x.activations = 0;
+                continue;
+            }
             if x.stun > 0 && x.tapped {
                 x.stun -= 1;
             } else {

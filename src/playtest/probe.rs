@@ -432,7 +432,7 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
         Some(k) if k < ab.effects.len() || ab.cond != Cond::Always => {
-            let ctx = Ctx {
+            let mut ctx = Ctx {
                 ctrl: 0,
                 src,
                 snap: snapshot,
@@ -446,6 +446,9 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
             if k < ab.effects.len() {
                 // A mode: all of its effects.
                 let mode = |j: usize| ab.modes.get(j).copied().unwrap_or(j as u8) as usize;
+                if let Some(t) = ab.mode_texts.get(k) {
+                    ctx.text = t;
+                }
                 for j in (0..ab.effects.len()).filter(|&j| mode(j) == k) {
                     g.apply(&ctx, &ab.effects[j]);
                 }

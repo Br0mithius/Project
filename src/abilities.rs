@@ -516,6 +516,9 @@ pub struct Ability {
     /// For a modal ability: the mode (bullet) each effect belongs to, so a mode with two
     /// effects ("deals 4 damage to any target and you gain 4 life") stays one choice.
     pub modes: Vec<u8>,
+    /// For a modal ability: each mode's own text (the bullet), for the details its effects
+    /// read ("any target", "two cards", "equal to ...").
+    pub mode_texts: Vec<String>,
     pub text: String,
 }
 
@@ -1171,6 +1174,15 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
                 .unwrap_or(Amount::fixed(1)),
             s,
         );
+        // "Create a number of 1/1 Rabbit tokens equal to ...".
+        let n = if c[0].contains("a number of") {
+            Amount {
+                n: TYPICAL_X,
+                x: true,
+            }
+        } else {
+            n
+        };
         let pw = amount(&c[3], s).n;
         let t = amount(&c[4], s).n;
         let kws = c
@@ -1210,7 +1222,14 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
                 })
                 .unwrap_or_default();
             out.push(Effect::Tokens {
-                amount: counted(amount(&c[1], s), s),
+                amount: if c[0].contains("a number of") {
+                    Amount {
+                        n: TYPICAL_X,
+                        x: true,
+                    }
+                } else {
+                    counted(amount(&c[1], s), s)
+                },
                 power: 1,
                 toughness: 1,
                 keywords: kws,
@@ -1245,6 +1264,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             || phrase.starts_with("her")
         {
             Target::it()
+        } else if phrase.contains("up to two") || phrase.contains("one or two") {
+            // "On each of up to two other target creatures you control".
+            let mut t = read_target(phrase.rsplit("target ").next().unwrap_or("creature"), false);
+            t.count = 2;
+            t.other = phrase.contains("other");
+            t
         } else if phrase.starts_with("each ") && phrase.contains("you control") {
             // "Each creature you control", "each other Merfolk you control", "each creature
             // you control with flying".
@@ -1712,6 +1737,35 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             to: read_target("player", false),
             until_eot: false,
         });
+    }
+    // "Destroy target permanent. Its controller creates a 3/3 green Beast creature token."
+    if gave {
+        if let Some(c) = Regex::new(r"(?:its controller|their controller) creates? an? (\d+)/(\d+)")
+            .ok()
+            .and_then(|re| re.captures(full).map(|c| format!("{}/{}", &c[1], &c[2])))
+        {
+            out.push(Effect::Rule(format!("its controller gets a {} token", c)));
+        }
+    }
+    // Graveyard hate: "exile up to one target card from a graveyard", "exile target player's
+    // graveyard".
+    if s.contains("exile target player's graveyard")
+        || s.contains("exile each opponent's graveyard")
+        || s.contains("exile all cards from target player's graveyard")
+    {
+        out.push(Effect::Rule("exiles a graveyard".into()));
+    } else if s.starts_with("exile")
+        && (s.contains("card from a graveyard")
+            || s.contains("cards from a single graveyard")
+            || s.contains("card from an opponent's graveyard")
+            || s.contains("target card from a graveyard"))
+        && !s.contains("creature card from a graveyard")
+    {
+        out.push(Effect::Rule("exiles a graveyard card".into()));
+    }
+    // "You may play an additional land this turn".
+    if s.contains("play an additional land this turn") {
+        out.push(Effect::Rule("extra land drop".into()));
     }
     // Only a quoted ability: it's given to something else (an emblem, a token, an equipped
     // creature) - named, but not counted as this card's own effect.
@@ -2426,6 +2480,7 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                     a.modes.extend(std::iter::repeat_n(k as u8, e.len()));
                     a.effects.extend(e);
                 }
+                a.mode_texts = modes.clone();
                 // Modes that only pick targets ("• Target creature card.") with the effect in
                 // the header ("Choose up to two. Return those cards ... to your hand.").
                 if a.effects.is_empty() {
@@ -2443,6 +2498,7 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                     }
                     a.modal = false;
                     a.modes.clear();
+                    a.mode_texts.clear();
                 } else {
                     a.modal = true;
                 }
@@ -2803,6 +2859,7 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
                     once: false,
                     modal: false,
                     modes: Vec::new(),
+                    mode_texts: Vec::new(),
                     text: line.clone(),
                 });
             }
@@ -2822,6 +2879,7 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
             || line.contains("activate only once") && !line.contains("only once each turn"),
         modal: false,
         modes: Vec::new(),
+        mode_texts: Vec::new(),
         text: line.clone(),
     };
     let body: String;

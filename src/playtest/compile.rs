@@ -296,6 +296,8 @@ pub struct SimAbility {
     pub modal: bool,
     /// The mode each effect belongs to (modal abilities).
     pub modes: Vec<u8>,
+    /// Each mode's own text (lower case, "~" for the card).
+    pub mode_texts: Vec<String>,
     pub effects: Vec<Effect>,
     /// Lower-case rules text (for X values and details).
     pub text: String,
@@ -357,6 +359,10 @@ pub struct SimCard {
     pub produces: u8,
     pub mana_amount: u8,
     pub enters_tapped: bool,
+    /// "Enters tapped unless you control a planeswalker / two or more other lands".
+    pub enters_tapped_unless: Option<Cond>,
+    /// "~ doesn't untap during your untap step" (Traxos; Bombur unless an enduring story).
+    pub no_untap: bool,
     pub equip: Option<u8>,
     pub crew: Option<u8>,
     /// Cycling cost and what it finds: "" = draws a card, "land" = a basic land, or a
@@ -385,6 +391,8 @@ pub struct SimCard {
     pub cost_reduction: Option<(u8, Filter)>,
     /// A mana ability: {T}: Add ... (rocks, dorks, Treasures-like permanents).
     pub mana_ability: bool,
+    /// What its mana ability counts ("Elf you control", "~'s power"), if it does.
+    pub mana_count: Option<String>,
     pub abilities: Vec<SimAbility>,
     pub back: Option<BackFace>,
     /// Rough worth of the card on its own (for the AI's quick estimates).
@@ -928,6 +936,11 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 } else {
                     (0..a.effects.len() as u8).collect()
                 },
+                mode_texts: if a.modal {
+                    a.mode_texts.clone()
+                } else {
+                    Vec::new()
+                },
                 effects: a.effects.clone(),
                 text: a.text.clone(),
                 until_eot: a.text.contains("until end of turn"),
@@ -1007,6 +1020,26 @@ fn color_bits(text: &str) -> u8 {
         m = 0b11111;
     }
     m
+}
+
+/// "This land enters tapped unless you control a planeswalker": what keeps it untapped.
+fn enters_tapped_unless(text: &str) -> Option<Cond> {
+    let i = text.find("enters tapped unless you control ")?;
+    let what = &text[i + "enters tapped unless you control ".len()..];
+    Some(if what.starts_with("two or more other lands") {
+        // Counted with itself already on the battlefield.
+        Cond::ControlLands(3)
+    } else if what.starts_with("a planeswalker") {
+        Cond::HasPlaneswalker
+    } else {
+        let w = what
+            .trim_start_matches("an ")
+            .trim_start_matches("a ")
+            .split([' ', '.', ','])
+            .next()
+            .unwrap_or("");
+        Cond::Control(w.to_string(), false)
+    })
 }
 
 /// How many counters a permanent enters with.
@@ -1127,19 +1160,29 @@ pub fn compile(card: &Card) -> SimCard {
     }
     let kw_words = &parsed.keywords;
     let mut kw = keyword_bits(kw_words);
-    if front_text.contains("~ can't be blocked")
+    // A line of its own: "This creature can't block." (`own_text` has the card as "~"; a
+    // condition or "this turn" makes it something else).
+    let own_line = |s: &str| own_text.lines().any(|l| l.trim() == s);
+    if own_line("~ can't be blocked.")
+        || front_text.contains("~ can't be blocked")
         || front_text.contains("can't be blocked.") && front_text.starts_with("~")
     {
         kw |= UNBLOCKABLE;
     }
-    if front_text.contains("~ can't block")
+    if own_line("~ can't block.")
+        || front_text.contains("~ can't block")
         || front_text.contains("can't block.") && !front_text.contains("target")
     {
         kw |= CANT_BLOCK;
     }
+    // The first number after the keyword ("equip—{2}, pay 2 life" is 2, not 22).
     let kw_num = |key: &str| {
         kw_words.iter().find(|k| k.starts_with(key)).map(|k| {
-            let digits: String = k.chars().filter(|c| c.is_ascii_digit()).collect();
+            let digits: String = k
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             digits.parse::<u8>().unwrap_or(2)
         })
     };
@@ -1185,6 +1228,11 @@ pub fn compile(card: &Card) -> SimCard {
     if types & T_LAND != 0 && !land_mana && !mana_ability {
         produces = 0;
     }
+    // "Add one mana of the chosen color" (Uncharted Haven, Heraldic Banner): whichever colour
+    // the deck needs.
+    if (land_mana || mana_ability) && front_text.contains("mana of the chosen color") {
+        produces = 0b11111;
+    }
     let mana_amount = abilities
         .iter()
         .filter(|a| matches!(a.trig, Trig::Activated { tap: true, .. }))
@@ -1194,6 +1242,32 @@ pub fn compile(card: &Card) -> SimCard {
             _ => None,
         })
         .unwrap_or(1);
+    // "Add {G} for each Elf you control", "add X mana, where X is ~'s power": counted when
+    // it's tapped.
+    let mana_count = abilities
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.trig,
+                Trig::Activated {
+                    tap: true,
+                    mana: 0,
+                    ..
+                }
+            )
+        })
+        .filter(|a| {
+            a.effects
+                .iter()
+                .any(|e| matches!(e, Effect::AddMana(n) if n.x))
+        })
+        .find_map(|a| {
+            a.text
+                .split("for each ")
+                .nth(1)
+                .or_else(|| a.text.split("where x is ").nth(1))
+                .map(|r| r.trim_end_matches('.').to_string())
+        });
     let harmful_aura = types & T_AURA != 0
         && abilities.iter().any(|a| {
             a.text.starts_with("enchanted creature")
@@ -1269,7 +1343,14 @@ pub fn compile(card: &Card) -> SimCard {
         produces,
         mana_amount,
         enters_tapped: front_text.contains("enters tapped") && !front_text.contains("unless"),
-        equip: (types & T_EQUIPMENT != 0).then(|| kw_num("equip").unwrap_or(2)),
+        enters_tapped_unless: enters_tapped_unless(&own_text),
+        no_untap: own_text.contains("~ doesn't untap during your untap step"),
+        // "Equip {3}. This ability costs {1} less ..." isn't a keyword line.
+        equip: (types & T_EQUIPMENT != 0).then(|| {
+            kw_num("equip")
+                .or_else(|| number_after(&front_text, "equip {"))
+                .unwrap_or(2)
+        }),
         crew: kw_words
             .iter()
             .any(|k| k.starts_with("crew"))
@@ -1309,6 +1390,7 @@ pub fn compile(card: &Card) -> SimCard {
         storied: kw_words.iter().any(|k| k == "storied"),
         cost_reduction,
         mana_ability,
+        mana_count,
         abilities,
         back: back_face(card, parsed),
         value: 0.0,

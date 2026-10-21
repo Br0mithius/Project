@@ -329,7 +329,7 @@ impl<'a> Game<'a> {
             let Some(&(ctrl, kw, _, cmd, toxic)) = src_info.get(&src) else {
                 continue;
             };
-            let n = if self.doubles(ctrl as usize, "damage") {
+            let n = if self.doubles_from(ctrl as usize, "damage", Some(src)) {
                 n * 2
             } else {
                 n

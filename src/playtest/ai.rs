@@ -1138,9 +1138,10 @@ pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usiz
     let mut v: Vec<(f32, usize)> = (0..n_modes)
         .filter(|&m| m >= 32 || used & (1 << m) == 0)
         .map(|m| {
+            let text = ab.mode_texts.get(m).unwrap_or(&ab.text);
             let val: f32 = (0..ab.effects.len())
                 .filter(|&k| mode(k) == m)
-                .map(|k| effect_now(g, ctx.ctrl, &ab.effects[k], &ab.text, ctx.src))
+                .map(|k| effect_now(g, ctx.ctrl, &ab.effects[k], text, ctx.src))
                 .sum();
             (val, m)
         })
@@ -1703,7 +1704,7 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
         if !g.players[p].alive || g.alive_count() <= 1 {
             return;
         }
-        if g.players[p].lands_played == 0 {
+        if g.players[p].lands_played < g.land_drops(p) {
             if let Some(h) = choose_land(g, p) {
                 g.play_land(p, h);
                 continue;

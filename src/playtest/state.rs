@@ -132,6 +132,11 @@ pub struct Player<'a> {
     pub attacked_this_turn: bool,
     pub gained_life_turn: bool,
     pub lost_life_turn: bool,
+    /// Extra land drops this turn ("you may play an additional land this turn").
+    pub extra_lands: u8,
+    /// Life gained and cards discarded this turn (amounts).
+    pub life_gained_turn: i32,
+    pub discarded_turn: u8,
     pub enduring_story: bool,
     /// An opponent controls this player's next turn (MSH Plans).
     pub hijacked: bool,
@@ -223,6 +228,12 @@ pub struct Game<'a> {
     pub last_discarded: i32,
     /// Permanents that got +1/+1 counters during the ability resolving ("those creatures").
     pub last_countered: Vec<u32>,
+    /// Permanents the last destroy effect destroyed ("for each creature destroyed this way").
+    pub last_destroyed: i32,
+    /// Cards the last draw effect drew ("the number of cards drawn this way").
+    pub last_drawn: i32,
+    /// What the last targeted effect chose ("target creature ... it gains ...").
+    pub last_targets: Vec<u32>,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -253,6 +264,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             once: false,
             modal: false,
             modes: Vec::new(),
+            mode_texts: Vec::new(),
             effects,
             text: text.to_string(),
             until_eot: false,
@@ -277,6 +289,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             once: false,
             modal: false,
             modes: Vec::new(),
+            mode_texts: Vec::new(),
             effects,
             text: String::new(),
             until_eot: false,
@@ -645,6 +658,16 @@ impl<'a> Game<'a> {
             // A land without a mana ability (Evolving Wilds) isn't a source.
             let land = land && (c.produces != 0 || c.mana_ability);
             if land || c.mana_ability && !(x.is_creature() && x.sick && !x.has(HASTE)) {
+                let amount = match &c.mana_count {
+                    Some(what) if what.contains("power") => x.p.clamp(0, 10) as u8,
+                    Some(what) => self
+                        .count_of(p, Some(x.id), what)
+                        .map_or(c.mana_amount, |k| k.clamp(0, 10) as u8),
+                    None => c.mana_amount,
+                };
+                if amount == 0 {
+                    continue;
+                }
                 out.push((
                     i,
                     if c.produces == 0 && land {
@@ -652,7 +675,7 @@ impl<'a> Game<'a> {
                     } else {
                         c.produces
                     },
-                    c.mana_amount.max(1),
+                    amount.max(1),
                     false,
                 ));
             }
@@ -793,6 +816,7 @@ impl<'a> Game<'a> {
         }
         self.players[p].life += n;
         self.players[p].gained_life_turn = true;
+        self.players[p].life_gained_turn += n;
         self.emit(Ev::GainLife, p, None);
     }
 
@@ -1077,6 +1101,11 @@ impl<'a> Game<'a> {
         if c.is(T_LAND) && c.enters_tapped {
             self.perms[i].tapped = true;
         }
+        if let Some(cond) = &c.enters_tapped_unless {
+            if !self.cond_holds(cond, ctrl, Some(i)) {
+                self.perms[i].tapped = true;
+            }
+        }
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
         }
@@ -1186,6 +1215,9 @@ impl<'a> Game<'a> {
 
     /// An event about player `p` (drawing, gaining life, landfall...).
     pub fn emit(&mut self, ev: Ev, p: usize, subject: Option<u32>) {
+        if ev == Ev::Discard {
+            self.players[p].discarded_turn = self.players[p].discarded_turn.saturating_add(1);
+        }
         let snap = subject
             .and_then(|id| self.idx(id))
             .map(|i| self.perms[i].clone());
@@ -1497,6 +1529,26 @@ impl<'a> Game<'a> {
                 break;
             }
         }
+    }
+
+    /// Lands `p` may play this turn: one, plus "you may play an additional land on each of
+    /// your turns" permanents and one-off extra drops.
+    pub fn land_drops(&self, p: usize) -> u8 {
+        let statics = self
+            .perms
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.ctrl as usize == p)
+            .filter(|(i, x)| {
+                self.abilities_of(x).iter().any(|a| {
+                    a.trig == Trig::Static
+                        && a.text
+                            .contains("play an additional land on each of your turns")
+                        && self.cond_holds(&a.cond, p, Some(*i))
+                })
+            })
+            .count() as u8;
+        1 + statics + self.players[p].extra_lands
     }
 
     /// "You can't lose the game" (Herald of Eternal Dawn).
