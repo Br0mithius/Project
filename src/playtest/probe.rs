@@ -858,3 +858,87 @@ pub fn probe(card: &Card) -> String {
     }
     out.join("\n")
 }
+
+/// Every card's probe, minus the board description, in name order: the reference the
+/// snapshot test compares against.
+pub fn snapshot(db: &crate::db::CardDb) -> String {
+    let mut cards: Vec<&Card> = db.cards.iter().collect();
+    cards.sort_by(|a, b| a.name.cmp(&b.name));
+    cards.dedup_by(|a, b| a.name == b.name);
+    cards
+        .iter()
+        .map(|c| {
+            probe(c)
+                .lines()
+                .filter(|l| !l.starts_with("BOARD:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n"
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    fn by_card(text: &str) -> BTreeMap<String, String> {
+        text.split("\n\n")
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                let name = s
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .split(" | ")
+                    .next()
+                    .unwrap_or("");
+                (name.to_string(), s.to_string())
+            })
+            .collect()
+    }
+
+    /// What the simulator does with every card is pinned in `data/probe_snapshot.txt`, so
+    /// a change to how any card plays can't slip in unnoticed. After checking that each
+    /// listed change is right, accept them with
+    /// `UPDATE_PROBE_SNAPSHOT=1 cargo test --release probe_snapshot`.
+    #[test]
+    fn probe_snapshot() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+        let db = crate::db::CardDb::load(&dir.join("cards.json")).unwrap();
+        let now = super::snapshot(&db);
+        let path = dir.join("probe_snapshot.txt");
+        if std::env::var_os("UPDATE_PROBE_SNAPSHOT").is_some() {
+            std::fs::write(&path, &now).unwrap();
+            return;
+        }
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
+        if old == now {
+            return;
+        }
+        let (a, b) = (by_card(&old), by_card(&now));
+        let mut changed = Vec::new();
+        for (name, text) in &b {
+            match a.get(name) {
+                Some(t) if t == text => {}
+                Some(t) => changed.push(format!("--- {}\n{}\n+++ now\n{}", name, t, text)),
+                None => changed.push(format!("+++ new card\n{}", text)),
+            }
+        }
+        for name in a.keys().filter(|n| !b.contains_key(*n)) {
+            changed.push(format!("--- removed: {}", name));
+        }
+        panic!(
+            "{} card(s) now play differently. Check each, then accept with \
+             UPDATE_PROBE_SNAPSHOT=1 cargo test --release probe_snapshot\n\n{}",
+            changed.len(),
+            changed
+                .iter()
+                .take(15)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        );
+    }
+}
