@@ -131,6 +131,8 @@ impl<'a> Game<'a> {
                 Some(self.players[me].life)
             } else if m.starts_with("amount of life you gained this turn") {
                 Some(self.players[me].life_gained_turn)
+            } else if m.starts_with("amount of mana spent to cast that spell") {
+                self.casting.map(|(r, _)| self.card(r).mv as i32)
             } else if m.starts_with("difference") {
                 // "If you have fewer than ten cards in hand, draw cards equal to the difference".
                 Some((10 - self.players[me].hand.len() as i32).max(0))
@@ -259,6 +261,13 @@ impl<'a> Game<'a> {
         // Zones other than the battlefield.
         if p.starts_with("opponent") {
             return Some(self.opponents(me).len() as i32);
+        }
+        if p.starts_with("graveyard with seven or more cards") {
+            return Some(
+                (0..self.players.len())
+                    .filter(|&o| alive(o) && self.players[o].graveyard.len() >= 7)
+                    .count() as i32,
+            );
         }
         if p.contains("discarded this way") {
             return Some(self.last_discarded);
@@ -1690,6 +1699,10 @@ impl<'a> Game<'a> {
                         .into_iter()
                         .collect()
                 };
+                // "Untap target creature you control. It gets +2/+2" (Vow to Erebor).
+                if t.kind != Kind::It && !ids.is_empty() {
+                    self.last_targets = ids.clone();
+                }
                 for id in ids {
                     if let Some(i) = self.idx(id) {
                         self.perms[i].tapped = false;
@@ -2938,14 +2951,16 @@ fn draw_then_discard(text: &str) -> Option<(i32, i32)> {
     };
     let i = text.find("draw")?;
     let rest = &text[i..];
-    let j = rest.find("then discard")?;
-    let (draw_part, disc_part) = (&rest[..j], &rest[j + "then discard".len()..]);
+    let (j, key) = ["then discard", "if you do, discard"]
+        .iter()
+        .find_map(|k| rest.find(k).map(|j| (j, k.len())))?;
+    let (draw_part, disc_part) = (&rest[..j], &rest[j + key..]);
     if draw_part.contains('.') && !draw_part.trim_end().ends_with('.') {
         return None;
     }
     let mut words = draw_part.split_whitespace();
     words.next(); // "draw" / "draws"
-    let d = if draw_part.contains("cards equal to") {
+    let d = if draw_part.contains("cards equal to") || draw_part.contains("where x is") {
         -1
     } else {
         word(words.next()?)?

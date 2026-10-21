@@ -476,10 +476,25 @@ impl<'a> Game<'a> {
                             let per_each = a.text.split("for each ").nth(1).and_then(|rest| {
                                 self.count_of(src.ctrl as usize, Some(src.id), rest)
                             });
+                            // "+2/+0 for every seven cards in your graveyard".
+                            let per_each = per_each.or_else(|| {
+                                let rest = a.text.split("for every ").nth(1)?;
+                                let (n, what) = rest.split_once(' ')?;
+                                let n = match n {
+                                    "two" => 2,
+                                    "three" => 3,
+                                    "five" => 5,
+                                    "seven" => 7,
+                                    d => d.parse().ok()?,
+                                };
+                                // (Not scaled by the reader: three "units" per step.)
+                                self.count_of(src.ctrl as usize, Some(src.id), what)
+                                    .map(|k| 3 * (k / n))
+                            });
                             match per_each {
                                 Some(k) => (
-                                    (*power / 3 * k) as i16,
-                                    (*toughness / 3 * k) as i16,
+                                    (*power * k / 3) as i16,
+                                    (*toughness * k / 3) as i16,
                                     0,
                                     false,
                                     Some(to),
