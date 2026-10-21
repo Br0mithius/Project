@@ -343,6 +343,22 @@ impl<'a> Game<'a> {
             until_eot: ab.until_eot,
             overload: pend.overloaded,
         };
+        // "Any opponent may sacrifice a creature. If a player does, tap ~ and ..."
+        // (Desecration Demon): an opponent feeds it a spare creature to tap it down; if
+        // nobody has one to spare, nothing happens and it attacks.
+        if ab.text.contains("any opponent may sacrifice") {
+            let payer = self
+                .opponents(me)
+                .into_iter()
+                .find_map(|o| ai::fodder(self, o, T_CREATURE, u32::MAX));
+            let Some(i) = payer else { return };
+            self.sacrifice(i);
+            if ab.text.contains("tap ~") {
+                if let Some(s) = pend.source.and_then(|id| self.idx(id)) {
+                    self.perms[s].tapped = true;
+                }
+            }
+        }
         if ab.optional && !ai::wants_optional(self, &ctx, ab) {
             return;
         }

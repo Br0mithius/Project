@@ -648,13 +648,14 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         When::EachTurn => Trig::Phase {
             phase: if t.contains("end step") {
                 Phase::End
-            } else if t.contains("beginning of combat") {
+            } else if t.contains("beginning of combat") || t.contains("beginning of each combat") {
                 Phase::Combat
             } else {
                 Phase::Upkeep
             },
             any_player: t.contains("each upkeep")
                 || t.contains("each end step")
+                || t.contains("each combat")
                 || t.contains("each player's")
                 || t.contains("each opponent's"),
         },
