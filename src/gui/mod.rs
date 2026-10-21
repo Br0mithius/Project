@@ -4,6 +4,7 @@
 use eframe::egui;
 mod cards;
 mod images;
+mod opponents;
 
 use crate::analysis::{self, SimResult, curve_label};
 use crate::card::{BASIC_FOR_COLOR, COLORS, Card, ColorSet, Role};
@@ -273,13 +274,14 @@ impl GuiApp {
             Collection::new(data_dir.join("collection.txt"), Default::default())
         });
         let rules_path = data_dir.join("rules.json");
-        let rules = if rules_path.exists() {
+        let mut rules = if rules_path.exists() {
             Rules::load(&rules_path)
         } else {
             let mut r = Rules::default();
             let _ = league::apply_session(&mut r, league::upcoming_session().number);
             r
         };
+        rules.data_dir = Some(data_dir.clone());
         let current = paths::decks_dir(&data_dir).join("_current.txt");
         let deck = Deck::load(&current, &db).unwrap_or_else(|_| Deck::new("my deck"));
         let deck_name = if deck.name == "_current" {
@@ -3160,6 +3162,7 @@ impl GuiApp {
                     self.rev += 1;
                 }
             });
+        self.opponents_section(ui);
         ui.collapsing("Advanced: change rules by hand", |ui| {
             let mut changed = false;
             ui.horizontal(|ui| {

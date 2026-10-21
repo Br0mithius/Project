@@ -144,6 +144,16 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Who opens Marvel / Hobbit packs (pack odds, playtest opponents), e.g. `roster 2 3 hob`",
     ),
     (
+        "opponents",
+        "[player|refresh]",
+        "Simulated opponents' decks with their season logs (drafts, cuts, trades, claims)",
+    ),
+    (
+        "opponent",
+        "<player> commander <card> | deck <file> | clear",
+        "Pin an opponent's real commander or decklist for playtests",
+    ),
+    (
         "trade",
         "[vp] [rare|mythic]",
         "Plan Public Pool trade-ins (default 10 VP minimum)",
@@ -212,7 +222,7 @@ impl App {
         db.attach_ratings(&data_dir);
         let coll = Collection::load(&data_dir.join("collection.txt"))?;
         let rules_path = data_dir.join("rules.json");
-        let rules = if rules_path.exists() {
+        let mut rules = if rules_path.exists() {
             Rules::load(&rules_path)
         } else {
             // First run: use the rules for the next league session.
@@ -220,6 +230,7 @@ impl App {
             let _ = league::apply_session(&mut r, league::upcoming_session().number);
             r
         };
+        rules.data_dir = Some(data_dir.clone());
         let current = crate::paths::decks_dir(&data_dir).join("_current.txt");
         let deck = if current.exists() {
             Deck::load(&current, &db).map(|mut d| {
@@ -319,6 +330,14 @@ impl App {
             "upgrades" | "upgrade" => self.upgrades(),
             "publicpool" => self.public_pool(rest),
             "roster" => self.roster(rest),
+            "opponents" => println!("{}", crate::opponents::command(&self.db, &self.rules, rest)),
+            "opponent" => {
+                println!(
+                    "{}",
+                    crate::opponents::pin_command(&self.db, &self.rules, rest)
+                );
+                *self.ranking.borrow_mut() = None;
+            }
             "vp" => self.vp(),
             "own" => self.own(rest, 1),
             "unown" => self.own(rest, -1),

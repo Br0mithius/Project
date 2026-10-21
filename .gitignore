@@ -12,3 +12,6 @@ data/ratings_downloaded.txt
 data/collection.backup.txt
 data/public_pool.txt
 .claude/worktrees/
+data/opponents.json
+data/gauntlet_cache.json
+data/gauntlet_cache.json.tmp*

@@ -492,6 +492,9 @@ fn parts_for(
     )
 }
 
+/// Seeds of the two simulated seasons the playtest opponents come from.
+pub const GAUNTLET_SEEDS: [u64; 2] = [2026, 4242];
+
 /// What every option is tested against: opponent decks for the playtest and how many
 /// games to play. Built once per ranking.
 pub struct TestBed {
@@ -505,13 +508,10 @@ impl TestBed {
         TestBed {
             // Opponents from two independent sets of simulated pools, so the result doesn't
             // hinge on one lucky or unlucky draw of the other players' packs.
-            gauntlet: [
-                crate::playtest::gauntlet(db, rules, 2026),
-                crate::playtest::gauntlet(db, rules, 4242),
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
+            gauntlet: GAUNTLET_SEEDS
+                .iter()
+                .flat_map(|&seed| crate::playtest::gauntlet(db, rules, seed))
+                .collect(),
             // 600 full games per option: noise ~0.017 against a spread of ~0.08 between
             // options, and a full ranking in under a minute on 4 cores.
             games: 600,
@@ -768,7 +768,7 @@ pub fn build_count(db: &CardDb, coll: &Collection, rules: &Rules) -> usize {
 /// Changes to any of these mean the ranking must be rebuilt.
 pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
         coll.total(),
         coll.counts.len(),
         rules.deck_size,
@@ -779,7 +779,8 @@ pub fn ranking_key(db: &CardDb, coll: &Collection, rules: &Rules) -> String {
         db.commander_stats.len(),
         db.edhrec.fetched,
         db.edhrec.commander_count(),
-        rules.roster
+        rules.roster,
+        crate::opponents::inputs_stamp(rules)
     )
 }
 

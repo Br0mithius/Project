@@ -2268,36 +2268,13 @@ pub fn win_rate(
     wins as f32 / games.max(1) as f32
 }
 
-/// Opponent decks for playtesting: one per other player in the league, auto-built from a
-/// simulated pool of the packs that player has by this point of the season (their own
-/// Marvel / Hobbit mix from `rules.roster`).
+/// Opponent decks for playtesting: one per other player in the league, from a simulation
+/// of their season up to `rules.session` (their packs, drafts, rebuilds and Public Pool
+/// trades - see `season`), with any real commanders or decklists pinned in
+/// `data/opponents.json`. Cached per inputs (see `opponents`).
 pub fn gauntlet(db: &CardDb, rules: &Rules, seed: u64) -> Vec<Prepared> {
-    let mut rng = Rng::new(seed);
-    let mut out = Vec::new();
-    for player in &rules.roster.others {
-        // A pool with no legendary creature can't make a deck; reopen (rare).
-        for _ in 0..4 {
-            let pool = crate::packs::simulated_pool(db, player, rules.session.max(1), &mut rng);
-            let best = db
-                .cards
-                .iter()
-                .filter(|c| {
-                    c.can_be_commander() && c.name != crate::deck::PIPER && pool.owned(&c.name) > 0
-                })
-                .map(|c| {
-                    let colors = crate::analysis::best_colors(c, db, &pool, rules);
-                    (
-                        crate::analysis::pool_quality_for(c, colors, db, &pool, rules),
-                        c,
-                    )
-                })
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            if let Some((_, cmd)) = best {
-                let deck = crate::analysis::autobuild(cmd, db, &pool, rules, None, None).0;
-                out.push(Prepared::new(&deck, db));
-                break;
-            }
-        }
-    }
-    out
+    crate::opponents::decks(db, rules, seed)
+        .iter()
+        .map(|d| Prepared::new(d, db))
+        .collect()
 }

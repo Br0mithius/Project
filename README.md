@@ -28,7 +28,7 @@ See `dist/README-windows.txt` for a tour. To rebuild the zip from Linux: `tools/
 | Trades & VP | Trade-in plan for the 10 VP minimum (with the rarity floor), VP prices, Skill Tree costs, Shop |
 | Upgrades | Cards that would improve your deck: what to claim from the Public Pool now (VP cost, rarity floor, a trade-in plan to pay for it) and what could come in the packs still to be handed out, with the odds that you, your draft table, or anyone in the league opens it |
 | Stats & Playtest | Mana curve vs. targets, colour sources, roles, weakest cards, 20,000-hand simulation, sample hands |
-| Season & Rules | The Season 2 schedule; picking a session sets deck size (60/75) and singleton |
+| Season & Rules | The Season 2 schedule; picking a session sets deck size (60/75) and singleton; the simulated opponents' decks and season logs, with pinning of their real commanders |
 | My Pool | Import from Mana Mixer, add/remove cards you own, copy your pool for Mana Mixer |
 
 Card images (full art, high resolution) come from [Scryfall](https://scryfall.com). Each one is downloaded the first
@@ -58,7 +58,9 @@ cargo run --release --bin msh-cli   # the same tools as a typed command line
 
 Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
 `trade 10 rare`, `export mixer`, `import pool.txt`, `ratings`, `update-cards`, `why red hulk`, `upgrades`,
-`publicpool pool.txt`, `roster`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts;
+`publicpool pool.txt`, `roster`, `opponents`, `opponent 3 commander Gandalf, Wandering Wizard`, `help`.
+`cargo run --release --example testbed_timing -- data` times building the simulated opponents (fresh and cached) and
+prints one opponent's season log. `cargo run --release --example rank_timing -- data` times the ranking's parts;
 `cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool;
 `compare_builds -- data "Thanos, the Mad Titan" WBR WUBRG` playtests one commander in several colour sets (win rate,
 mana sources, opening hands); `score_cards -- data "<commander>" "<card>"...` shows how cards score for that deck;
@@ -77,6 +79,8 @@ see whether a card plays the way its text says. Add `COMPARE_GAMES=4800` before 
 | `data/edhrec.json`, `data/scryfall_tags.json` | Saved EDHREC ranks and commander pages, and Scryfall Tagger tags. `data/edhrec_log.txt` lists every EDHREC request of the last update and how it went. |
 | `data/public_pool.txt` | The league's Public Pool, pasted from Mana Mixer (Upgrades tab or `publicpool <file>`). |
 | `data/rules.json` | Format rules, created when you change one with `rules <key> <value>`. |
+| `data/opponents.json` | What you know about other players (real commanders, decklists), set with `opponent`. |
+| `data/gauntlet_cache.json` | The simulated opponents' seasons, cached (safe to delete; `opponents refresh`). |
 | `decks/*.txt` | Saved decks (`decks/_current.txt` is the auto-saved working deck). |
 
 ## Format rules (defaults - change with `rules`)
@@ -181,8 +185,8 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   (wants ~6) - ability rarely works". The same check marks other payoff cards in a deck as weak when their enablers
   are missing, and in the playtest "if equipped" abilities only work when Equipment is attached. Before Session 6 the same ranking is also run
   under singleton rules as a preview. `why <commander>` in the command line shows the breakdown.
-* **Playtest** (`src/playtest/`) plays each deck in 600 full 4-player Commander games against decks auto-built from two
-  independent sets of simulated league pools (random packs, the same number you have by this point of the season), so
+* **Playtest** (`src/playtest/`) plays each deck in 600 full 4-player Commander games against the other seven
+  players' decks from two independent simulations of their season so far (see **Simulated opponents** below), so
   one lucky or unlucky draw of the other players' packs can't swing it. Every deck faces the same opponents and
   shuffles.
   - **The game:** library, hand, graveyard, exile and command zone; colour-exact mana from each land and rock;
@@ -216,6 +220,34 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   all Marvel, one player 3 Marvel / 6 Hobbit at kickoff, five all Hobbit. That's why Hobbit cards can show up as
   upgrades for a Marvel player: they can be drafted from a table-mate's pack. The same mix shapes the simulated
   opponents in playtests (one deck per other player, from their own packs).
+* **Simulated opponents** (`src/season.rs`, `src/opponents.rs`) keep up with the league instead of staying on their
+  kickoff packs. The other seven players' season is played out together, session by session, up to the session
+  you're building for:
+  - **Packs** on the schedule (kickoff, Reality Fracture, Nauctis once it's in the database). Sessions 2-4 are
+    **table drafts**: everyone (you as an extra seat) is seated at random in pods of four, opens their weekly pack
+    and picks in turn, each player taking the top of the Draft Helper's ranking for their current deck.
+  - **A rebuild after every session**: a player keeps their commander unless another one's pool quality is 15%
+    better, swaps new cards in for their weakest ones while it's an upgrade, and rebuilds from scratch for a new
+    commander, the 75-card decks (Session 10) or singleton (from Session 6).
+  - **A trading round every session** against one shared simulated Public Pool, which starts as the Foundations
+    starter kit (one of each card) and grows with everyone's trade-ins. Players take turns claiming (who goes first
+    rotates each session), up to 3 claims each, best upgrade for their deck first (it must beat their weakest card);
+    each claim costs 2x its VP, a rare needs a rare and a mythic a mythic or two rares traded in that same round, one
+    copy per card, and claimed cards leave the pool. Spare cards are traded in cheapest-loss first (the Trades tab's
+    planner), always at least 10 VP; unspent VP is banked, and the next Skill Tree staple (5, 10, 15... VP) is bought
+    when it beats the deck's weakest card. Traded-in cards join the pool after the round.
+  - **This session's claims use your real Public Pool** when you've imported it (Upgrades tab or `publicpool`).
+  - The `opponents` command (or **Season & Rules > Simulated opponents**) lists each opponent's deck and a
+    session-by-session log: packs and notable openings, draft picks, cards in and cut, trade-ins, claims, staples, VP.
+  - **Pin what you know**: `opponent <player> commander <card>` (player by name or number from `roster`) makes the
+    simulation build that player around their real commander from the kickoff on; `opponent <player> deck <file>`
+    uses their real decklist as-is (its commander is simulated too); `opponent <player> clear` goes back to the
+    simulation. In the app, type the commander under the player and press Pin. Pins are kept in `data/opponents.json`.
+  - Simulating takes a moment the first time on 4 cores (about 1 s for Session 2's two opponent sets, 4-7 s mid-season,
+    12 s for the finale), then the decks come from `data/gauntlet_cache.json` in about 50 ms. The cache is keyed by
+    everything the result depends on (session and rules, seed, roster, pins, the imported Public Pool, the card
+    data), so it rebuilds by itself when any of them change; `opponents refresh` (or "Simulate again") forces it.
+    Everything is deterministic for a seed, and nothing goes online.
 * **Lands**: the league's 25-27 at 60 cards (scaled for 75), low end for cheap curves; basics are split by coloured pips.
 * **Simulation** shuffles the deck thousands of times to estimate opening-hand land counts, land drops by turn, and the
   odds of casting your commander on curve.

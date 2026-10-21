@@ -358,6 +358,11 @@ pub struct Rules {
     /// simulated opponents in playtests).
     #[serde(default)]
     pub roster: crate::packs::Roster,
+    /// The data folder these rules belong to (not saved): where the simulated opponents
+    /// read pinned opponent info and the Public Pool, and cache their season. `None` =
+    /// pure simulation.
+    #[serde(skip)]
+    pub data_dir: Option<PathBuf>,
 }
 
 fn yes() -> bool {
@@ -383,16 +388,19 @@ impl Default for Rules {
             session: 0,
             piper_free: true,
             roster: crate::packs::Roster::default(),
+            data_dir: None,
         }
     }
 }
 
 impl Rules {
     pub fn load(path: &Path) -> Rules {
-        fs::read_to_string(path)
+        let mut r: Rules = fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        r.data_dir = path.parent().map(Path::to_path_buf);
+        r
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
