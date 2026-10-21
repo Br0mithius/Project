@@ -204,17 +204,55 @@ impl Card {
         symbols_in(&self.mana_cost)
     }
 
-    /// Coloured pips in the mana cost, WUBRG order. Hybrid symbols count for both colours.
+    /// Coloured pips the mana cost requires, WUBRG order. Hybrid symbols ({U/B}: blue or
+    /// black) aren't counted - either colour pays them (see `hybrid`).
     pub fn pips(&self) -> [u32; 5] {
         let mut out = [0; 5];
         for sym in self.cost_symbols() {
-            for part in sym.split('/') {
-                if let Some(i) = COLORS.iter().position(|c| part == c.to_string()) {
-                    out[i] += 1;
-                }
+            if let Some(i) = COLORS.iter().position(|c| sym == c.to_string()) {
+                out[i] += 1;
             }
         }
         out
+    }
+
+    /// Hybrid symbols in the mana cost, each as the colours that can pay it ({U/B} -> UB).
+    pub fn hybrid(&self) -> Vec<ColorSet> {
+        self.cost_symbols()
+            .iter()
+            .filter(|s| s.contains('/'))
+            .map(|s| {
+                s.split('/')
+                    .filter(|p| p.len() == 1)
+                    .filter_map(|p| p.chars().next())
+                    .filter(|c| COLORS.contains(c))
+                    .fold(ColorSet(0), |acc, c| acc.union(ColorSet::from_char(c)))
+            })
+            .filter(|c| c.count() >= 2)
+            .collect()
+    }
+
+    /// Can be cast with mana of these colours: every plain pip's colour is there, and every
+    /// hybrid symbol has at least one of its colours (Ghost's {2}{U/B} is castable in a black
+    /// deck).
+    pub fn castable_with(&self, colors: ColorSet) -> bool {
+        self.cost_colors().is_subset_of(colors) && self.hybrid().iter().all(|h| h.0 & colors.0 != 0)
+    }
+
+    /// Castable with these colours, and its abilities' coloured costs ("{G}: Regenerate")
+    /// can be paid too.
+    pub fn playable_with(&self, colors: ColorSet) -> bool {
+        if !self.castable_with(colors) {
+            return false;
+        }
+        symbols_in(&strip_reminder(
+            &self.oracle_text.split("// Back face:").next().unwrap_or(""),
+        ))
+        .iter()
+        .filter(|s| s.len() == 1)
+        .filter_map(|s| s.chars().next())
+        .filter(|c| COLORS.contains(c))
+        .all(|c| colors.contains(COLORS.iter().position(|x| *x == c).unwrap()))
     }
 
     pub fn identity(&self) -> ColorSet {
@@ -674,6 +712,14 @@ mod tests {
         );
         assert_eq!(c.pips(), [0, 0, 0, 2, 0]);
         assert_eq!(c.identity().to_string(), "RG");
+        // Hybrid: either colour pays it, but both count for colour identity.
+        let ghost = card("{2}{U/B}", "Creature — Spirit", "");
+        assert_eq!(ghost.pips(), [0; 5]);
+        assert!(ghost.castable_with(ColorSet::parse("B").unwrap()));
+        assert!(ghost.castable_with(ColorSet::parse("U").unwrap()));
+        assert!(!ghost.castable_with(ColorSet::parse("R").unwrap()));
+        assert!(!c.playable_with(ColorSet::parse("R").unwrap()));
+        assert!(c.playable_with(ColorSet::parse("RG").unwrap()));
         assert!(c.can_be_commander());
         assert_eq!(c.subtypes(), vec!["Villain"]);
     }

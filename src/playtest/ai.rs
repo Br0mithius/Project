@@ -184,6 +184,40 @@ fn threat_uncached(g: &Game, o: usize) -> f32 {
 
 /// How much `me` wants to hurt opponent `o`: the biggest threat, whoever attacked it, and
 /// whoever is close to dead.
+/// Mana value of a permanent for "odd or even" checks (tokens are 0; token copies keep the
+/// copied card's).
+pub fn perm_mv(g: &Game, x: &Perm) -> u8 {
+    x.card.map(|r| g.card(r).mv).unwrap_or(0)
+}
+
+/// Thanos's power-up: "Choose odd or even. Destroy each other creature with mana value of the
+/// chosen quality." The parity (true = odd) that's best for `p` - opponents' creatures lost,
+/// weighted by how threatening their controller is, minus `p`'s own - and its net value.
+pub fn best_parity(g: &Game, p: usize, src: Option<u32>) -> (bool, f32) {
+    let net = |odd: bool| -> f32 {
+        g.perms
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.is_creature() && Some(x.id) != src && !x.has(INDESTRUCTIBLE))
+            .filter(|(_, x)| (perm_mv(g, x) % 2 == 1) == odd)
+            .map(|(i, x)| {
+                let o = x.ctrl as usize;
+                if o == p {
+                    -perm_value(g, i)
+                } else {
+                    perm_value(g, i) * weight(g, p, o) * 0.8
+                }
+            })
+            .sum()
+    };
+    let (odd, even) = (net(true), net(false));
+    if odd >= even {
+        (true, odd)
+    } else {
+        (false, even)
+    }
+}
+
 pub fn weight(g: &Game, me: usize, o: usize) -> f32 {
     if o == me || !g.players[o].alive {
         return 0.0;
@@ -909,6 +943,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         }
     };
     match e {
+        Effect::Destroy(_) if text.contains("odd or even") => best_parity(g, p, src).1,
         Effect::Destroy(t) => opp_value(t, &|x| !x.has(INDESTRUCTIBLE)),
         Effect::Exile { target, .. } => opp_value(target, &|_| true),
         Effect::Damage { amount, to } => {

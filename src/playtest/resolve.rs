@@ -581,6 +581,24 @@ impl<'a> Game<'a> {
         let me = ctx.ctrl;
         let text = ctx.text;
         match e {
+            Effect::Destroy(_) if text.contains("odd or even") => {
+                // Thanos: pick the parity that hurts the table most and spares the most of
+                // our own; "each other creature" never includes the source.
+                let (odd, _) = ai::best_parity(self, me, ctx.src);
+                let ids: Vec<u32> = self
+                    .perms
+                    .iter()
+                    .filter(|x| x.is_creature() && Some(x.id) != ctx.src)
+                    .filter(|x| (ai::perm_mv(self, x) % 2 == 1) == odd)
+                    .map(|x| x.id)
+                    .collect();
+                self.note(|| format!("P{} chooses {}", me, if odd { "odd" } else { "even" }));
+                for id in ids {
+                    if let Some(i) = self.idx(id) {
+                        self.destroy(i);
+                    }
+                }
+            }
             Effect::Destroy(t) => {
                 let harmful = t.whose != Whose::Yours;
                 for id in self.choose(ctx, t, harmful) {

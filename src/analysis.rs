@@ -564,7 +564,7 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
                     .fold(0, |acc, i| acc | (1 << i)),
             )
             .union(cmd.cost_colors());
-            if !card.cost_colors().is_subset_of(cast) {
+            if !card.castable_with(cast) {
                 score -= 1.0;
                 why.push("adds a new colour".into());
             }
@@ -1507,7 +1507,7 @@ pub fn suggestions_within<'a>(
             Some(id) if rules.enforce_color_identity => c.identity().is_subset_of(id),
             _ => true,
         })
-        .filter(|c| colors.is_none_or(|lim| c.identity().is_subset_of(lim)))
+        .filter(|c| colors.is_none_or(|lim| c.playable_with(lim)))
         .map(|c| {
             let (score, reasons) = score_card(c, deck, db, rules);
             Scored {
@@ -1644,7 +1644,7 @@ pub fn pool_quality_for(
     for c in db
         .cards
         .iter()
-        .filter(|c| !c.is_land() && c.identity().is_subset_of(colors))
+        .filter(|c| !c.is_land() && c.playable_with(colors))
     {
         let n = available(c, &deck, coll, rules);
         if n == 0 || n >= 99 {
@@ -1719,7 +1719,7 @@ pub fn rank_commanders<'a>(
         for c in db
             .cards
             .iter()
-            .filter(|c| !c.is_land() && c.identity().is_subset_of(plays))
+            .filter(|c| !c.is_land() && c.playable_with(plays))
         {
             let n = available(c, &deck, coll, rules);
             if n == 0 || n >= 99 || c.name == cmd.name {

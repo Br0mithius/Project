@@ -70,17 +70,26 @@ pub const T_SAGA: u16 = 1 << 11;
 pub const T_TOKEN: u16 = 1 << 12;
 pub const T_BASIC: u16 = 1 << 13;
 
-/// A mana cost: generic plus coloured pips (WUBRG order).
+/// Bit for "can make colourless mana ({C})" in a source's colour mask (WUBRG are bits 0-4).
+pub const COLORLESS: u8 = 1 << 5;
+
+/// A mana cost: generic plus coloured pips (WUBRG order), {C} that only colourless mana
+/// pays, and hybrid symbols (each a mask of the colours that can pay it).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Mana {
     pub generic: u8,
     pub pips: [u8; 5],
     pub x: bool,
+    pub colorless: u8,
+    pub hybrid: [u8; 3],
 }
 
 impl Mana {
     pub fn total(&self) -> u32 {
-        self.generic as u32 + self.pips.iter().map(|&p| p as u32).sum::<u32>()
+        self.generic as u32
+            + self.pips.iter().map(|&p| p as u32).sum::<u32>()
+            + self.colorless as u32
+            + self.hybrid.iter().filter(|&&h| h != 0).count() as u32
     }
 
     pub fn generic(n: u32) -> Mana {
@@ -90,15 +99,30 @@ impl Mana {
         }
     }
 
-    /// Reads "{2}{U}{U}" (hybrid and Phyrexian symbols count as generic).
+    /// Reads "{2}{U}{U}", "{C}" and hybrid "{U/B}" (Phyrexian and {2/W} symbols count as
+    /// generic).
     pub fn parse(cost: &str) -> Mana {
         let mut m = Mana::default();
         for sym in crate::card::symbols_in(cost) {
             let s = sym.to_uppercase();
+            let colour = |p: &str| {
+                crate::card::COLORS
+                    .iter()
+                    .position(|c| p.len() == 1 && p.starts_with(*c))
+            };
             if let Ok(n) = s.parse::<u8>() {
                 m.generic = m.generic.saturating_add(n);
             } else if s == "X" {
                 m.x = true;
+            } else if s == "C" {
+                m.colorless += 1;
+            } else if let Some((a, b)) = s.split_once('/')
+                && let (Some(i), Some(j)) = (colour(a), colour(b))
+            {
+                match m.hybrid.iter().position(|&h| h == 0) {
+                    Some(slot) => m.hybrid[slot] = (1 << i) | (1 << j),
+                    None => m.generic = m.generic.saturating_add(1),
+                }
             } else if let Some(i) = crate::card::COLORS
                 .iter()
                 .position(|c| s.len() == 1 && s.starts_with(*c))
@@ -205,7 +229,8 @@ pub enum Trig {
         life: u8,
         sorcery: bool,
     },
-    PowerUp(u8),
+    /// Power-up (CR 702.193) with its full mana cost, colours included.
+    PowerUp(Mana),
     Loyalty(i8),
     Chapter(u8),
     /// "When you do": fires from its card's counters or a choice (see `SimAbility::counter_goal`).
@@ -725,7 +750,17 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             },
             sorcery: t.contains("only as a sorcery"),
         },
-        When::PowerUp(c) => Trig::PowerUp(c.mana.min(255) as u8),
+        When::PowerUp(c) => {
+            // The parser keeps only the total; read the coloured cost from the text
+            // ("power-up — {c}{w}{u}{b}{r}{g}: ...").
+            let cost_text = t.split(':').next().unwrap_or("");
+            let m = Mana::parse(cost_text);
+            Trig::PowerUp(if m.total() > 0 {
+                m
+            } else {
+                Mana::generic(c.mana)
+            })
+        }
         When::Loyalty(n) => Trig::Loyalty((*n).clamp(-20, 20) as i8),
         When::Chapter(n) => Trig::Chapter((*n).min(10) as u8),
         When::Reflexive => Trig::Reflexive,
@@ -926,12 +961,16 @@ pub fn compile(card: &Card) -> SimCard {
         0
     };
     if (types & T_LAND != 0 || mana_ability) && produces == 0 {
-        // Colourless or "a colour among..." sources: count as the card's colours, else generic.
+        // "A colour among..." sources: count as the card's colours.
         produces = if card.identity().0 != 0 && types & T_LAND != 0 {
             card.identity().0 & 0b11111
         } else {
             0
         };
+    }
+    // Sources of {C} (Thanos's power-up and other {C} costs need one).
+    if (types & T_LAND != 0 || mana_ability) && (card.makes_colorless() || produces == 0) {
+        produces |= COLORLESS;
     }
     let mana_amount = abilities
         .iter()

@@ -617,6 +617,25 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        // {C}: only colourless sources; hybrid: either colour.
+        let wanted: Vec<u8> = std::iter::repeat_n(COLORLESS, cost.colorless as usize)
+            .chain(cost.hybrid.iter().copied().filter(|&h| h != 0))
+            .collect();
+        for mask in wanted {
+            let pick = srcs
+                .iter()
+                .enumerate()
+                .filter(|(i, s)| !used[*i] && s.1 & mask != 0)
+                .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
+                .map(|(i, _)| i);
+            match pick {
+                Some(i) => {
+                    used[i] = true;
+                    extra_generic += srcs[i].2 as u32 - 1;
+                }
+                None => return None,
+            }
+        }
         let mut need = (cost.generic as u32).saturating_sub(extra_generic);
         let mut pool = self.players[p].pool;
         while need > 0 && pool > 0 {

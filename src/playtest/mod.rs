@@ -541,16 +541,26 @@ impl<'a> Game<'a> {
                 }
                 Some(Mana::generic(*mana as u32))
             }
-            Trig::PowerUp(n) => {
+            Trig::PowerUp(full) => {
                 if x.powered {
                     return None;
                 }
-                let less = if x.born == self.round {
-                    x.card.map(|r| self.card(r).mv as u32).unwrap_or(0)
-                } else {
-                    0
-                };
-                Some(Mana::generic((*n as u32).saturating_sub(less)))
+                // The turn it entered, the cost is reduced by the permanent's mana cost:
+                // its coloured pips come off matching pips, the rest off generic.
+                let mut cost = *full;
+                if x.born == self.round {
+                    if let Some(r) = x.card {
+                        let own = self.card(r).cost;
+                        let mut spare = own.generic as u32;
+                        for i in 0..5 {
+                            let off = own.pips[i].min(cost.pips[i]);
+                            cost.pips[i] -= off;
+                            spare += (own.pips[i] - off) as u32;
+                        }
+                        cost = cost.minus_generic(spare);
+                    }
+                }
+                Some(cost)
             }
             Trig::Loyalty(n) => {
                 if x.loyalty_used || x.loyalty + (*n as i16) < 0 {

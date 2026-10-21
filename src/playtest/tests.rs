@@ -549,6 +549,56 @@ fn adventures_and_power_up() {
 }
 
 #[test]
+fn thanos_power_up_needs_its_colours_and_picks_the_better_parity() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Thanos, the Mad Titan",
+            "Island",
+            "Forest",
+            "Cryptic Caves",
+            "K'un-Lun Warrior",
+            "Madame Masque",
+            "Misty Knight, Hero for Hire",
+            "Swamp",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    // Me: Thanos (3) and K'un-Lun Warrior (2). Opponent: Madame Masque (5), Misty Knight (2).
+    let thanos = put(&mut g, 0, 0);
+    let kunlun = put(&mut g, 0, 4);
+    let masque = put(&mut g, 1, 5);
+    let misty = put(&mut g, 1, 6);
+    let i = g.idx(thanos).unwrap();
+    let k = g
+        .abilities_of(&g.perms[i])
+        .iter()
+        .position(|a| matches!(a.trig, Trig::PowerUp(_)))
+        .unwrap();
+    // The turn he enters it costs {C}{U}{G}: black mana alone can't pay it.
+    lands(&mut g, 0, 3, 'B');
+    assert!(
+        !g.activate(0, thanos, k),
+        "needs colourless, blue and green"
+    );
+    put(&mut g, 0, 1);
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 3);
+    assert!(g.activate(0, thanos, k));
+    g.run_pending();
+    g.sba();
+    // Odd kills only the opponent's Madame Masque; even would cost my Warrior for their Misty.
+    assert!(g.idx(masque).is_none(), "odd-cost Madame Masque destroyed");
+    assert!(g.idx(kunlun).is_some(), "my even-cost creature spared");
+    assert!(g.idx(misty).is_some(), "even-cost creatures spared");
+    assert!(
+        g.idx(thanos).is_some(),
+        "\"each other creature\" spares Thanos"
+    );
+}
+
+#[test]
 fn mulligans_keep_playable_hands() {
     let lands_only = prep(&[
         Card::basic_land("Forest", 'G'),
