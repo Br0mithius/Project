@@ -743,15 +743,23 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("cast from a graveyard") || t.contains("cast it from your graveyard") {
         return Cond::CastFromGraveyard;
     }
+    // "Another" first: "if you control another Elf" is an Elf other than this one, not a
+    // permanent of type "other".
     for key in [
-        "if you control a",
-        "as long as you control a",
-        "if you control another",
-        "as long as you control another",
+        "if you control another ",
+        "as long as you control another ",
+        "if you control an ",
+        "as long as you control an ",
+        "if you control a ",
+        "as long as you control a ",
     ] {
         if let Some(i) = t.find(key) {
-            let rest = t[i + key.len()..].trim_start_matches(['n', ' ']);
-            let what: String = rest.split([' ', ',', '.']).next().unwrap_or("").to_string();
+            let rest = &t[i + key.len()..];
+            let word = rest.split([' ', ',', '.']).next().unwrap_or("");
+            // Plurals and whole words ("Elves", "Wolves") name the subtype.
+            let what = crate::restrict::subtype_word(word)
+                .map(|id| crate::restrict::subtype_name(id).to_string())
+                .unwrap_or_else(|| word.to_string());
             if !what.is_empty() {
                 return Cond::Control(what, key.contains("another"));
             }

@@ -8,8 +8,8 @@ use crate::abilities::Amount;
 use crate::restrict::{self, Dyn, Obj, Restr};
 
 impl<'a> Game<'a> {
-    /// A permanent as a restriction sees it.
-    pub fn obj<'p>(&self, x: &'p Perm) -> Obj<'p> {
+    /// A permanent as a restriction sees it (`equipped` is looked up only when asked for).
+    pub fn obj<'p>(&self, x: &'p Perm, need_equipped: bool) -> Obj<'p> {
         let probe = x.id == u32::MAX;
         Obj {
             types: x.types | if x.is_creature() { T_CREATURE } else { 0 },
@@ -24,7 +24,8 @@ impl<'a> Game<'a> {
             attacking: x.attacking,
             blocking: x.blocking,
             counters: x.counters,
-            equipped: !probe
+            equipped: need_equipped
+                && !probe
                 && self
                     .perms
                     .iter()
@@ -101,7 +102,7 @@ impl<'a> Game<'a> {
 
     /// Does permanent `x` meet restriction `r`?
     pub fn perm_ok(&self, r: &Restr, x: &Perm, d: &Dyn) -> bool {
-        r.is_empty() || r.matches(&self.obj(x), d)
+        r.is_empty() || r.matches(&self.obj(x, r.has(restrict::EQUIPPED)), d)
     }
 
     /// Does card `c` (in a graveyard, library or being cast) meet restriction `r`?

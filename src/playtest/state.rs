@@ -195,8 +195,9 @@ pub struct Game<'a> {
     pub last_ctrl: Option<u8>,
     /// The resolving ability has chosen targets ("it" is what it chose, if anything).
     pub targeted: bool,
-    /// Who is targeting, for "becomes the target of a spell or ability an opponent controls".
-    pub targeter: u8,
+    /// Whose spell or ability is acting: targeting ("becomes the target of a spell or
+    /// ability an opponent controls") or dealing noncombat damage ("a source you control").
+    pub actor: u8,
     /// Bumped whenever the board changes (`recalc`); the AI caches values per tick.
     pub tick: u64,
     /// Per permanent index: (tick, id, value).
@@ -1143,6 +1144,13 @@ impl<'a> Game<'a> {
                         continue;
                     }
                 }
+                // "Whenever a source you control deals noncombat damage to an opponent".
+                if ev == Ev::NoncombatDamage
+                    && trigger_part(&a.text).contains("you control")
+                    && self.actor != src.ctrl
+                {
+                    continue;
+                }
                 if let Some(s) = subject {
                     // Self-referential events ("whenever ~ is dealt damage", "becomes the target").
                     let about_self =
@@ -1173,7 +1181,7 @@ impl<'a> Game<'a> {
                     // "Becomes the target of a spell or ability an opponent controls".
                     if ev == Ev::Targeted
                         && trigger_part(&a.text).contains("an opponent controls")
-                        && self.targeter == src.ctrl
+                        && self.actor == src.ctrl
                     {
                         continue;
                     }

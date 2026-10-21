@@ -240,6 +240,11 @@ impl<'a> Game<'a> {
             if another && Some(x.id) == src_id {
                 continue;
             }
+            // A spell's "create a Cadet, then put a counter on each other Wizard token":
+            // other than what it just made.
+            if t.other && src_id.is_none() && self.last_targets.contains(&x.id) {
+                continue;
+            }
             if !r.is_empty() {
                 if !self.perm_ok(r, x, &d) {
                     continue;
@@ -324,7 +329,7 @@ impl<'a> Game<'a> {
                 };
                 for i in picks {
                     let id = self.perms[i].id;
-                    self.targeter = ctx.ctrl as u8;
+                    self.actor = ctx.ctrl as u8;
                     self.emit_targeted(id);
                     out.push(id);
                 }
@@ -374,7 +379,7 @@ impl<'a> Game<'a> {
             }
             let snap = self.perms[self.idx(id).unwrap_or(i).min(self.perms.len() - 1)].clone();
             if snap.id == id {
-                self.targeter = ctx.ctrl as u8;
+                self.actor = ctx.ctrl as u8;
                 self.emit_about(Ev::Targeted, snap.ctrl as usize, &snap);
             }
             out.push(id);
@@ -710,6 +715,7 @@ impl<'a> Game<'a> {
         };
         self.damage_player(ctx.ctrl, o, n, 0);
         if n > 0 && o != ctx.ctrl {
+            self.actor = ctx.ctrl as u8;
             self.emit(Ev::NoncombatDamage, o, None);
         }
         if self
@@ -866,7 +872,7 @@ impl<'a> Game<'a> {
                                 .iter()
                                 .any(|&i| self.perms[i].id == id)
                             {
-                                self.targeter = ctx.ctrl as u8;
+                                self.actor = ctx.ctrl as u8;
                                 self.emit_targeted(id);
                                 self.hurt(ctx, id, n);
                             }
@@ -1325,7 +1331,14 @@ impl<'a> Game<'a> {
             }
             Effect::Regrowth => {
                 let creature = text.contains("creature card");
-                let pick = if text.contains("return that card") || text.contains("return it") {
+                let itself = text.contains("return ~ from") || text.contains("return this card");
+                let pick = if itself {
+                    // "Return ~ from your graveyard to your hand": only the card itself.
+                    match self.returned_card(ctx) {
+                        Some(Some((o, k))) if o == me => Some(k),
+                        _ => None,
+                    }
+                } else if text.contains("return that card") || text.contains("return it") {
                     // The card that just went there (e.g. the creature that died).
                     self.players[me].graveyard.len().checked_sub(1)
                 } else {

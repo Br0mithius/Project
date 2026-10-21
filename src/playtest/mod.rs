@@ -16,6 +16,8 @@ pub mod combat;
 pub mod compile;
 pub mod probe;
 pub mod resolve;
+#[cfg(test)]
+mod restrict_tests;
 pub mod state;
 pub mod targets;
 #[cfg(test)]
@@ -143,7 +145,7 @@ impl<'a> Game<'a> {
             last_targets: Vec::new(),
             last_ctrl: None,
             targeted: false,
-            targeter: 0,
+            actor: 0,
             tick: 1,
             vcache: Default::default(),
             tcache: std::cell::RefCell::new([(0, 0.0); 8]),
