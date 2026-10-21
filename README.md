@@ -59,7 +59,10 @@ cargo run --release --bin msh-cli   # the same tools as a typed command line
 Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
 `trade 10 rare`, `export mixer`, `import pool.txt`, `ratings`, `update-cards`, `why red hulk`, `upgrades`,
 `publicpool pool.txt`, `roster`, `help`. `cargo run --release --example rank_timing -- data` times the ranking's parts;
-`cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool.
+`cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool;
+`compare_builds -- data "Thanos, the Mad Titan" WBR WUBRG` playtests one commander in several colour sets (win rate,
+mana sources, opening hands); `score_cards -- data "<commander>" "<card>"...` shows how cards score for that deck;
+`review_cards -- data <list.txt>` prints each card's rules text beside the app's reading, for checking misreads.
 
 ## Files
 
