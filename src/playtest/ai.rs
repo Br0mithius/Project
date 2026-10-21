@@ -1258,6 +1258,7 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
             -me.map_or(1.0, |i| perm_value(g, i) * 0.6)
         }
         "ends the turn" => 0.0,
+        "spells cost less this turn" | "the next spell this turn is free" => 1.0,
         // A land or artifact that becomes a creature: worth it to attack with this turn.
         "becomes a creature" => {
             let ready = me.is_some_and(|i| {
@@ -1649,7 +1650,7 @@ fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     {
         o.offspring = true;
     }
-    if (c.convoke || c.improvise) && post {
+    if (c.convoke || g.improvises(p, c)) && post {
         o.convoke = true;
     }
     let mana = g.mana_available(p);

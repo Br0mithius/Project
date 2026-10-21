@@ -77,6 +77,27 @@ pub const R_ATTACK_TAX: u32 = 1 << 16;
 /// "As long as you have an enduring story, you may pay {0} rather than pay the equip cost of
 /// the first equip ability you activate each turn" (Kíli).
 pub const R_FREE_FIRST_EQUIP: u32 = 1 << 17;
+/// "Instant and sorcery spells you control can't be countered" (Sphinx of the Final Word;
+/// Samut's split second).
+pub const R_SPELLS_UNCOUNTERABLE: u32 = 1 << 18;
+/// "Noncreature spells you cast have improvise" (Ironheart).
+pub const R_IMPROVISE: u32 = 1 << 19;
+/// "You may activate abilities of creatures you control as though those creatures had
+/// haste" (Shang-Chi).
+pub const R_ABILITIES_HASTE: u32 = 1 << 20;
+/// "Creatures your opponents control enter tapped" (Authority of the Consuls).
+pub const R_OPP_CREATURES_TAPPED: u32 = 1 << 21;
+/// "If one or more +1/+1 counters would be put on a creature you control, that many plus
+/// one" (Yoshimaru).
+pub const R_EXTRA_COUNTER: u32 = 1 << 22;
+/// "Planeswalkers you control aren't put into their owners' graveyards for having 0
+/// loyalty" (Sanctum Lurker).
+pub const R_WALKERS_STAY: u32 = 1 << 23;
+/// "If a creature an opponent controls would die, exile it instead" (Garruk, Veiled Butcher).
+pub const R_OPP_DIE_EXILE: u32 = 1 << 24;
+/// "Prevent all noncombat damage that would be dealt to other creatures you control"
+/// (Crystal Barricade).
+pub const R_PREVENT_NONCOMBAT: u32 = 1 << 25;
 
 /// The rule-changing statics in a face's rules text (card name as "~").
 pub fn rules_of(text: &str) -> u32 {
@@ -130,6 +151,36 @@ pub fn rules_of(text: &str) -> u32 {
         (
             "rather than pay the equip cost of the first equip ability",
             R_FREE_FIRST_EQUIP,
+        ),
+        (
+            "instant and sorcery spells you control can't be countered",
+            R_SPELLS_UNCOUNTERABLE,
+        ),
+        (
+            "instant and sorcery spells you control have split second",
+            R_SPELLS_UNCOUNTERABLE,
+        ),
+        ("noncreature spells you cast have improvise", R_IMPROVISE),
+        (
+            "activate abilities of creatures you control as though those creatures had haste",
+            R_ABILITIES_HASTE,
+        ),
+        (
+            "creatures your opponents control enter tapped",
+            R_OPP_CREATURES_TAPPED,
+        ),
+        ("that many plus one +1/+1 counters", R_EXTRA_COUNTER),
+        (
+            "aren't put into their owners' graveyards for having 0 loyalty",
+            R_WALKERS_STAY,
+        ),
+        (
+            "if a creature an opponent controls would die, exile it instead",
+            R_OPP_DIE_EXILE,
+        ),
+        (
+            "prevent all noncombat damage that would be dealt to other creatures you control",
+            R_PREVENT_NONCOMBAT,
         ),
     ] {
         if has(phrase) {
@@ -2098,6 +2149,16 @@ fn sim_rules(text: &str, effects: &mut Vec<Effect>) {
     {
         rule(effects, "becomes a creature");
     }
+    // Armor Wars II: "Artifact spells you cast this turn cost {1} less to cast".
+    if text.contains("spells you cast this turn cost {") {
+        rule(effects, "spells cost less this turn");
+    }
+    // World War Hulk I: "The next red or green creature spell you cast this turn can be cast
+    // without paying its mana cost".
+    if text.contains("spell you cast this turn can be cast without paying its mana cost") {
+        effects.retain(|e| !matches!(e, Effect::FreeSpell));
+        rule(effects, "the next spell this turn is free");
+    }
     if text.contains("an opponent gains control of ~") {
         rule(effects, "gives itself to an opponent");
     }
@@ -2258,6 +2319,18 @@ pub fn keyword_bits(words: &[String]) -> u32 {
         }
     }
     bits
+}
+
+/// The colour bit of one colour word ("red" -> 1 << 3), 0 for other words.
+pub fn color_word(w: &str) -> u8 {
+    match w {
+        "white" => 1,
+        "blue" => 1 << 1,
+        "black" => 1 << 2,
+        "red" => 1 << 3,
+        "green" => 1 << 4,
+        _ => 0,
+    }
 }
 
 fn color_bits(text: &str) -> u8 {

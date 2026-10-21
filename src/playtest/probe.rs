@@ -151,6 +151,8 @@ struct Snap {
     playable: Vec<usize>,
     by_toughness: Vec<bool>,
     emblems: Vec<usize>,
+    cheaper: Vec<usize>,
+    free_next: Vec<bool>,
     fog: bool,
     end_turn: bool,
     perms: Vec<PermSnap>,
@@ -196,6 +198,8 @@ fn snap(g: &Game) -> Snap {
         playable: g.players.iter().map(|p| p.playable.len()).collect(),
         by_toughness: g.players.iter().map(|p| p.toughness_damage_turn).collect(),
         emblems: g.players.iter().map(|p| p.emblems.len()).collect(),
+        cheaper: g.players.iter().map(|p| p.turn_reduction.len()).collect(),
+        free_next: g.players.iter().map(|p| p.free_next.is_some()).collect(),
         fog: g.fog,
         end_turn: g.end_turn,
         perms: g
@@ -288,6 +292,26 @@ fn rule_names(bits: u32) -> String {
             R_FREE_FIRST_EQUIP,
             "the first equip each turn is free with an enduring story",
         ),
+        (
+            R_SPELLS_UNCOUNTERABLE,
+            "your instants and sorceries can't be countered",
+        ),
+        (R_IMPROVISE, "your noncreature spells have improvise"),
+        (
+            R_ABILITIES_HASTE,
+            "your creatures' abilities ignore summoning sickness",
+        ),
+        (R_OPP_CREATURES_TAPPED, "opponents' creatures enter tapped"),
+        (R_EXTRA_COUNTER, "one extra +1/+1 counter on your creatures"),
+        (R_WALKERS_STAY, "your planeswalkers stay at 0 loyalty"),
+        (
+            R_OPP_DIE_EXILE,
+            "opponents' creatures are exiled instead of dying",
+        ),
+        (
+            R_PREVENT_NONCOMBAT,
+            "noncombat damage to your other creatures is prevented",
+        ),
     ]
     .iter()
     .filter(|(b, _)| bits & b != 0)
@@ -365,6 +389,12 @@ fn diff(a: &Snap, b: &Snap, skip: Option<u32>) -> Vec<String> {
         }
         if b.emblems[p] > a.emblems[p] {
             bits.push("gets an emblem".into());
+        }
+        if b.cheaper[p] > a.cheaper[p] {
+            bits.push("spells cost less this turn".into());
+        }
+        if b.free_next[p] && !a.free_next[p] {
+            bits.push("the next matching spell this turn is free".into());
         }
         if b.by_toughness[p] && !a.by_toughness[p] {
             bits.push("creatures deal combat damage by toughness this turn".into());

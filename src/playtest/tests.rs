@@ -2389,3 +2389,73 @@ fn copies_go_on_the_right_permanent() {
     g.recalc();
     assert!(!perm(&g, relic).is_creature(), "until end of turn");
 }
+
+#[test]
+fn more_rule_statics_and_turn_cost_changes() {
+    let db = db();
+    let mut cards: Vec<Card> = [
+        "Island",
+        "Authority of the Consuls",
+        "Yoshimaru, Beloved Companion",
+        "Head of the Hunt",
+        "World War Hulk",
+        "Armor Wars",
+        "Lightning Strike",
+    ]
+    .iter()
+    .map(|n| db.get(n).unwrap().clone())
+    .collect();
+    cards.push(card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("5", "5")),
+    ));
+    cards.push(card("Relic", "{3}", "Artifact", "", None));
+    let d = prep(&cards);
+    const GIANT: u16 = 7;
+    const RELIC: u16 = 8;
+    let mut g = game(&[&d, &d]);
+    // Authority of the Consuls: an opponent's creature enters tapped, ours doesn't.
+    put(&mut g, 0, 1);
+    let theirs = put(&mut g, 1, GIANT);
+    let ours = put(&mut g, 0, GIANT);
+    assert!(perm(&g, theirs).tapped && !perm(&g, ours).tapped);
+    // Yoshimaru: one more +1/+1 counter.
+    put(&mut g, 0, 2);
+    let i = g.idx(ours).unwrap();
+    g.add_counters(i, 1);
+    assert_eq!(perm(&g, ours).counters, 2);
+    // Head of the Hunt: an opponent's creature that would die is exiled.
+    put(&mut g, 0, 3);
+    let i = g.idx(theirs).unwrap();
+    g.destroy(i);
+    assert!(g.players[1].graveyard.is_empty());
+    assert_eq!(g.players[1].exile, vec![GIANT]);
+    // World War Hulk I: the next red or green creature spell this turn is free.
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let hulk = put(&mut g, 0, 4);
+    let k = ability(&d, 4, "without paying");
+    fire_card(&mut g, 4, k, Some(hulk));
+    g.players[0].hand = vec![GIANT, GIANT];
+    let cost = |g: &Game, h: usize| {
+        g.cast_cost(0, Src::Hand(h), CastOpts::default())
+            .unwrap()
+            .total()
+    };
+    assert_eq!(cost(&g, 0), 0);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(cost(&g, 0), 5, "only the next one");
+    // Armor Wars II: artifact spells cost {1} less this turn.
+    let saga = put(&mut g, 0, 5);
+    let k = ability(&d, 5, "this turn cost");
+    fire_card(&mut g, 5, k, Some(saga));
+    g.players[0].hand = vec![RELIC, 6];
+    assert_eq!(cost(&g, 0), 2);
+    assert_eq!(cost(&g, 1), 2, "not other spells");
+    g.take_turn(1, false);
+    g.players[0].hand = vec![RELIC];
+    assert_eq!(cost(&g, 0), 3, "only that turn");
+}

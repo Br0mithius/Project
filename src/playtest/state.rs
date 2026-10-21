@@ -216,6 +216,11 @@ pub struct Player<'a> {
     pub emblems: Vec<(CardRef, u16)>,
     /// Equip abilities activated this turn (Kíli: the first may cost {0}).
     pub equips_turn: u8,
+    /// "Artifact spells you cast this turn cost {1} less": (amount, card types).
+    pub turn_reduction: Vec<(u8, u16)>,
+    /// "The next red or green creature spell you cast this turn can be cast without paying
+    /// its mana cost": (colours, card types) it must have.
+    pub free_next: Option<(u8, u16)>,
 }
 
 pub const RETURNS: u8 = 1;
@@ -1202,8 +1207,13 @@ impl<'a> Game<'a> {
     pub fn leave(&mut self, i: usize, to: Zone, _sba: bool) {
         let perm = self.perms.remove(i);
         self.last_left = Some(perm.clone());
-        // A finality counter: dying exiles it instead (no dies triggers).
-        let to = if perm.finality && matches!(to, Zone::Graveyard) {
+        // A finality counter, or Garruk ("if a creature an opponent controls would die,
+        // exile it instead"): dying exiles it instead (no dies triggers).
+        let garruk = perm.is_creature()
+            && self.rule_anywhere(R_OPP_DIE_EXILE)
+            && (0..self.players.len())
+                .any(|o| o != perm.ctrl as usize && self.rules[o % 8] & R_OPP_DIE_EXILE != 0);
+        let to = if (perm.finality || garruk) && matches!(to, Zone::Graveyard) {
             Zone::Exile
         } else {
             to
@@ -1503,6 +1513,14 @@ impl<'a> Game<'a> {
                 self.perms[i].tapped = true;
             }
         }
+        // "Creatures your opponents control enter tapped" (Authority of the Consuls).
+        if c.is(T_CREATURE)
+            && self.rule_anywhere(R_OPP_CREATURES_TAPPED)
+            && (0..self.players.len())
+                .any(|o| o != ctrl && self.rules[o % 8] & R_OPP_CREATURES_TAPPED != 0)
+        {
+            self.perms[i].tapped = true;
+        }
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
         }
@@ -1541,6 +1559,7 @@ impl<'a> Game<'a> {
                     } else {
                         k
                     };
+                    let k = k + i32::from(self.rules[ctrl % 8] & R_EXTRA_COUNTER != 0);
                     self.perms[i].counters += k as i16;
                 }
                 "shield" => self.perms[i].shield += k as u8,
@@ -2059,7 +2078,10 @@ impl<'a> Game<'a> {
                     && (x.t <= 0
                         || (!x.has(INDESTRUCTIBLE)
                             && (x.damage >= x.t || x.deathtouched && x.damage > 0))))
-                    || (x.is(T_PLANESWALKER) && !x.is_creature() && x.loyalty <= 0)
+                    || (x.is(T_PLANESWALKER)
+                        && !x.is_creature()
+                        && x.loyalty <= 0
+                        && self.rules[x.ctrl as usize % 8] & R_WALKERS_STAY == 0)
                     || (x.is(T_AURA)
                         && x.attached
                             .is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))

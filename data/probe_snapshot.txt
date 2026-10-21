@@ -675,7 +675,7 @@ ABILITIES:
       if the condition holds -> Opp A: hand +1, library -1
       if the condition holds -> Opp B: hand +1, library -1
   Chapter(2): "ii — artifact spells you cast this turn cost {1} less to cast."
-      (no effects read)
+      -> You: spells cost less this turn
   Chapter(3): "iii — ~ deals x damage to target opponent, where x is the greatest mana value among artifacts you control."
       -> Opp B: life -1
 
@@ -835,6 +835,7 @@ ABILITIES:
 
 Authority of the Consuls | {W} | Enchantment
 TEXT: Creatures your opponents control enter tapped. / Whenever a creature an opponent controls enters, you gain 1 life.
+SIM: rules: opponents' creatures enter tapped
 On entering:
       itself: 
       -> (nothing changes)
@@ -2723,7 +2724,7 @@ ABILITIES:
 
 Crystal Barricade | {1}{W} | Artifact Creature — Wall | 0/4
 TEXT: Defender (This creature can't attack.) / You have hexproof. (You can't be the target of spells or abilities your opponents control.) / Prevent all noncombat damage that would be dealt to other creatures you control.
-SIM: keywords defender
+SIM: keywords defender; rules: noncombat damage to your other creatures is prevented
 On entering:
       itself: 0/4 defender
       -> (nothing changes)
@@ -4780,6 +4781,7 @@ ABILITIES:
 
 Garruk, Veiled Butcher | {3}{B}{B} | Legendary Planeswalker — Garruk
 TEXT: If a creature an opponent controls would die, exile it instead. / [+2]: Up to one target creature gets -4/-1 until your next turn. / [-2]: Each player sacrifices a creature of their choice. If you sacrificed a creature this way, create a 4/4 green Beast creature token with trample. / [-3]: Each opponent discards two cards. For each opponent who didn't discard two nonland cards this way, you draw a card.
+SIM: rules: opponents' creatures are exiled instead of dying
 On entering:
       itself: 
       -> (nothing changes)
@@ -4790,8 +4792,8 @@ ABILITIES:
       -> Opp A's Dragon: 6/6 -> 2/5
   Loyalty(-2): "[-2]: each player sacrifices a creature of their choice. if you sacrificed a creature this way, create a 4/4 green beast creature token with trample."
       -> You: graveyard +1
-      -> Opp A: graveyard +1
-      -> Opp B: graveyard +1
+      -> Opp A: exile +1
+      -> Opp B: exile +1
       -> Your Bear left the battlefield
       -> Opp A's Bear left the battlefield
       -> Opp B's Bear left the battlefield
@@ -5731,7 +5733,7 @@ ABILITIES:
 
 Head of the Hunt | {2}{B}{B} | Creature — Wolf | 4/3
 TEXT: Flash / If a creature an opponent controls would die, exile it instead. When you do, create a 2/2 green Wolf creature token.
-SIM: keywords flash
+SIM: keywords flash; rules: opponents' creatures are exiled instead of dying
 On entering:
       itself: 4/3 flash
       -> (nothing changes)
@@ -6492,7 +6494,7 @@ ABILITIES:
 
 Ironheart, Clever Champion | {4}{U} | Legendary Artifact Creature — Human Hero | 3/4
 TEXT: Improvise (Your artifacts can help cast this spell. Each artifact you tap after you're done activating mana abilities pays for {1}.) / Flying / Noncreature spells you cast have improvise.
-SIM: keywords flying; improvise
+SIM: keywords flying; improvise; rules: your noncreature spells have improvise
 On entering:
       itself: 3/4 flying
       -> (nothing changes)
@@ -10097,6 +10099,7 @@ ABILITIES:
 
 Samut, Tyrant of Naktamun | {1}{U} | Legendary Creature — Human Wizard | 2/1
 TEXT: Instant and sorcery spells you control have split second. (As long as a spell with split second is on the stack, players can't cast spells or activate abilities that aren't mana abilities.)
+SIM: rules: your instants and sorceries can't be countered
 On entering:
       itself: 2/1 
       -> (nothing changes)
@@ -10106,6 +10109,7 @@ ABILITIES:
 
 Sanctum Lurker | {2}{B} | Creature — Horror | 3/2
 TEXT: When this creature enters, empower Jace 1. / Planeswalkers you control aren't put into their owners' graveyards for having 0 loyalty. / Planeswalkers you control have "[+2]: This planeswalker deals 1 damage to each opponent and you gain 1 life."
+SIM: rules: your planeswalkers stay at 0 loyalty
 On entering:
       itself: 3/2 
       -> You gets Jace token
@@ -10374,7 +10378,7 @@ ABILITIES:
 
 Shang-Chi, Master of Kung Fu | {1}{G} | Legendary Creature — Human Warrior Hero | 2/2
 TEXT: You may activate abilities of creatures you control as though those creatures had haste. / {T}: Add two mana of any one color. Spend this mana only to activate abilities of creature sources.
-SIM: makes mana (colour mask 0b011111, 2 at a time)
+SIM: makes mana (colour mask 0b011111, 2 at a time); rules: your creatures' abilities ignore summoning sickness
 On entering:
       itself: 2/2 
       -> (nothing changes)
@@ -10833,7 +10837,7 @@ ABILITIES:
 
 Sphinx of the Final Word | {5}{U}{U} | Creature — Sphinx | 5/5
 TEXT: This spell can't be countered. / Flying, hexproof / Instant and sorcery spells you control can't be countered.
-SIM: keywords flying, hexproof
+SIM: keywords flying, hexproof; rules: your instants and sorceries can't be countered
 On entering:
       itself: 5/5 flying, hexproof
       -> (nothing changes)
@@ -14027,12 +14031,10 @@ World War Hulk | {3}{G}{G} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.) / I — The next red or green creature spell you cast this turn can be cast without paying its mana cost. / II — Put three +1/+1 counters on target creature you control. / III — Choose target creature you control. Until end of turn, double its power and toughness and it gains trample.
 On entering:
       itself: 
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> You: the next matching spell this turn is free
 ABILITIES:
   Chapter(1): "i — the next red or green creature spell you cast this turn can be cast without paying its mana cost."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> You: the next matching spell this turn is free
   Chapter(2): "ii — put three +1/+1 counters on target creature you control."
       -> Your Dragon: 6/6 -> 9/9, +1/+1 counters +3
   Chapter(3): "iii — choose target creature you control. until end of turn, double its power and toughness and it gains trample."
@@ -14117,6 +14119,7 @@ ABILITIES:
 
 Yoshimaru, Beloved Companion | {2}{W} | Legendary Creature — Dog | 2/2
 TEXT: If one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead. / {6}: Put a +1/+1 counter on target legendary creature.
+SIM: rules: one extra +1/+1 counter on your creatures
 On entering:
       itself: 2/2 
       -> (nothing changes)
@@ -14124,7 +14127,7 @@ ABILITIES:
   Static: "if one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead."
       (static: shown under "On entering")
   Activated (6 mana): "{6}: put a +1/+1 counter on target legendary creature."
-      -> Your Yoshimaru, Beloved Companion: 2/2 -> 3/3, +1/+1 counters +1
+      -> Your Yoshimaru, Beloved Companion: 2/2 -> 4/4, +1/+1 counters +2
 
 Yoshimaru, Scrappy Stray | {1}{G} | Legendary Creature — Dog | 1/1
 TEXT: When Yoshimaru enters, another target creature you control fights up to one target creature an opponent controls. (Each deals damage equal to its power to the other.) / {6}: Put a +1/+1 counter on target nonlegendary creature.

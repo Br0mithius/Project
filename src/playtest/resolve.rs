@@ -85,6 +85,8 @@ pub const RULES_MODELLED: &[&str] = &[
     "you get an emblem",
     "gets +N/+N until your next turn",
     "becomes a creature",
+    "spells cost less this turn",
+    "the next spell this turn is free",
     // and "you lose N life" (see `rule_modelled`)
 ];
 
@@ -1277,13 +1279,15 @@ impl<'a> Game<'a> {
         }
     }
 
-    fn add_counters(&mut self, i: usize, n: i32) {
+    pub(crate) fn add_counters(&mut self, i: usize, n: i32) {
         let p = self.perms[i].ctrl as usize;
         let id = self.perms[i].id;
         if !self.last_countered.contains(&id) {
             self.last_countered.push(id);
         }
         let n = if self.doubles(p, "counter") { n * 2 } else { n };
+        // Yoshimaru: "that many plus one".
+        let n = n + i32::from(n > 0 && self.rules[p % 8] & R_EXTRA_COUNTER != 0);
         self.perms[i].counters += n as i16;
         let snap = self.perms[i].clone();
         self.emit_about(Ev::Counters, p, &snap);
@@ -1443,6 +1447,18 @@ impl<'a> Game<'a> {
             n
         };
         if self.perms[i].protection & ctx.card.map(|c| c.colors).unwrap_or(0) != 0 {
+            return;
+        }
+        // Crystal Barricade: noncombat damage to its controller's other creatures.
+        let (owner, target) = (self.perms[i].ctrl as usize, self.perms[i].id);
+        if self.rules[owner % 8] & R_PREVENT_NONCOMBAT != 0
+            && self.perms[i].is_creature()
+            && self.perms.iter().any(|y| {
+                y.ctrl as usize == owner
+                    && y.id != target
+                    && self.perm_rules(y) & R_PREVENT_NONCOMBAT != 0
+            })
+        {
             return;
         }
         if ctx.text.contains("would die this turn, exile it instead") {
@@ -3708,6 +3724,35 @@ impl<'a> Game<'a> {
                     x.kw |= kw;
                 }
                 self.recalc();
+            }
+            "spells cost less this turn" => {
+                let Some(rest) = text.split(" cost {").nth(1) else {
+                    return;
+                };
+                let n = rest
+                    .split('}')
+                    .next()
+                    .and_then(|d| d.parse::<u8>().ok())
+                    .unwrap_or(1);
+                let what = text
+                    .split(" spells you cast this turn")
+                    .next()
+                    .unwrap_or("");
+                let types = filter_of(what).types;
+                let types = if types == 0 { 0xFFFF } else { types };
+                self.players[me].turn_reduction.push((n, types));
+            }
+            "the next spell this turn is free" => {
+                let what = text.split("the next ").nth(1).unwrap_or("");
+                let what = what.split(" spell").next().unwrap_or("");
+                let colors = what
+                    .split([' ', ','])
+                    .fold(0u8, |m, w| m | crate::playtest::compile::color_word(w));
+                let types = filter_of(what).types;
+                self.players[me].free_next = Some((
+                    if colors == 0 { 0b11111 } else { colors },
+                    if types == 0 { 0xFFFF } else { types },
+                ));
             }
             "assigns combat damage by toughness" => {
                 self.players[me].toughness_damage_turn = true;

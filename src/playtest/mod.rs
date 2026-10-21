@@ -172,6 +172,8 @@ impl<'a> Game<'a> {
                 toughness_damage_turn: false,
                 emblems: Vec::new(),
                 equips_turn: 0,
+                turn_reduction: Vec::new(),
+                free_next: None,
             })
             .collect();
         let mut g = Game {
@@ -504,11 +506,17 @@ impl<'a> Game<'a> {
                 }
             }
         }
-        if opts.convoke && (c.convoke || c.improvise) {
+        // Armor Wars II.
+        for &(n, t) in &self.players[p].turn_reduction {
+            if types & t != 0 {
+                less += n as u32;
+            }
+        }
+        if opts.convoke && (c.convoke || self.improvises(p, c)) {
             less += self.convoke_tappers(p, c).len() as u32;
         }
         cost = cost.minus_generic(less).plus_generic(tax);
-        if free_cast {
+        if free_cast || self.next_spell_free(p, c, back) {
             cost = Mana::default();
         }
         // Stashed cards: "mana of any type can be spent to cast those spells"; Inside
@@ -555,17 +563,32 @@ impl<'a> Game<'a> {
 
     /// Creatures (convoke) or artifacts (improvise) that could be tapped to help pay.
     fn convoke_tappers(&self, p: usize, c: &SimCard) -> Vec<u32> {
+        let improvise = self.improvises(p, c);
         self.perms
             .iter()
             .filter(|x| {
                 x.ctrl as usize == p
                     && !x.tapped
                     && ((c.convoke && x.is_creature())
-                        || (c.improvise && x.is(T_ARTIFACT) && !x.is_creature()))
+                        || (improvise && x.is(T_ARTIFACT) && !x.is_creature()))
                     && x.tok != Tok::Treasure
             })
             .map(|x| x.id)
             .collect()
+    }
+
+    /// World War Hulk: is this the next red or green creature spell, cast free?
+    pub fn next_spell_free(&self, p: usize, c: &SimCard, back: bool) -> bool {
+        !back
+            && self.players[p]
+                .free_next
+                .is_some_and(|(colors, types)| c.colors & colors != 0 && c.types & types != 0)
+    }
+
+    /// Does card `c` have improvise for `p` (its own, or Ironheart's for noncreature
+    /// spells)?
+    pub fn improvises(&self, p: usize, c: &SimCard) -> bool {
+        c.improvise || !c.is(T_CREATURE) && self.rules[p % 8] & R_IMPROVISE != 0
     }
 
     pub fn can_cast(&self, p: usize, src: Src, opts: CastOpts) -> bool {
@@ -613,7 +636,7 @@ impl<'a> Game<'a> {
         }
         .map(|i| self.perms[i].id);
         // Convoke / improvise: tap helpers first (the cost already counts them).
-        if opts.convoke && (c.convoke || c.improvise) && !opts.free {
+        if opts.convoke && (c.convoke || self.improvises(p, c)) && !opts.free {
             let tappers = self.convoke_tappers(p, c);
             let mut base = self
                 .cast_cost(
@@ -670,6 +693,9 @@ impl<'a> Game<'a> {
             if self.players[p].playable[k].pay_life {
                 self.lose_life(p, c.mv as i32);
             }
+        }
+        if self.next_spell_free(p, c, back) {
+            self.players[p].free_next = None;
         }
         // The card leaves its zone.
         let mut commander_slot = 0;
@@ -758,7 +784,11 @@ impl<'a> Game<'a> {
             )
         });
         // Opponents may counter it.
-        if !c.cant_be_countered && ai::respond_to_spell(self, p, (list as u8, idx), back) {
+        // (Sphinx of the Final Word, Samut: instants and sorceries can't be countered.)
+        let uncounterable = c.cant_be_countered
+            || spell_types & (T_INSTANT | T_SORCERY) != 0
+                && self.rules[p % 8] & R_SPELLS_UNCOUNTERABLE != 0;
+        if !uncounterable && ai::respond_to_spell(self, p, (list as u8, idx), back) {
             self.note(|| format!("  {} is countered", c.name));
             match src {
                 Src::Prepared(_) => {}
@@ -1033,7 +1063,11 @@ impl<'a> Game<'a> {
                 if extra.from_graveyard || extra.from_hand || ab.graveyard_only() {
                     return None;
                 }
-                if *tap && (x.tapped || (x.is_creature() && x.sick && !x.has(HASTE))) {
+                let sick = x.is_creature()
+                    && x.sick
+                    && !x.has(HASTE)
+                    && self.rules[p % 8] & R_ABILITIES_HASTE == 0;
+                if *tap && (x.tapped || sick) {
                     return None;
                 }
                 if *sac_other && self.sac_fodder(p, x.id, &ab.text).is_none() {
@@ -1612,6 +1646,8 @@ impl<'a> Game<'a> {
             pl.noncreature_spells_turn = 0;
             pl.gy_types_used = 0;
             pl.equips_turn = 0;
+            pl.turn_reduction.clear();
+            pl.free_next = None;
             pl.toughness_damage_turn = false;
             for g in pl.grudge.iter_mut() {
                 *g *= 0.8;
