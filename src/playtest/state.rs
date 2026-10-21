@@ -443,6 +443,9 @@ pub struct GameExtra {
     pub exiled_for_cost: Vec<u16>,
     /// What mana is being paid for right now (see `Game::sources`).
     pub paying: std::cell::Cell<Purpose>,
+    /// Colours (a bit each) the rest of the AI's turn plan still needs: generic costs are
+    /// paid from other sources first.
+    pub reserve: std::cell::Cell<u8>,
 }
 
 /// Per-player facts beyond the core zones and counts.
@@ -1391,7 +1394,7 @@ impl<'a> Game<'a> {
     }
 
     /// Plans paying `cost` from player `p`'s sources; returns the sources to use.
-    fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8)> {
+    fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
         let srcs = self.sources(p);
         let mut used = vec![false; srcs.len()];
         // Ramos' ten mana of mixed colours can pay several coloured pips at once.
@@ -1467,14 +1470,34 @@ impl<'a> Game<'a> {
             pool -= 1;
             need -= 1;
         }
-        for (i, s) in srcs.iter().enumerate() {
+        // Best fit: sources that make no more than what's still needed (keeping the colours
+        // the rest of the turn's plan needs, `GameExtra::reserve`), then the smallest one
+        // that covers the rest - a big source isn't burnt on a small cost.
+        let reserve = self.ext.reserve.get();
+        let mut cands: Vec<usize> = (0..srcs.len()).filter(|&i| !used[i]).collect();
+        cands.sort_by_key(|&i| {
+            let s = &srcs[i];
+            (s.3, s.1 & reserve != 0, multi[i], s.2, s.1.count_ones())
+        });
+        for &i in &cands {
             if need == 0 {
                 break;
             }
-            if !used[i] {
+            if srcs[i].2 as u32 <= need {
                 used[i] = true;
-                need = need.saturating_sub(s.2 as u32);
+                need -= srcs[i].2 as u32;
             }
+        }
+        while need > 0 {
+            let rest = cands.iter().copied().filter(|&i| !used[i]);
+            let pick = rest
+                .clone()
+                .filter(|&i| srcs[i].2 as u32 >= need)
+                .min_by_key(|&i| (srcs[i].3, srcs[i].2))
+                .or_else(|| rest.max_by_key(|&i| srcs[i].2));
+            let Some(i) = pick else { break };
+            used[i] = true;
+            need = need.saturating_sub(srcs[i].2 as u32);
         }
         if need > 0 {
             return None;
@@ -1486,6 +1509,11 @@ impl<'a> Game<'a> {
                 .map(|(_, s)| s.0)
                 .collect(),
             self.players[p].pool - pool,
+            srcs.iter()
+                .enumerate()
+                .filter(|(i, _)| used[*i])
+                .map(|(_, s)| s.2 as u32)
+                .sum(),
         ))
     }
 
@@ -1495,7 +1523,7 @@ impl<'a> Game<'a> {
 
     /// Pays a cost (taps sources, sacrifices Treasures). False if it can't be paid.
     pub fn pay(&mut self, p: usize, cost: &Mana) -> bool {
-        let Some((idxs, from_pool)) = self.plan_payment(p, cost) else {
+        let Some((idxs, from_pool, made)) = self.plan_payment(p, cost) else {
             return false;
         };
         if self.stats.is_some() {
@@ -1504,6 +1532,9 @@ impl<'a> Game<'a> {
             }
         }
         self.players[p].pool -= from_pool;
+        // Mana made beyond the cost (a multi-mana source) floats in the pool.
+        let surplus = (made + from_pool as u32).saturating_sub(cost.total());
+        self.players[p].pool = self.players[p].pool.saturating_add(surplus.min(255) as u8);
         let mut sac = Vec::new();
         for i in idxs {
             if matches!(self.perms[i].tok, Tok::Treasure | Tok::Lotus) {

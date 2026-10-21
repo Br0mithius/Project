@@ -66,7 +66,18 @@ fn kw_value(kw: u32, p: f32) -> f32 {
 fn engine_value(abilities: &[SimAbility]) -> f32 {
     let mut v = 0.0;
     for a in abilities {
-        let e: f32 = if a.modal {
+        // "Choose one that hasn't been chosen": every mode happens in turn - including
+        // "you lose the game" (Demonic Pact).
+        let e: f32 = if a.modal && a.text.contains("hasn't been chosen") {
+            if a.effects
+                .iter()
+                .any(|e| matches!(e, Effect::Rule(r) if r.contains("lose the game")))
+            {
+                -15.0
+            } else {
+                a.effects.iter().map(effect_value).sum()
+            }
+        } else if a.modal {
             a.effects.iter().map(effect_value).fold(0.0, f32::max)
         } else {
             a.effects.iter().map(effect_value).sum()
@@ -154,10 +165,20 @@ pub fn weight_peek(g: &Game, me: usize, o: usize) -> f32 {
             return v;
         }
     }
-    let opps = g.opponents(me);
-    let max = opps.iter().map(|&q| threat_peek(g, q)).fold(0.1, f32::max);
+    let max = g
+        .opponents(me)
+        .iter()
+        .map(|&q| win_score_peek(g, q))
+        .fold(f32::MIN, f32::max);
+    weight_from(g, me, o, win_score_peek(g, o) - max)
+}
+
+/// `weight`, given how `o`'s win score compares with the likeliest opponent's.
+fn weight_from(g: &Game, me: usize, o: usize, behind: f32) -> f32 {
     let low = if g.players[o].life <= 10 { 0.4 } else { 0.0 };
-    1.0 + 0.7 * threat_peek(g, o) / max + (g.players[me].grudge[o] / 15.0).min(0.5) + low
+    // The odds `o` wins, against those of the likeliest winner among our opponents: early on
+    // they're all about even, and one who merely developed first isn't singled out.
+    1.0 + behind.exp() + (g.players[me].grudge[o] / 15.0).min(0.5) + low
 }
 
 fn perm_value_uncached(g: &Game, i: usize) -> f32 {
@@ -192,7 +213,17 @@ fn perm_value_uncached(g: &Game, i: usize) -> f32 {
     if x.is(T_PLANESWALKER) {
         v += 2.0 + x.loyalty.max(0) as f32 * 0.6;
     }
-    v += engine_value(abilities) * if x.locked { 0.5 } else { 1.0 };
+    let engine = if x.powered {
+        // A used power-up does nothing more.
+        abilities
+            .iter()
+            .filter(|a| !matches!(a.trig, Trig::PowerUp(_)))
+            .map(|a| engine_value(std::slice::from_ref(a)))
+            .sum()
+    } else {
+        engine_value(abilities)
+    };
+    v += engine * if x.locked { 0.5 } else { 1.0 };
     if x.card.is_some_and(|r| g.card(r).mana_ability) && !x.is(T_LAND) {
         v += 1.5;
     }
@@ -222,6 +253,45 @@ pub fn threat(g: &Game, o: usize) -> f32 {
         g.tcache.borrow_mut()[o] = (g.tick, v);
     }
     v
+}
+
+/// How likely player `o` is to win, as a score (log-odds, up to a constant): life, cards in
+/// hand, creature power, lands and the board's value, weighted as fitted (conditional logit)
+/// to who went on to win from the start of rounds 3-9 of simulated league games. It names
+/// the eventual winner more often than the board value alone from round 5 on.
+pub fn win_score(g: &Game, o: usize) -> f32 {
+    if !g.players[o].alive {
+        return f32::MIN;
+    }
+    win_score_from(g, o, threat(g, o))
+}
+
+/// `win_score` without filling caches.
+pub fn win_score_peek(g: &Game, o: usize) -> f32 {
+    if !g.players[o].alive {
+        return f32::MIN;
+    }
+    win_score_from(g, o, threat_peek(g, o))
+}
+
+fn win_score_from(g: &Game, o: usize, threat: f32) -> f32 {
+    let pl = &g.players[o];
+    // The board: what its permanents are worth (`threat` without its hand and life terms).
+    let board = threat - pl.hand.len() as f32 * 0.4 - pl.life as f32 * 0.05;
+    let (mut power, mut lands) = (0i32, 0i32);
+    for x in g.perms.iter().filter(|x| x.ctrl as usize == o) {
+        if x.is_creature() {
+            power += x.p.max(0) as i32;
+        }
+        if x.is(T_LAND) {
+            lands += 1;
+        }
+    }
+    0.0893 * pl.life as f32
+        + 0.0779 * pl.hand.len() as f32
+        + 0.0391 * power as f32
+        + 0.1328 * lands as f32
+        + 0.0363 * board
 }
 
 fn threat_uncached(g: &Game, o: usize) -> f32 {
@@ -307,10 +377,12 @@ pub fn weight(g: &Game, me: usize, o: usize) -> f32 {
 }
 
 fn weight_uncached(g: &Game, me: usize, o: usize) -> f32 {
-    let opps = g.opponents(me);
-    let max = opps.iter().map(|&q| threat(g, q)).fold(0.1, f32::max);
-    let low = if g.players[o].life <= 10 { 0.4 } else { 0.0 };
-    1.0 + 0.7 * threat(g, o) / max + (g.players[me].grudge[o] / 15.0).min(0.5) + low
+    let max = g
+        .opponents(me)
+        .iter()
+        .map(|&q| win_score(g, q))
+        .fold(f32::MIN, f32::max);
+    weight_from(g, me, o, win_score(g, o) - max)
 }
 
 fn archenemy(g: &Game, me: usize) -> Option<usize> {
@@ -675,7 +747,15 @@ pub fn card_worth(g: &Game, p: usize, c: &SimCard) -> f32 {
         return if lands_total(g, p) >= 6 { 0.3 } else { 2.5 };
     }
     let lands = lands_in_play(g, p) as f32;
-    c.value - 0.4 * (c.mv as f32 - lands - 2.0).max(0.0)
+    // Colours its lands can't make, and mana it's far from, make a card worth less.
+    let have = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl as usize == p && x.is(T_LAND))
+        .filter_map(|x| x.card)
+        .fold(0u8, |m, r| m | g.card(r).produces);
+    let offcolour = lands >= 3.0 && pip_mask(&c.cost) & !have != 0;
+    c.value * if offcolour { 0.6 } else { 1.0 } - (c.mv as f32 - lands - 1.0).max(0.0)
 }
 
 pub fn discard_choice(g: &Game, p: usize) -> Option<usize> {
@@ -913,22 +993,25 @@ pub fn free_spell_choice(g: &Game, me: usize, limit: u8) -> Option<usize> {
 
 // ------------------------------------------------------------ mulligan
 
-fn keepable(g: &Game, p: usize) -> bool {
+/// A keepable hand: 2-5 lands and an early play its lands can cast (or 3+ lands). The
+/// first mulligan is free, so the first hand also needs an untapped land and, with only two
+/// lands, a castable early play.
+fn keepable(g: &Game, p: usize, attempt: u8) -> bool {
     let pl = &g.players[p];
-    let lands = pl
-        .hand
+    let hand: Vec<&SimCard> = pl.hand.iter().map(|&c| &pl.cards[c as usize]).collect();
+    let lands: Vec<&&SimCard> = hand.iter().filter(|c| c.is(T_LAND)).collect();
+    let n = lands.len();
+    let colours = lands.iter().fold(0u8, |m, c| m | c.produces);
+    let untapped = lands.iter().filter(|c| !c.enters_tapped).count();
+    let castable = |c: &SimCard| pip_mask(&c.cost) & !colours == 0;
+    let early = hand
         .iter()
-        .filter(|&&c| pl.cards[c as usize].is(T_LAND))
+        .filter(|c| !c.is(T_LAND) && c.mv as usize <= n.max(2) + 1 && castable(c))
         .count();
-    let early = pl
-        .hand
-        .iter()
-        .filter(|&&c| {
-            let card = &pl.cards[c as usize];
-            !card.is(T_LAND) && card.mv as usize <= lands.max(2) + 1
-        })
-        .count();
-    (2..=5).contains(&lands) && (early >= 1 || lands >= 3)
+    if !(2..=5).contains(&n) || early == 0 && n < 3 {
+        return false;
+    }
+    attempt > 0 || untapped >= 1 && (early >= 1 || n >= 4)
 }
 
 /// London mulligan (CR 103.5), with the first mulligan free as in multiplayer Commander.
@@ -947,7 +1030,7 @@ pub fn mulligan(g: &mut Game, p: usize) {
             }
         }
         g.players[p].mulligans = attempt;
-        let keep = keepable(g, p);
+        let keep = keepable(g, p, attempt);
         if g.log.is_some() {
             let pl = &g.players[p];
             let lands = pl
@@ -973,7 +1056,8 @@ pub fn mulligan(g: &mut Game, p: usize) {
             } else if attempt == 2 {
                 "not keepable, kept anyway (third hand)"
             } else {
-                "not keepable (needs 2-5 lands and an early play, or 3+ lands): mulligan"
+                "not keepable (needs 2-5 lands and an early play they can cast, or 3+ lands; \
+                 the free first hand also an untapped land): mulligan"
             };
             g.note(|| {
                 format!(
@@ -1122,6 +1206,28 @@ fn is_reactive_only(c: &SimCard) -> bool {
         })
 }
 
+/// Removing permanent `i` is worth less when it's a commander (it comes back, for more
+/// mana) or its controller is about to die anyway.
+fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
+    let x = &g.perms[i];
+    let o = x.ctrl as usize;
+    let mut f = 1.0;
+    if x.commander > 0 {
+        f *= 0.6;
+    }
+    // Our creatures that can attack now, against their life.
+    let clock: i32 = g
+        .perms
+        .iter()
+        .filter(|y| y.ctrl as usize == p && y.is_creature() && !y.tapped && !y.sick)
+        .map(|y| y.p.max(0) as i32)
+        .sum();
+    if g.players[o].life <= 3 || g.active == p && !g.in_combat && clock >= g.players[o].life * 2 {
+        f *= 0.5;
+    }
+    f
+}
+
 /// What an effect would do for player `p` right now (card points).
 fn effect_now(
     g: &Game,
@@ -1148,6 +1254,16 @@ fn effect_now(
         about: None,
     };
     let d = g.dyn_values(&card_restr, Some(&ctx), p, src);
+    // Removal (not theft or locks): see `removal_discount`.
+    let removal = matches!(
+        e,
+        Effect::Destroy(_)
+            | Effect::Exile { .. }
+            | Effect::Damage { .. }
+            | Effect::Shrink { .. }
+            | Effect::Bounce(_)
+            | Effect::Fight(_)
+    );
     let opp_value = |t: &crate::abilities::Target, kill: &dyn Fn(&Perm) -> bool| -> f32 {
         let cands = g.candidates(&ctx, t, true);
         if t.mass {
@@ -1167,7 +1283,16 @@ fn effect_now(
             cands
                 .iter()
                 .filter(|&&i| g.perms[i].ctrl as usize != p && kill(&g.perms[i]))
-                .map(|&i| perm_value(g, i) * weight(g, p, g.perms[i].ctrl as usize) * 0.8)
+                .map(|&i| {
+                    perm_value(g, i)
+                        * weight(g, p, g.perms[i].ctrl as usize)
+                        * 0.8
+                        * if removal {
+                            removal_discount(g, p, i)
+                        } else {
+                            1.0
+                        }
+                })
                 .fold(0.0, f32::max)
         }
     };
@@ -1221,7 +1346,7 @@ fn effect_now(
             .sum(),
         Effect::CounterSpell | Effect::Fog => 0.0,
         Effect::Draw { amount, .. } => {
-            1.2 * amount.n.max(1) as f32
+            2.5 * amount.n.max(1) as f32
                 + if g.players[p].hand.len() <= 1 {
                     0.6
                 } else {
@@ -1497,62 +1622,70 @@ pub fn wants_to_pay(g: &Game, ctx: &Ctx, ab: &SimAbility, pc: &PayCost) -> bool 
         .skip(pc.first as usize)
         .map(|e| effect_now(g, p, e, &ab.text, ctx.src, ab.card_restr))
         .sum();
-    let src = ctx.src.unwrap_or(u32::MAX);
+    match pay_price(g, p, ctx.src, pc) {
+        Some(None) => gain >= 0.0,
+        Some(Some(price)) => gain > price,
+        None => false,
+    }
+}
+
+/// What paying a resolving ability's cost would cost `p` (None: can't pay; Some(None):
+/// costs nothing worth counting).
+fn pay_price(g: &Game, p: usize, src_id: Option<u32>, pc: &PayCost) -> Option<Option<f32>> {
+    let src = src_id.unwrap_or(u32::MAX);
     let pl = &g.players[p];
     let price = match &pc.cost {
         ResCost::Free | ResCost::SacrificeSelf | ResCost::ExileSelf | ResCost::ExileNamed(_) => {
-            return gain >= 0.0;
+            return Some(None);
         }
         ResCost::Sacrifice { types, other } => {
-            match fodder(g, p, *types, if *other { src } else { u32::MAX }) {
-                Some(i) => perm_value(g, i) * 0.8,
-                None => return false,
-            }
+            perm_value(
+                g,
+                fodder(g, p, *types, if *other { src } else { u32::MAX })?,
+            ) * 0.8
         }
         ResCost::SacrificeOrDiscard(types) => match fodder(g, p, *types, src) {
             Some(i) => perm_value(g, i) * 0.8,
             None if !pl.hand.is_empty() => 1.0,
-            None => return false,
+            None => return None,
         },
         ResCost::Mana(m) => {
             if !g.can_pay(p, m) {
-                return false;
+                return None;
             }
             m.total() as f32 * 0.3
         }
         ResCost::Life(n) => {
             if pl.life <= *n as i32 + 5 {
-                return false;
+                return None;
             }
             *n as f32 * if pl.life < 15 { 0.3 } else { 0.1 }
         }
         ResCost::Discard => {
             if pl.hand.is_empty() {
-                return false;
+                return None;
             }
             discard_choice(g, p)
                 .map(|h| card_worth(g, p, &pl.cards[pl.hand[h] as usize]) * 0.5)
                 .unwrap_or(1.0)
         }
         ResCost::RemoveCounter { plus } => {
-            let Some(x) = ctx.src.and_then(|id| g.idx(id)).map(|i| &g.perms[i]) else {
-                return false;
-            };
+            let x = src_id.and_then(|id| g.idx(id)).map(|i| &g.perms[i])?;
             if *plus {
                 // Not the last counter keeping it alive.
                 if x.counters < 1 || x.t <= 1 {
-                    return false;
+                    return None;
                 }
                 0.8
             } else {
                 if x.other_counters < 1 {
-                    return false;
+                    return None;
                 }
                 0.0
             }
         }
     };
-    gain > price
+    Some(Some(price))
 }
 
 /// What casting a spell is worth to `p` right now.
@@ -1620,7 +1753,16 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
                     Cond::Teamwork | Cond::Gift | Cond::Kicked | Cond::Chance(_)
                 )
             {
-                v += ability_now(g, p, a, None);
+                let now = ability_now(g, p, a, None);
+                // A cost paid as it resolves: counted only if it would be paid.
+                v += match &a.pay {
+                    Some(pc) => match pay_price(g, p, None, pc) {
+                        Some(None) => now.max(0.0),
+                        Some(Some(price)) if now > price => now - price,
+                        _ => 0.0,
+                    },
+                    None => now,
+                };
             }
         }
         if commander {
@@ -1716,31 +1858,80 @@ enum Act {
     Cycle(usize),
 }
 
-/// Lands: play the one that fixes what the hand needs; tapped lands on quiet turns.
+/// Value of the best set of spells (value, mana, colours needed) castable with `budget` mana
+/// of colours `have`.
+fn spells_worth(spells: &[(f32, u32, u8)], budget: u32, have: u8) -> f32 {
+    let b = budget.min(20) as usize;
+    let mut dp = vec![0.0f32; b + 1];
+    for &(v, cost, need) in spells {
+        if need & !have != 0 || cost as usize > b {
+            continue;
+        }
+        for m in (cost as usize..=b).rev() {
+            dp[m] = dp[m].max(dp[m - cost as usize] + v);
+        }
+    }
+    dp[b]
+}
+
+/// Lands: the one that fixes what the hand needs. A tapped land is held back when an untapped
+/// one would get something cast this turn, and played on a turn whose extra mana wouldn't be
+/// used (it costs nothing then).
 fn choose_land(g: &Game, p: usize) -> Option<usize> {
     let pl = &g.players[p];
-    let missing = missing_colors(g, p);
-    let mana = g.mana_available(p) as u8;
-    let cheapest_spell = pl
-        .hand
-        .iter()
-        .map(|&c| &pl.cards[c as usize])
-        .filter(|c| !c.is(T_LAND))
-        .map(|c| c.mv)
-        .min()
-        .unwrap_or(99);
-    (0..pl.hand.len())
+    let lands: Vec<usize> = (0..pl.hand.len())
         .filter(|&h| pl.cards[pl.hand[h] as usize].is(T_LAND))
-        .max_by_key(|&h| {
-            let c = &pl.cards[pl.hand[h] as usize];
-            let fixes = (c.produces & missing).count_ones() as i32 * 10;
-            let tapped_pen = if c.enters_tapped && cheapest_spell <= mana + 1 {
-                -6
-            } else {
-                0
-            };
-            fixes + tapped_pen + c.produces.count_ones() as i32
-        })
+        .collect();
+    if lands.len() <= 1 {
+        return lands.first().copied();
+    }
+    let missing = missing_colors(g, p);
+    let mana = g.mana_available(p);
+    let have = g.sources(p).iter().fold(0u8, |m, s| m | s.1);
+    // What the hand (and command zone) could cast, with the colours it needs.
+    let mut spells: Vec<(f32, u32, u8)> = Vec::new();
+    for (h, &idx) in pl.hand.iter().enumerate() {
+        let c = &pl.cards[idx as usize];
+        if c.is(T_LAND) || is_reactive_only(c) {
+            continue;
+        }
+        if let Some(cost) = g.cast_cost(p, Src::Hand(h), CastOpts::default()) {
+            spells.push((
+                spell_value(g, p, idx, false, false),
+                cost.total(),
+                pip_mask(&cost),
+            ));
+        }
+    }
+    for (k, &(idx, _)) in pl.command.iter().enumerate() {
+        if let Some(cost) = g.cast_cost(p, Src::Command(k), CastOpts::default()) {
+            spells.push((
+                spell_value(g, p, idx, false, true),
+                cost.total(),
+                pip_mask(&cost),
+            ));
+        }
+    }
+    let now = spells_worth(&spells, mana, have);
+    let busy = lands.iter().any(|&h| {
+        let c = &pl.cards[pl.hand[h] as usize];
+        !c.enters_tapped
+            && spells_worth(
+                &spells,
+                mana + c.mana_amount.max(1) as u32,
+                have | c.produces,
+            ) > now + 0.3
+    });
+    lands.into_iter().max_by_key(|&h| {
+        let c = &pl.cards[pl.hand[h] as usize];
+        let fixes = (c.produces & missing).count_ones() as i32 * 10;
+        let tapped = match (c.enters_tapped, busy) {
+            (true, true) => -6,
+            (true, false) => 3,
+            _ => 0,
+        };
+        fixes + tapped + c.produces.count_ones() as i32
+    })
 }
 
 /// A land `p` may play from outside the hand: (true, graveyard slot) with Mole Man or
@@ -1803,6 +1994,27 @@ fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     o
 }
 
+/// A power-up's cost the turn its creature entered (reduced by the creature's mana cost:
+/// its coloured pips off matching pips, the rest off generic; Hulk's discount too).
+fn powerup_cost_on_entry(g: &Game, p: usize, c: &SimCard, full: &Mana) -> Mana {
+    let mut cost = *full;
+    let own = c.cost;
+    let mut spare = own.generic as u32;
+    for i in 0..5 {
+        let off = own.pips[i].min(cost.pips[i]);
+        cost.pips[i] -= off;
+        spare += (own.pips[i] - off) as u32;
+    }
+    let less: u32 = g
+        .perms
+        .iter()
+        .filter(|y| y.ctrl as usize == p)
+        .filter_map(|y| y.card)
+        .map(|r| g.card(r).power_up_less as u32)
+        .sum();
+    cost.minus_generic(spare + less)
+}
+
 /// Everything `p` could do at sorcery speed, with its value and mana.
 fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     let mut out = Vec::new();
@@ -1841,6 +2053,25 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 v *= 0.6;
             }
             out.push((v, cost.total(), Act::Cast(src, opts)));
+            // Cast it and use its power-up the same turn, at the reduced cost (planned as
+            // one action; `plan_turn` keeps it apart from the plain cast).
+            if !back && c.is(T_CREATURE) {
+                for a in c.abilities.iter() {
+                    let Trig::PowerUp(full) = &a.trig else {
+                        continue;
+                    };
+                    let reduced = powerup_cost_on_entry(g, p, c, full);
+                    let both = mana_sum(cost, &reduced);
+                    if !g.can_pay_for(p, &both, why) {
+                        continue;
+                    }
+                    let pu = ability_now(g, p, a, None)
+                        + 0.7 * full.total().saturating_sub(reduced.total()) as f32;
+                    if pu > 1.0 {
+                        out.push((v + pu, both.total(), Act::Cast(src, opts)));
+                    }
+                }
+            }
         };
     for (h, &idx) in pl.hand.iter().enumerate() {
         let c = &pl.cards[idx as usize];
@@ -1933,6 +2164,8 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             }
         }
     }
+    // Mana each untapped source makes (an ability that taps it costs that mana too).
+    let srcs = g.sources(p);
     for (i, x) in g.perms.iter().enumerate() {
         if x.ctrl as usize != p {
             continue;
@@ -1979,6 +2212,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 continue;
             }
             let mut v = ability_now(g, p, a, Some(x.id));
+            let mut plan_cost = cost.total();
             match &a.trig {
                 Trig::Loyalty(n) => {
                     let after = x.loyalty + *n as i16;
@@ -1998,8 +2232,24 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                     sorcery: _,
                     sac_self,
                     extra,
+                    tap,
+                    discard,
                     ..
                 } => {
+                    // A card discarded to pay for it is a card lost.
+                    if *discard {
+                        let pl = &g.players[p];
+                        v -= discard_choice(g, p)
+                            .map(|h| card_worth(g, p, &pl.cards[pl.hand[h] as usize]) * 0.8)
+                            .unwrap_or(0.0);
+                    }
+                    if *tap {
+                        plan_cost += srcs
+                            .iter()
+                            .filter(|s| s.0 == i && !s.3)
+                            .map(|s| s.2 as u32)
+                            .sum::<u32>();
+                    }
                     if *sac_self || extra.exile_self || extra.return_self {
                         // Clues and Food when there's mana to spare; other sacrifices when worth it.
                         v -= perm_value(g, i) * 0.5;
@@ -2010,17 +2260,17 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                     // Tapping helpers and spending counters aren't free either.
                     v -= 0.3 * extra.tap_others as f32 + 0.2 * extra.remove as f32;
                 }
-                Trig::PowerUp(_) => {
-                    // Cheapest the turn it enters.
+                Trig::PowerUp(full) => {
+                    // Cheapest the turn it enters: worth the mana it saves.
                     if x.born == g.round {
-                        v += 0.5;
+                        v += 0.7 * full.total().saturating_sub(cost.total()) as f32;
                     }
                 }
                 _ => {}
             }
             out.push((
                 v - 0.1 * cost.total() as f32,
-                cost.total(),
+                plan_cost,
                 Act::Activate(x.id, k),
             ));
         }
@@ -2093,23 +2343,16 @@ fn waits_for_combat(g: &Game, p: usize, act: &Act) -> bool {
     })
 }
 
-fn plan(options: &[(f32, u32, Act)], budget: u32) -> Option<(usize, f32)> {
-    plan_where(options, budget, &|_| true)
-}
-
-/// The best set of actions for the mana (a small knapsack); returns the most valuable of
-/// them that `now` allows doing at this point, and the whole set's value.
-fn plan_where(
-    options: &[(f32, u32, Act)],
-    budget: u32,
-    now: &dyn Fn(usize) -> bool,
-) -> Option<(usize, f32)> {
-    let items: Vec<usize> = (0..options.len()).filter(|&i| options[i].0 > 0.3).collect();
+/// The best set of actions for the mana (a small knapsack): the chosen options and their
+/// total value. Options in `skip` are left out.
+fn plan_set(options: &[(f32, u32, Act)], budget: u32, skip: &[usize]) -> Option<(Vec<usize>, f32)> {
+    let items: Vec<usize> = (0..options.len())
+        .filter(|&i| options[i].0 > 0.3 && !skip.contains(&i))
+        .collect();
     if items.is_empty() {
         return None;
     }
     let b = budget.min(30) as usize;
-    // dp[m] = (value, chosen items as a bitmask over `items`, up to 64 items)
     let mut dp: Vec<(f32, u64)> = vec![(0.0, 0); b + 1];
     for (k, &i) in items.iter().enumerate().take(64) {
         let (v, cost, _) = options[i];
@@ -2128,16 +2371,55 @@ fn plan_where(
     if mask == 0 {
         return None;
     }
-    // Do the chosen action that's most urgent: removal / ramp first, then the biggest.
-    let first = items
+    let chosen = items
         .iter()
         .enumerate()
         .take(64)
         .filter(|(k, _)| mask & (1 << k) != 0)
         .map(|(_, &i)| i)
-        .filter(|&i| now(i))
-        .max_by(|&a, &b| options[a].0.partial_cmp(&options[b].0).unwrap())?;
-    Some((first, total))
+        .collect();
+    Some((chosen, total))
+}
+
+/// The mana an action costs (pips included), as it would be paid now.
+fn act_cost(g: &Game, p: usize, act: &Act) -> Option<Mana> {
+    match *act {
+        Act::Cast(src, opts) => g.cast_cost(p, src, opts),
+        Act::Activate(id, k) => g.idx(id).and_then(|i| g.activation_cost(p, i, k)),
+        Act::ActivateGy(gk, k) => g.graveyard_activation_cost(p, gk, k),
+        Act::Equip(e, t) => g.equip_cost(p, e, t).map(|c| c.0),
+        Act::Cycle(h) => {
+            let pl = &g.players[p];
+            pl.hand
+                .get(h)
+                .and_then(|&c| pl.cards[c as usize].cycling.as_ref())
+                .map(|(n, _)| Mana::generic(*n as u32))
+        }
+    }
+}
+
+/// Two costs paid together.
+fn mana_sum(a: Mana, b: &Mana) -> Mana {
+    let mut m = a;
+    m.generic = m.generic.saturating_add(b.generic);
+    m.colorless = m.colorless.saturating_add(b.colorless);
+    for i in 0..5 {
+        m.pips[i] = m.pips[i].saturating_add(b.pips[i]);
+    }
+    for &h in b.hybrid.iter().filter(|&&h| h != 0) {
+        match m.hybrid.iter().position(|&x| x == 0) {
+            Some(s) => m.hybrid[s] = h,
+            None => m.generic = m.generic.saturating_add(1),
+        }
+    }
+    m
+}
+
+/// Colours an action's cost needs (pips; a bit per colour).
+fn pip_mask(m: &Mana) -> u8 {
+    (0..5)
+        .filter(|&i| m.pips[i] > 0)
+        .fold(0u8, |a, i| a | 1 << i)
 }
 
 fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
@@ -2166,8 +2448,10 @@ fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
     if cost > avail {
         return 0;
     }
-    let full = plan(opts, avail).map(|x| x.1).unwrap_or(0.0);
-    let held = plan(opts, avail - cost).map(|x| x.1).unwrap_or(0.0);
+    let full = plan_set(opts, avail, &[]).map(|x| x.1).unwrap_or(0.0);
+    let held = plan_set(opts, avail - cost, &[])
+        .map(|x| x.1)
+        .unwrap_or(0.0);
     if held + value * 0.6 >= full { cost } else { 0 }
 }
 
@@ -2225,8 +2509,115 @@ fn act_name(g: &Game, p: usize, act: &Act) -> String {
     }
 }
 
+/// The turn's plan: the best set of actions whose colours the mana can pay, and the one to
+/// do first (the most valuable). Before combat, creature spells wait for after it - unless
+/// the plan needs the mana of creatures, which would otherwise attack and not make it.
+fn plan_turn(
+    g: &Game,
+    p: usize,
+    post: bool,
+    opts: &[(f32, u32, Act)],
+    budget: u32,
+) -> Option<(usize, f32)> {
+    // A creature cast with its power-up is listed twice (with and without the power-up):
+    // plan with each version and keep the better plan.
+    let mut twins: Vec<(usize, usize)> = Vec::new();
+    for i in 0..opts.len() {
+        if let Act::Cast(..) = opts[i].2 {
+            if let Some(j) =
+                (0..i).find(|&j| format!("{:?}", opts[j].2) == format!("{:?}", opts[i].2))
+            {
+                twins.push((j, i));
+            }
+        }
+    }
+    let (set, total) = if twins.is_empty() {
+        plan_payable(g, p, opts, budget, Vec::new())?
+    } else {
+        let plain = plan_payable(g, p, opts, budget, twins.iter().map(|t| t.1).collect());
+        let both = plan_payable(g, p, opts, budget, twins.iter().map(|t| t.0).collect());
+        match (plain, both) {
+            (Some(a), Some(b)) => {
+                if b.1 > a.1 {
+                    b
+                } else {
+                    a
+                }
+            }
+            (a, b) => a.or(b)?,
+        }
+    };
+    let creature_mana = !post && {
+        let cost: u32 = set.iter().map(|&i| opts[i].1).sum();
+        let other: u32 = g
+            .sources(p)
+            .iter()
+            .filter(|s| !g.perms[s.0].is_creature())
+            .map(|s| s.2 as u32)
+            .sum::<u32>()
+            + g.players[p].pool as u32;
+        cost > other
+    };
+    let first = set
+        .iter()
+        .copied()
+        .filter(|&i| post || creature_mana || !waits_for_combat(g, p, &opts[i].2))
+        .max_by(|&a, &b| opts[a].0.partial_cmp(&opts[b].0).unwrap())?;
+    // Colours the rest of the plan needs: generic costs are paid from other sources.
+    let keep = set
+        .iter()
+        .filter(|&&i| i != first)
+        .filter_map(|&i| act_cost(g, p, &opts[i].2))
+        .fold(0u8, |a, m| a | pip_mask(&m));
+    g.ext.reserve.set(keep);
+    Some((first, total))
+}
+
+/// `plan_set`, dropping the action worth least for its mana while the set's colours can't
+/// be paid together.
+fn plan_payable(
+    g: &Game,
+    p: usize,
+    opts: &[(f32, u32, Act)],
+    budget: u32,
+    mut skip: Vec<usize>,
+) -> Option<(Vec<usize>, f32)> {
+    let fixed = skip.len();
+    loop {
+        let (set, total) = plan_set(opts, budget, &skip)?;
+        if set.len() < 2 || skip.len() >= fixed + 3 {
+            return Some((set, total));
+        }
+        let costs: Option<Vec<Mana>> = set.iter().map(|&i| act_cost(g, p, &opts[i].2)).collect();
+        let fits = costs.is_some_and(|c| {
+            let sum = c.iter().fold(Mana::default(), |a, m| mana_sum(a, m));
+            g.can_pay(p, &sum)
+        });
+        if fits {
+            return Some((set, total));
+        }
+        // Drop the action worth the least for its mana and plan again.
+        let worst = set
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                let r = |i: usize| opts[i].0 / opts[i].1.max(1) as f32;
+                r(a).partial_cmp(&r(b)).unwrap()
+            })
+            .unwrap();
+        skip.push(worst);
+    }
+}
+
 /// A main phase: land, then the best plan for the mana, re-planned after each action.
 pub fn main_phase(g: &mut Game, p: usize, post: bool) {
+    main_phase_inner(g, p, post);
+    g.ext.reserve.set(0);
+    // Mana empties from the pool between steps and phases.
+    g.players[p].pool = 0;
+}
+
+fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
     let mut failed: Vec<String> = Vec::new();
     for _ in 0..30 {
         if !g.players[p].alive || g.alive_count() <= 1 {
@@ -2260,9 +2651,8 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
             g.note(|| format!("AI P{} holds up {} mana", p, reserve));
         }
         // The whole turn is planned together; before combat, only its pre-combat parts happen.
-        let pick = plan_where(&opts, avail.saturating_sub(reserve), &|i| {
-            post || !waits_for_combat(g, p, &opts[i].2)
-        });
+        let budget = avail.saturating_sub(reserve);
+        let pick = plan_turn(g, p, post, &opts, budget);
         if g.log.is_some() {
             let mut order: Vec<usize> = (0..opts.len()).collect();
             order.sort_by(|&a, &b| opts[b].0.partial_cmp(&opts[a].0).unwrap());
@@ -2312,6 +2702,7 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
         };
         let act = opts[i].2;
         let ok = do_act(g, p, act);
+        g.ext.reserve.set(0);
         if !ok {
             g.note(|| format!("   P{} couldn't do {:?}", p, act));
         }
@@ -2484,6 +2875,10 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
         g.on_cast(o, counter);
         // Other effects on the counterspell (draw a card, etc.).
         for (k2, a) in counter.abilities.iter().enumerate() {
+            // A modal counterspell used its counter mode.
+            if a.modal && a.effects.contains(&Effect::CounterSpell) {
+                continue;
+            }
             if a.trig == Trig::Spell && a.effects.iter().any(|e| *e != Effect::CounterSpell) {
                 g.pending.push(Pending {
                     ctrl: o as u8,

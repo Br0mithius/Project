@@ -74,13 +74,17 @@ fn main() {
     // ---------------------------------------------------------------- play
     let mut played: Vec<Game> = Vec::new();
     for k in 0..games {
+        // Opponents and their seats are drawn at random for each game (seeded): fixed
+        // neighbours would confound the per-deck rates. Our seat rotates.
+        let mut picks: Vec<usize> = (1..=n).collect();
+        Rng::new(0x5EA7_0000 + k).shuffle(&mut picks);
         let decks: Vec<usize> = match &me {
             Some(_) => {
-                let mut ids: Vec<usize> = (0..3).map(|i| 1 + (k as usize + i) % n).collect();
+                let mut ids = picks[..3].to_vec();
                 ids.insert(k as usize % 4, 0);
                 ids
             }
-            None => (0..4).map(|i| 1 + (k as usize + i) % n).collect(),
+            None => picks[..4].to_vec(),
         };
         let table: Vec<&Prepared> = decks.iter().map(|&d| deck_of(d)).collect();
         let mut g =

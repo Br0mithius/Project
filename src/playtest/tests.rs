@@ -2826,3 +2826,180 @@ fn ronin_sacrifices_only_its_own_equipment() {
     assert!(g.idx(bear).is_some(), "the Bear survives");
     assert!(g.idx(dragon).is_none(), "the 4/4 gets -4/-4");
 }
+
+// ------------------------------------------------------------ casting and mana decisions
+
+fn dump_log(g: &Game) {
+    for l in g.log.iter().flatten() {
+        eprintln!("{}", l);
+    }
+}
+
+#[test]
+fn ai_plays_the_tapped_land_on_a_quiet_turn() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Bloodfell Caves").unwrap().clone(),
+        card("Ogre", "{3}{B}", "Creature — Ogre", "", Some(("4", "4"))),
+        card("Bear", "{2}{B}", "Creature — Bear", "", Some(("3", "3"))),
+        card("Elf", "{2}{G}", "Creature — Elf", "", Some(("3", "3"))),
+    ]);
+    // Two lands out, a 4-drop and an off-colour 3-drop in hand: an untapped land's mana
+    // would go unused.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].hand = vec![0, 1, 2, 4];
+    ai::main_phase(&mut g, 0, false);
+    assert!(
+        g.perms.iter().any(|x| x.card == Some((0, 1))),
+        "Bloodfell Caves played on the quiet turn"
+    );
+    // With a 3-drop to cast, the untapped land comes down and the Bear is cast.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].hand = vec![0, 1, 3];
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 3))), "Bear cast");
+    assert!(g.players[0].hand.contains(&1), "the tapped land waits");
+}
+
+#[test]
+fn ai_casts_with_its_mana_creature_instead_of_attacking() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        Card::basic_land("Swamp", 'B'),
+        db.get("Undercover Skrull").unwrap().clone(),
+        card("Bear", "{2}{B}", "Creature — Bear", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'G');
+    lands(&mut g, 0, 1, 'B');
+    put(&mut g, 0, 2);
+    g.players[0].hand = vec![3];
+    // Before combat: the 3-drop needs the Skrull's mana, so it's cast now (the Skrull
+    // would otherwise attack and the Bear stay in hand).
+    ai::main_phase(&mut g, 0, false);
+    assert!(
+        g.perms.iter().any(|x| x.card == Some((0, 3))),
+        "Bear cast before combat with the Skrull's mana"
+    );
+}
+
+#[test]
+fn ai_pays_big_costs_from_big_sources_and_floats_the_rest() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Doc Samson, Super Psychiatrist").unwrap().clone(),
+        card(
+            "Imp",
+            "{1}",
+            "Artifact Creature — Imp",
+            "",
+            Some(("1", "1")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'B');
+    let doc = put(&mut g, 0, 1);
+    // {1}: the Swamp pays, not Doc Samson's five.
+    assert!(g.pay(0, &Mana::generic(1)));
+    assert!(!perm(&g, doc).tapped, "Doc Samson isn't tapped for {{1}}");
+    // {2} needs Doc Samson (X = his power): what's left over floats in the pool.
+    let made = perm(&g, doc).p as u8;
+    assert!(made >= 3);
+    assert!(g.pay(0, &Mana::generic(2)));
+    assert_eq!(g.players[0].pool, made - 2, "surplus mana floats");
+    assert!(g.can_pay(0, &Mana::generic(made as u32 - 2)));
+}
+
+#[test]
+fn ai_uses_thanos_power_up_the_turn_he_enters() {
+    let db = db();
+    let d = prep(&[
+        db.get("Thanos, the Mad Titan").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Plains", 'W'),
+        Card::basic_land("Swamp", 'B'),
+        Card::basic_land("Island", 'U'),
+        Card::basic_land("Forest", 'G'),
+        Card::basic_land("Wastes", 'C'),
+        card("Troll", "{2}{G}", "Creature — Troll", "", Some(("4", "4"))),
+        card(
+            "Golem",
+            "{3}",
+            "Artifact Creature — Golem",
+            "",
+            Some(("4", "4")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    for k in 1..=6 {
+        put(&mut g, 0, k);
+    }
+    g.players[0].command = vec![(0, 0)];
+    // A 3-drop competes for the mana left after Thanos.
+    g.players[0].hand = vec![8];
+    let masque = put(&mut g, 1, 7);
+    let masque2 = put(&mut g, 1, 7);
+    g.log = Some(Vec::new());
+    ai::main_phase(&mut g, 0, false);
+    let thanos = g.perms.iter().find(|x| x.card == Some((0, 0)));
+    if thanos.is_none_or(|t| !t.powered) {
+        dump_log(&g);
+    }
+    assert!(thanos.is_some_and(|t| t.powered), "cast and powered up");
+    assert!(g.idx(masque).is_none() && g.idx(masque2).is_none());
+}
+
+#[test]
+fn ai_does_not_fire_the_parity_wipe_at_a_net_loss() {
+    let db = db();
+    let d = prep(&[
+        db.get("Thanos, the Mad Titan").unwrap().clone(),
+        Card::basic_land("Wastes", 'C'),
+        Card::basic_land("Plains", 'W'),
+        Card::basic_land("Island", 'U'),
+        Card::basic_land("Swamp", 'B'),
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Forest", 'G'),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+        card("Troll", "{2}{G}", "Creature — Troll", "", Some(("4", "4"))),
+    ]);
+    let mut g = Game::new(&[&d, &d, &d, &d], &Rules::default(), Rng::new(7));
+    for p in g.players.iter_mut() {
+        p.hand.clear();
+        p.library = vec![0; 30];
+        p.command.clear();
+    }
+    g.round = 6;
+    for k in 1..=6 {
+        put(&mut g, 0, k);
+    }
+    let thanos = put(&mut g, 0, 0);
+    let i = g.idx(thanos).unwrap();
+    g.perms[i].born = 1;
+    // Odd kills my Troll for one opponent's Rat; even kills nothing (and the power-up still
+    // puts two counters on Thanos).
+    let troll = put(&mut g, 0, 8);
+    let rat = put(&mut g, 1, 7);
+    ai::main_phase(&mut g, 0, false);
+    assert!(g.idx(troll).is_some(), "no wipe of my 4/4 for a 1/1");
+    assert!(g.idx(rat).is_some());
+}
+
+#[test]
+fn ai_does_not_cast_demonic_pact_without_a_way_out() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Demonic Pact").unwrap().clone(),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    g.players[0].hand = vec![1];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].hand, vec![1], "Demonic Pact stays in hand");
+}

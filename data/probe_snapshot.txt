@@ -612,7 +612,8 @@ TEXT: Flying / When this creature enters, choose one — / • Destroy target no
 SIM: keywords flying
 On entering:
       itself: 4/4 flying
-      -> You: life +4
+      -> Opp A: graveyard +1
+      -> Opp A's Relic left the battlefield
 ABILITIES:
   Enters: "when ~ enters, choose one —"
       mode 1: Opp A: graveyard +1
@@ -2529,9 +2530,9 @@ TEXT: Trample / When this creature enters, choose two — / • This creature de
 SIM: keywords trample
 On entering:
       itself: 7/5 trample
+      -> You: hand +1, library -1
       -> Opp B: graveyard +1
       -> Opp B's Knight left the battlefield
-      -> You gets 2/2 soldier wizard token 2/2
 ABILITIES:
   Enters: "when ~ enters, choose two —"
       mode 1: Opp B: graveyard +1
@@ -6270,7 +6271,7 @@ ABILITIES:
       -> Opp B: graveyard +1
       -> Opp B's Dragon left the battlefield
   Spell [may; may pays Discard for effects 0..]: "you may discard a card. if you do, draw a card."
-      -> (nothing changes)
+      -> You: library -1, graveyard +1
       if the cost is paid -> You: hand +1, library -1
 
 Infernal Vessel | {2}{B} | Creature — Human Cleric | 2/1
@@ -8990,7 +8991,7 @@ ABILITIES:
   Static: "~ enters prepared."
       (static: shown under "On entering")
   Back: Spell [may; may pays Discard for effects 0..]: "you may discard a card. if you do, draw a card."
-      -> (nothing changes)
+      -> You: library -1, graveyard +1
       if the cost is paid -> You: hand +1, library -1
 
 Pongify | {U} | Instant
