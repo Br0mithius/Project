@@ -208,6 +208,33 @@ fn kw_names(bits: u32) -> String {
         .join(", ")
 }
 
+/// "{2}{U}{U}".
+fn mana_text(m: &Mana) -> String {
+    let mut s = String::new();
+    if m.x {
+        s.push_str("{X}");
+    }
+    if m.generic > 0 || m.total() == 0 {
+        s.push_str(&format!("{{{}}}", m.generic));
+    }
+    for _ in 0..m.colorless {
+        s.push_str("{C}");
+    }
+    for &h in m.hybrid.iter().filter(|&&h| h != 0) {
+        let cs: Vec<String> = (0..5)
+            .filter(|i| h & (1 << i) != 0)
+            .map(|i| crate::card::COLORS[i].to_string())
+            .collect();
+        s.push_str(&format!("{{{}}}", cs.join("/")));
+    }
+    for (i, &n) in m.pips.iter().enumerate() {
+        for _ in 0..n {
+            s.push_str(&format!("{{{}}}", crate::card::COLORS[i]));
+        }
+    }
+    s
+}
+
 fn signed(n: i64) -> String {
     format!("{:+}", n)
 }
@@ -347,10 +374,77 @@ fn trig_label(t: &Trig) -> String {
             discard,
             life,
             sorcery,
+            extra,
         } => {
             let mut parts = Vec::new();
             if *mana > 0 {
                 parts.push(format!("{} mana", mana));
+            }
+            if extra.x > 0 {
+                parts.push(format!("{{X}} x{}", extra.x));
+            }
+            if extra.remove > 0 {
+                parts.push(format!(
+                    "remove {} {} counter(s)",
+                    extra.remove,
+                    if extra.remove_plus { "+1/+1" } else { "other" }
+                ));
+            }
+            if extra.add_counter > 0 {
+                parts.push(
+                    if extra.add_counter == 1 {
+                        "stun counter on it"
+                    } else {
+                        "a counter on it"
+                    }
+                    .into(),
+                );
+            }
+            if extra.tap_others > 0 {
+                parts.push(format!(
+                    "tap {} untapped {}",
+                    extra.tap_others,
+                    extra
+                        .tap_subtype
+                        .as_deref()
+                        .unwrap_or(if extra.tap_types == T_ARTIFACT {
+                            "artifacts"
+                        } else {
+                            "creatures"
+                        })
+                ));
+            }
+            if extra.exile_self {
+                parts.push("exile it".into());
+            }
+            if extra.return_self {
+                parts.push("return it to hand".into());
+            }
+            if extra.from_graveyard {
+                parts.push("from the graveyard, exiling it".into());
+            }
+            if extra.from_hand {
+                parts.push("from the hand".into());
+            }
+            if extra.exile_cards > 0 {
+                parts.push(format!(
+                    "exile {} other {}card(s) from the graveyard",
+                    extra.exile_cards,
+                    if extra.exile_creatures {
+                        "creature "
+                    } else {
+                        ""
+                    }
+                ));
+            }
+            if extra.black_pips > 0 {
+                parts.push(format!(
+                    "exile black cards with {}+ black pips from the graveyard",
+                    extra.black_pips
+                ));
+            }
+            if extra.boast {
+                parts.push("boast".into());
             }
             if *tap {
                 parts.push("tap".into());
@@ -431,7 +525,7 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     let snapshot = died.or_else(|| src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone()));
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
-        Some(k) if k < ab.effects.len() || ab.cond != Cond::Always => {
+        Some(k) if k < ab.mode_ranges().len() || ab.cond != Cond::Always || ab.pay.is_some() => {
             let mut ctx = Ctx {
                 ctrl: 0,
                 src,
@@ -442,19 +536,28 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 text: &ab.text,
                 until_eot: ab.until_eot,
                 overload: false,
+                x: None,
+                paid: None,
             };
-            if k < ab.effects.len() {
-                // A mode: all of its effects.
-                let mode = |j: usize| ab.modes.get(j).copied().unwrap_or(j as u8) as usize;
-                if let Some(t) = ab.mode_texts.get(k) {
-                    ctx.text = t;
+            if let Some(r) = ab.mode_ranges().get(k) {
+                // A mode reads its own bullet's text.
+                if ab.modal {
+                    ctx.text = ab.mode_text(k);
                 }
-                for j in (0..ab.effects.len()).filter(|&j| mode(j) == k) {
-                    g.apply(&ctx, &ab.effects[j]);
+                for e in &ab.effects[r.clone()] {
+                    g.apply(&ctx, e);
                 }
             } else {
-                for e in &ab.effects {
-                    g.apply(&ctx, e);
+                // A cost paid as it resolves is the payment, not an effect.
+                let cost = ab
+                    .pay
+                    .as_ref()
+                    .map(|p| p.skip_from as usize..p.first as usize)
+                    .unwrap_or(0..0);
+                for (j, e) in ab.effects.iter().enumerate() {
+                    if !cost.contains(&j) {
+                        g.apply(&ctx, e);
+                    }
                 }
             }
         }
@@ -473,6 +576,7 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 from_graveyard: false,
                 kicked: false,
                 overloaded: false,
+                x: None,
             });
         }
     }
@@ -503,6 +607,14 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
         if ab.once_per_turn {
             flags.push("once each turn".into());
         }
+        if let Some(p) = &ab.pay {
+            flags.push(format!(
+                "{}pays {:?} for effects {}..",
+                if p.optional { "may " } else { "" },
+                p.cost,
+                p.first
+            ));
+        }
         let flags = if flags.is_empty() {
             String::new()
         } else {
@@ -523,9 +635,8 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
             out.push("      (static: shown under \"On entering\")".into());
             continue;
         }
-        let n_modes = ab.modes.iter().map(|&m| m as usize + 1).max().unwrap_or(0);
-        if ab.modal && ab.effects.len() > 1 {
-            for m in 0..n_modes.max(1) {
+        if ab.modal && ab.mode_ranges().len() > 1 {
+            for m in 0..ab.mode_ranges().len() {
                 for line in fire(prep, k, back, Some(m)) {
                     out.push(format!("      mode {}: {}", m + 1, line));
                 }
@@ -534,9 +645,14 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
             for line in fire(prep, k, back, None) {
                 out.push(format!("      -> {}", line));
             }
-            if ab.cond != Cond::Always {
+            if ab.cond != Cond::Always || ab.pay.is_some() {
+                let what = if ab.cond != Cond::Always {
+                    "the condition holds"
+                } else {
+                    "the cost is paid"
+                };
                 for line in fire(prep, k, back, Some(usize::MAX)) {
-                    out.push(format!("      if the condition holds -> {}", line));
+                    out.push(format!("      if {} -> {}", what, line));
                 }
             }
         }
@@ -562,15 +678,65 @@ pub fn probe(card: &Card) -> String {
          flying (MV6), Relic (artifact), Banner (enchantment), 5 basics, 3 cards in hand, a \
          library of 10 basics and 10 Ogres, 2 creature cards (Dragon, Ogre) in the graveyard, \
          30 life. Triggers fire as if their event happened \
-         (\"it\"/\"that creature\" = your Bear). Abilities resolve as in a game; one with a condition is also forced, to show what it does when the condition holds."
+         (\"it\"/\"that creature\" = your Bear). Abilities resolve as in a game; one with a condition (or a cost paid as it resolves) is also forced, to show what it does when the condition holds (or the cost is paid). Activation costs are listed, not paid."
             .into(),
     );
     let mut sim = Vec::new();
     if c.kw != 0 {
         sim.push(format!("keywords {}", kw_names(c.kw)));
     }
-    if c.ward > 0 {
-        sim.push(format!("ward {}", c.ward));
+    if c.ward > 0 || c.ward_cost != WardCost::default() {
+        let w = &c.ward_cost;
+        let mut parts = Vec::new();
+        if c.ward > 0 {
+            parts.push(format!("{{{}}}", c.ward));
+        }
+        if w.life > 0 {
+            parts.push(format!("pay {} life", w.life));
+        }
+        if w.discard {
+            parts.push("discard a card".into());
+        }
+        if w.sacrifice > 0 {
+            parts.push(format!("sacrifice {} permanents", w.sacrifice));
+        }
+        if w.poison > 0 {
+            parts.push(format!("get {} poison", w.poison));
+        }
+        let join = if w.discard_or_mana { " or " } else { ", " };
+        sim.push(format!("ward {}", parts.join(join)));
+    }
+    if let Some(m) = &c.flashback {
+        sim.push(format!(
+            "flashback {}{}",
+            mana_text(m),
+            if c.flashback_discard {
+                ", discard a card"
+            } else {
+                ""
+            }
+        ));
+    }
+    if let Some(m) = &c.kicker {
+        sim.push(format!("kicker {}", mana_text(m)));
+    }
+    if let Some(e) = &c.extra_cost {
+        sim.push(format!("additional cost {:?}", e));
+    }
+    if let Some(e) = c.back.as_ref().and_then(|b| b.extra_cost.as_ref()) {
+        sim.push(format!("back face additional cost {:?}", e));
+    }
+    if let Some(s) = &c.self_less {
+        sim.push(format!("costs X less, X = {:?}", s));
+    }
+    if c.power_up_less > 0 {
+        sim.push(format!(
+            "other creatures' power-ups cost {} less",
+            c.power_up_less
+        ));
+    }
+    if c.behold_untapped {
+        sim.push("enters untapped if you can behold a Jace".into());
     }
     if c.produces != 0 {
         sim.push(format!(
@@ -587,14 +753,9 @@ pub fn probe(card: &Card) -> String {
     if c.protection != 0 {
         sim.push(format!("protection from colours {:#07b}", c.protection));
     }
-    for (label, m) in [
-        ("flashback", c.flashback),
-        ("kicker", c.kicker),
-        ("overload", c.overload),
-        ("sneak", c.sneak),
-    ] {
+    for (label, m) in [("overload", &c.overload), ("sneak", &c.sneak)] {
         if let Some(m) = m {
-            sim.push(format!("{} {} mana", label, m.total()));
+            sim.push(format!("{} {}", label, mana_text(m)));
         }
     }
     for (label, on) in [
@@ -607,8 +768,18 @@ pub fn probe(card: &Card) -> String {
             sim.push(label.into());
         }
     }
+    if let Some(m) = &c.equip {
+        sim.push(format!(
+            "equip {}{}",
+            mana_text(m),
+            if c.equip_life > 0 {
+                format!(", pay {} life", c.equip_life)
+            } else {
+                String::new()
+            }
+        ));
+    }
     for (label, v) in [
-        ("equip", c.equip),
         ("crew", c.crew),
         ("teamwork", c.teamwork),
         ("offspring", c.offspring),

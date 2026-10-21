@@ -222,7 +222,7 @@ pub fn ability_value(a: &Ability) -> f32 {
     let v = if a.modal {
         let mut per: Vec<f32> = Vec::new();
         for (k, v) in vals.iter().enumerate() {
-            let m = a.modes.get(k).copied().unwrap_or(k as u8) as usize;
+            let m = crate::abilities::mode_of(&a.modes, k);
             if per.len() <= m {
                 per.resize(m + 1, 0.0);
             }

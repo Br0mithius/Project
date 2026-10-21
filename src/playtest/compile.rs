@@ -232,6 +232,8 @@ pub enum Trig {
         discard: bool,
         life: u8,
         sorcery: bool,
+        /// The rest of the cost (X, counters, tapping others, exiling...).
+        extra: ActCost,
     },
     /// Power-up (CR 702.193) with its full mana cost, colours included.
     PowerUp(Mana),
@@ -240,6 +242,112 @@ pub enum Trig {
     /// "When you do": fires from its card's counters or a choice (see `SimAbility::counter_goal`).
     Reflexive,
     Static,
+}
+
+/// The parts of an activated ability's cost beyond mana, {T}, sacrificing, discarding and
+/// life.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ActCost {
+    /// Number of {X} symbols ({X}{X} = 2); X is chosen when it's activated.
+    pub x: u8,
+    /// "Remove N counters from ~" (`plus`: +1/+1 counters, otherwise other counters).
+    pub remove: u8,
+    pub remove_plus: bool,
+    /// "Remove any number of +1/+1 counters": all of them (X = how many).
+    pub remove_all: bool,
+    /// "Put a stun counter on ~" (1) / "put a page counter on ~" (2).
+    pub add_counter: u8,
+    /// "Tap N untapped artifacts / Elves you control".
+    pub tap_others: u8,
+    pub tap_types: u16,
+    pub tap_subtype: Option<String>,
+    /// "Exile ~" (from the battlefield).
+    pub exile_self: bool,
+    /// "Return ~ to its owner's hand".
+    pub return_self: bool,
+    /// "Exile ~ from your graveyard": only works from the graveyard.
+    pub from_graveyard: bool,
+    /// "Exile ~ from your hand": only works from the hand.
+    pub from_hand: bool,
+    /// "Exile N other (creature) cards from your graveyard".
+    pub exile_cards: u8,
+    pub exile_creatures: bool,
+    /// "Exile black cards ... with N or more black mana symbols" (Baron Helmut Zemo).
+    pub black_pips: u8,
+    /// Boast: only if it attacked this turn, once each turn.
+    pub boast: bool,
+}
+
+/// A cost paid while an ability resolves: "you may sacrifice another creature. If you do,
+/// ...", "remove a bait counter from ~. If you do, ...".
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResCost {
+    /// Sacrifice a permanent of these types (`other`: not the source).
+    Sacrifice {
+        types: u16,
+        other: bool,
+    },
+    /// "Sacrifice an artifact or discard a card".
+    SacrificeOrDiscard(u16),
+    SacrificeSelf,
+    Mana(Mana),
+    Life(u8),
+    Discard,
+    /// Remove a counter from the source (`plus`: a +1/+1 counter).
+    RemoveCounter {
+        plus: bool,
+    },
+    ExileSelf,
+    /// "Exile this spell and N cards named ~ from your graveyard".
+    ExileNamed(u8),
+    /// A choice that costs nothing ("you may exile the top card of your library").
+    Free,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PayCost {
+    pub cost: ResCost,
+    /// "You may" pay it (otherwise it's paid if it can be).
+    pub optional: bool,
+    /// "If it has six or more quest counters on it, sacrifice it. If you do, ...": paid
+    /// only when this holds.
+    pub cond: Option<Cond>,
+    /// Effects before this index happen anyway; the cost sentence's own effects (up to
+    /// `first`) are the payment, not effects; the rest need the payment.
+    pub skip_from: u8,
+    pub first: u8,
+}
+
+/// "As an additional cost to cast this spell, ...".
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExtraCost {
+    Sacrifice(u16),
+    Discard,
+    SacrificeOrPay(u16, Mana),
+    DiscardOrPay(Mana),
+    /// "Behold a Jace or pay {1}".
+    BeholdOrPay(String, Mana),
+}
+
+/// Ward costs that aren't (only) mana: "Ward—Pay 2 life", "Ward—Discard a card".
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WardCost {
+    pub life: u8,
+    pub discard: bool,
+    /// Discard a card *or* pay the mana (Titania).
+    pub discard_or_mana: bool,
+    pub sacrifice: u8,
+    pub poison: u8,
+}
+
+/// "This spell costs {X} less to cast, where X is ...".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SelfLess {
+    GreatestToughness,
+    GreatestPower,
+    TotalPower,
+    /// "The total power of creatures you control with flying".
+    TotalPowerFlying,
 }
 
 /// Conditions ("if", "as long as") the game can check.
@@ -281,6 +389,60 @@ pub enum Cond {
     HasShield,
     /// You control at least N Treasures.
     Treasures(u8),
+    /// You control at least N creatures (or permanents) of this type or subtype.
+    ControlCount(u8, String),
+    /// Creatures you control have total power N or greater.
+    TotalPower(u16),
+    /// The source's power is N or greater.
+    PowerAtLeast(i16),
+    /// N or more creatures died this turn.
+    CreaturesDied(u8),
+    /// An opponent has cast a spell this turn.
+    OpponentCastSpell,
+    /// An opponent lost life (was dealt damage) last turn.
+    OpponentLostLifeLastTurn,
+    /// The X paid for the spell or ability is N or more.
+    XAtLeast(i32),
+    /// An opponent (the one targeted) has exactly N life.
+    OpponentLifeExactly(i32),
+    /// The creature that triggered it has greater power or toughness than the source.
+    SubjectBigger,
+    /// The creature that triggered it (that died) was attacking.
+    SubjectWasAttacking,
+    /// The creature that triggered it (that died) was dealt damage by the source this turn.
+    SubjectHurtBySource,
+    /// The source isn't a creature right now.
+    SourceNotCreature,
+    /// The source has this creature type.
+    SourceSubtype(String),
+    /// N or more loyalty counters among Jaces you control.
+    JaceLoyalty(i16),
+    /// You activated a loyalty ability this turn.
+    LoyaltyActivated,
+    /// Any player controls a permanent of these colours.
+    AnyPermanentColor(u8),
+    /// The source has at least N counters other than +1/+1 (divinity, page...).
+    OtherCountersAtLeast(i16),
+    /// The source is attacking.
+    SourceAttacking,
+    /// The source dealt combat damage to a player this turn.
+    SourceHitThisTurn,
+    /// The source hasn't dealt combat damage yet.
+    SourceNeverHit,
+    /// You scried or surveilled this turn.
+    Scried,
+    /// Exactly one creature you control is attacking.
+    AttacksAlone,
+    /// You attack with N or more creatures.
+    AttackersAtLeast(u8),
+    /// A creature of this type you control attacked or entered this turn.
+    AttackedOrEntered(String),
+    /// One of your attackers has this creature type.
+    AttackerSubtype(String),
+    /// Your attackers have total power N or greater.
+    AttackingPower(u16),
+    /// You control a Jace or have a Jace card in hand (to behold).
+    CanBeholdJace,
     /// Can't be checked: happens this often.
     Chance(f32),
     /// The other branch of an "X. If <c>, Y instead" / "X if <c>. Otherwise, Y" pair.
@@ -294,11 +456,12 @@ pub struct SimAbility {
     pub optional: bool,
     pub once: bool,
     pub modal: bool,
-    /// The mode each effect belongs to (modal abilities).
-    pub modes: Vec<u8>,
     /// Each mode's own text (lower case, "~" for the card).
     pub mode_texts: Vec<String>,
     pub effects: Vec<Effect>,
+    /// Modal abilities whose modes have several effects: effects per mode, in order
+    /// (empty = each effect is a mode).
+    pub modes: Vec<u8>,
     /// Lower-case rules text (for X values and details).
     pub text: String,
     /// "Until end of turn" control changes (threaten effects).
@@ -309,16 +472,35 @@ pub struct SimAbility {
     pub filter: Filter,
     /// "This ability triggers only once each turn".
     pub once_per_turn: bool,
-    /// "Whenever you draw your second card each turn".
+    /// "Whenever you draw your second card each turn" / "casts their second spell each turn".
     pub second_draw: bool,
     /// Works while the card is in its owner's graveyard ("return ~ from your graveyard to
     /// the battlefield", "exile ~ from your graveyard: ..."), not on the battlefield.
     pub from_graveyard: bool,
+    /// A cost paid as it resolves ("you may pay {2}. If you do, ...").
+    pub pay: Option<PayCost>,
+    /// "... If it's a Zombie card, draw a card.": effects that need the card in question
+    /// (the top card, the returned card, the destroyed permanent) to be of a kind.
+    pub gate: Option<Gate>,
 }
 
 /// Does this ability work from the graveyard (and only there)?
 pub fn graveyard_ability(text: &str) -> bool {
     text.contains("~ from your graveyard")
+}
+
+/// Effects `from..to` of an ability happen only if the card it dealt with is of a kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Gate {
+    pub from: u8,
+    pub to: u8,
+    /// Card types it must have all of ("legendary enchantment").
+    pub types: u16,
+    pub subtype: Option<String>,
+    /// The card is the top card of your library (looked at as it resolves).
+    pub top: bool,
+    /// Or a condition instead of a card ("... If he's attacking, untap him").
+    pub cond: Option<Cond>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -337,6 +519,7 @@ pub struct BackFace {
     pub cost: Mana,
     pub types: u16,
     pub abilities: Vec<SimAbility>,
+    pub extra_cost: Option<ExtraCost>,
 }
 
 #[derive(Debug, Clone)]
@@ -351,7 +534,9 @@ pub struct SimCard {
     pub toughness: i16,
     pub loyalty: i16,
     pub kw: u32,
+    /// Ward's mana part (and `ward_cost` for life, discard, sacrifice, poison).
     pub ward: u8,
+    pub ward_cost: WardCost,
     /// Colours it has protection from.
     pub protection: u8,
     pub toxic: u8,
@@ -363,12 +548,18 @@ pub struct SimCard {
     pub enters_tapped_unless: Option<Cond>,
     /// "~ doesn't untap during your untap step" (Traxos; Bombur unless an enduring story).
     pub no_untap: bool,
-    pub equip: Option<u8>,
+    /// "As this land enters, you may behold a Jace. If you don't, it enters tapped."
+    pub behold_untapped: bool,
+    pub equip: Option<Mana>,
+    /// "Equip—{2}, Pay 2 life".
+    pub equip_life: u8,
     pub crew: Option<u8>,
     /// Cycling cost and what it finds: "" = draws a card, "land" = a basic land, or a
     /// land type / creature type ("mountain", "halfling").
     pub cycling: Option<(u8, String)>,
     pub flashback: Option<Mana>,
+    /// "Flashback—{1}{U/R}{U/R}, Discard a card".
+    pub flashback_discard: bool,
     pub kicker: Option<Mana>,
     pub overload: Option<Mana>,
     /// MSH Sneak: an alternative cost when you attacked this turn.
@@ -389,6 +580,12 @@ pub struct SimCard {
     pub storied: bool,
     /// "Spells you cast cost {N} less" (with an optional subtype/type filter).
     pub cost_reduction: Option<(u8, Filter)>,
+    /// "This spell costs {X} less to cast, where X is ..." (the Ghaltas).
+    pub self_less: Option<SelfLess>,
+    /// "Power-up abilities of other creatures you control cost {N} less to activate."
+    pub power_up_less: u8,
+    /// "As an additional cost to cast this spell, ...".
+    pub extra_cost: Option<ExtraCost>,
     /// A mana ability: {T}: Add ... (rocks, dorks, Treasures-like permanents).
     pub mana_ability: bool,
     /// What its mana ability counts ("Elf you control", "~'s power"), if it does.
@@ -453,6 +650,41 @@ fn cda_of(text: &str) -> Option<Cda> {
     None
 }
 
+impl SimAbility {
+    /// The modes of a modal ability, as ranges of `effects`.
+    /// The mode effect `k` belongs to.
+    pub fn mode_of(&self, k: usize) -> usize {
+        crate::abilities::mode_of(&self.modes, k)
+    }
+
+    /// Each mode's own text (or the whole text).
+    pub fn mode_text(&self, m: usize) -> &str {
+        self.mode_texts
+            .get(m)
+            .map_or(self.text.as_str(), |t| t.as_str())
+    }
+
+    pub fn mode_ranges(&self) -> Vec<std::ops::Range<usize>> {
+        if self.modes.is_empty() {
+            return (0..self.effects.len()).map(|k| k..k + 1).collect();
+        }
+        let mut out = Vec::new();
+        let mut at = 0;
+        for &n in &self.modes {
+            let end = (at + n as usize).min(self.effects.len());
+            out.push(at..end);
+            at = end;
+        }
+        out
+    }
+
+    /// Works only while the card is in the graveyard ("return ~ from your graveyard to your
+    /// hand", "exile ~ from your graveyard: ...").
+    pub fn graveyard_only(&self) -> bool {
+        self.text.contains("~ from your graveyard")
+    }
+}
+
 impl SimCard {
     pub fn is(&self, t: u16) -> bool {
         self.types & t != 0
@@ -512,7 +744,11 @@ fn number_word(w: &str) -> Option<u8> {
         "eight" | "eighth" => 8,
         "nine" | "ninth" => 9,
         "ten" | "tenth" => 10,
+        "twelve" => 12,
         "thirteen" => 13,
+        "fifteen" => 15,
+        "twenty" => 20,
+        "twenty-five" => 25,
         d => d
             .trim_end_matches(|c: char| c.is_alphabetic())
             .parse()
@@ -593,9 +829,109 @@ pub fn filter_of(what: &str) -> Filter {
     f
 }
 
+/// The word after `key` ("one or more merfolk you control" with key "one or more ").
+fn word_after<'t>(text: &'t str, key: &str) -> Option<&'t str> {
+    let i = text.find(key)?;
+    text[i + key.len()..]
+        .split([' ', ',', '.'])
+        .next()
+        .filter(|w| !w.is_empty())
+}
+
+/// "creatures" -> "creature", "elves" -> "elf".
+fn singular(w: &str) -> String {
+    if let Some(s) = w.strip_suffix("ves") {
+        format!("{}f", s)
+    } else {
+        w.strip_suffix('s').unwrap_or(w).to_string()
+    }
+}
+
+/// The part of an ability's text that states its condition ("if you control three or more
+/// creatures", "as long as it's attacking"), so the trigger's own words ("at the beginning
+/// of combat on your turn") aren't read as one.
+fn cond_clause(t: &str) -> Option<&str> {
+    let mut best: Option<usize> = None;
+    for key in [
+        "if ",
+        "as long as ",
+        "during your turn",
+        " unless ",
+        "while ~",
+        "while it",
+    ] {
+        let mut from = 0;
+        while let Some(off) = t[from..].find(key) {
+            let i = from + off;
+            from = i + key.len();
+            if key == "if "
+                && (i > 0 && t[..i].ends_with(|c: char| c.is_alphanumeric())
+                    || t[i..].starts_with("if you do")
+                    || t[i..].starts_with("if you don't")
+                    || t[..i].ends_with("even ")
+                    || t[..i].ends_with("as though "))
+            {
+                continue;
+            }
+            if best.is_none_or(|b| i < b) {
+                best = Some(i);
+            }
+            break;
+        }
+    }
+    let rest = t[best?..].trim();
+    let end = rest
+        .find(", ")
+        .into_iter()
+        .chain(rest.find(". "))
+        .min()
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
 /// Reads the condition in an ability's text.
 pub fn cond_of(text: &str, conditional: bool) -> Cond {
     let t = text;
+    // Trigger filters the event itself doesn't express.
+    if t.contains("attacks alone") || t.contains("attacks a player alone") {
+        return Cond::AttacksAlone;
+    }
+    if t.contains("attack with") && t.contains(" or more creatures") {
+        return Cond::AttackersAtLeast(number_before(t, " or more creatures").unwrap_or(3));
+    }
+    if t.contains("attack with creatures with total power") {
+        return Cond::AttackingPower(number_after(t, "total power").unwrap_or(10) as u16);
+    }
+    if let Some(w) = word_after(t, "whenever one or more ")
+        && t.contains(" you control attack")
+        && w != "creatures"
+    {
+        return Cond::AttackerSubtype(singular(w));
+    }
+    if t.contains("until end of turn, whenever ~ deals combat damage")
+        || t.contains("dealt combat damage by ~ this turn")
+    {
+        return Cond::SourceHitThisTurn;
+    }
+    if t.contains("first time during each of your turns") {
+        return Cond::MyTurn;
+    }
+    // "Whenever a creature dealt damage by ~ this turn dies" (Predator Ooze).
+    if t.contains("dealt damage by ~ this turn dies") {
+        return Cond::SubjectHurtBySource;
+    }
+    // "A spell with mana value of the chosen quality" (Gollum): about half of them.
+    if t.contains("casts a spell with mana value of the chosen quality") {
+        return Cond::Chance(0.5);
+    }
+    // "When one or more Equipment become attached to that creature this way" (Thorin):
+    // only with an Equipment to attach.
+    if t.contains("equipment become attached") {
+        return Cond::Control("equipment".into(), false);
+    }
+    if t.contains("when there are") && t.contains("counters on ~") {
+        return Cond::OtherCountersAtLeast(number_before(t, " or more").unwrap_or(1) as i16);
+    }
     if t.contains("enduring story") {
         return Cond::Storied;
     }
@@ -611,6 +947,23 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
         return Cond::Kicked;
     }
     if !conditional {
+        // "Whenever ~ attacks, draw a card if her power is 4 or greater": a condition at
+        // the end of the ability's only sentence.
+        if let Some(clause) = cond_clause(t) {
+            let at = t.find(clause).unwrap_or(0);
+            if !t[..at].contains(". ") {
+                if let c @ (Cond::PowerAtLeast(_) | Cond::SourceAttacking) = cond_from(clause) {
+                    return c;
+                }
+            }
+        }
+        return Cond::Always;
+    }
+    // Replacement effects ("if ... would ..., ... instead") always apply; "for the first
+    // time each turn" is a once-a-turn trigger (`once_per_turn`), not a condition.
+    if t.contains(" would ") && t.contains("instead")
+        || t.contains("for the first time each turn") && !t.contains(" if ")
+    {
         return Cond::Always;
     }
     // Wordings that hold whenever the ability comes up in a game.
@@ -626,11 +979,25 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
         "if it's a creature",
         "if it's a planeswalker",
         "if it had a revival counter",
+        "triggers an additional time",
     ] {
         if t.contains(always) {
             return Cond::Always;
         }
     }
+    // The condition's own clause first ("if you control three or more creatures"), so a
+    // trigger's "on your turn" isn't read as the condition.
+    if let Some(clause) = cond_clause(t) {
+        let c = cond_from(clause);
+        if !matches!(c, Cond::Chance(_)) {
+            return c;
+        }
+    }
+    cond_from(t)
+}
+
+/// The condition a piece of rules text states (`Chance` when it can't be checked).
+fn cond_from(t: &str) -> Cond {
     if t.contains("isn't a token") || t.contains("not a token") {
         return Cond::NotToken;
     }
@@ -646,23 +1013,99 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("power is") && t.contains("or less") {
         return Cond::PowerAtMost(number_after(t, "power is").unwrap_or(1) as i16);
     }
+    if t.contains("power is") && t.contains("or greater") && !t.contains("with power") {
+        return Cond::PowerAtLeast(number_after(t, "power is").unwrap_or(4) as i16);
+    }
     if t.contains("or more treasures") {
         return Cond::Treasures(number_before(t, " or more treasures").unwrap_or(4));
     }
-    if t.contains("equipped") {
+    if t.contains("if x is") && t.contains(" or more") {
+        return Cond::XAtLeast(number_after(t, "if x is").unwrap_or(10) as i32);
+    }
+    if t.contains("has exactly") && t.contains(" life") {
+        return Cond::OpponentLifeExactly(number_after(t, "has exactly").unwrap_or(10) as i32);
+    }
+    if t.contains("greater power or toughness than ~") {
+        return Cond::SubjectBigger;
+    }
+    if t.contains("if it was attacking") {
+        return Cond::SubjectWasAttacking;
+    }
+    if t.contains("dealt damage by ~ this turn") {
+        return Cond::SubjectHurtBySource;
+    }
+    if t.contains("~ isn't a creature") {
+        return Cond::SourceNotCreature;
+    }
+    if let Some(w) = word_after(t, "if ~ is a ") {
+        return Cond::SourceSubtype(w.to_string());
+    }
+    if t.contains("loyalty counters among jaces") {
+        return Cond::JaceLoyalty(number_before(t, " or more loyalty").unwrap_or(25) as i16);
+    }
+    if t.contains("activated a loyalty ability this turn") {
+        return Cond::LoyaltyActivated;
+    }
+    if t.contains("any player controls a") && t.contains(" permanent") {
+        let m = color_bits(t.split("any player controls a").nth(1).unwrap_or(""));
+        if m != 0 {
+            return Cond::AnyPermanentColor(m);
+        }
+    }
+    if t.contains("haven't dealt combat damage") || t.contains("hasn't dealt combat damage") {
+        return Cond::SourceNeverHit;
+    }
+    if t.contains("it has a ") && t.contains(" counter on it") && !t.contains("+1/+1") {
+        return Cond::OtherCountersAtLeast(1);
+    }
+    if t.contains("it's attacking") || t.contains("he's attacking") || t.contains("~ is attacking")
+    {
+        return Cond::SourceAttacking;
+    }
+    if t.contains("scried or surveilled this turn") {
+        return Cond::Scried;
+    }
+    if t.contains("opponent has cast a spell this turn") {
+        return Cond::OpponentCastSpell;
+    }
+    if t.contains("noncombat damage last turn") {
+        return Cond::OpponentLostLifeLastTurn;
+    }
+    if t.contains("or more creatures died this turn") {
+        return Cond::CreaturesDied(number_before(t, " or more creatures died").unwrap_or(3));
+    }
+    if t.contains("died this turn") {
+        return Cond::CreatureDiedThisTurn;
+    }
+    if t.contains("total power") && t.contains("or greater") {
+        return Cond::TotalPower(number_after(t, "total power").unwrap_or(8) as u16);
+    }
+    // "If you controlled that creature" (Azog): its removal goes at opponents' creatures.
+    if t.contains("if you controlled that creature") {
+        return Cond::Chance(0.05);
+    }
+    if t.contains("is equipped") || t.contains("~ equipped") {
         return Cond::Equipped;
     }
     if t.contains("isn't prepared") {
         return Cond::NotPrepared;
+    }
+    if t.contains("cast from a graveyard")
+        || t.contains("cast it from your graveyard")
+        || t.contains("wasn't cast from your hand")
+    {
+        return Cond::CastFromGraveyard;
+    }
+    // "If you attacked with a Hero this turn or a Hero entered the battlefield under your
+    // control this turn".
+    if let Some(w) = word_after(t, "attacked with a ").filter(|_| t.contains(" entered")) {
+        return Cond::AttackedOrEntered(w.to_string());
     }
     if t.contains("attacked this turn")
         || t.contains("attacked with")
         || t.contains("dealt combat damage by")
     {
         return Cond::AttackedThisTurn;
-    }
-    if t.contains("died this turn") {
-        return Cond::CreatureDiedThisTurn;
     }
     if t.contains("in your graveyard") {
         let n = number_before(t, " or more").unwrap_or(4);
@@ -684,6 +1127,14 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("or more lands") || t.contains("or more other lands") {
         return Cond::ControlLands(number_before(t, " or more").unwrap_or(5));
     }
+    if t.contains("you control") && t.contains(" or more ") {
+        if let (Some(n), Some(w)) = (
+            number_before(t, " or more "),
+            word_after(t, " or more ").filter(|w| *w != "life" && !w.contains("counter")),
+        ) {
+            return Cond::ControlCount(n, singular(w));
+        }
+    }
     if t.contains("or more life") {
         return Cond::LifeAtLeast(number_before(t, " or more life").unwrap_or(20) as i32);
     }
@@ -702,14 +1153,12 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("your turn") {
         return Cond::MyTurn;
     }
-    if t.contains("cast from a graveyard") || t.contains("cast it from your graveyard") {
-        return Cond::CastFromGraveyard;
-    }
+    // "Another" before "a": "you control another Goblin" isn't "a" + "nother".
     for key in [
-        "if you control a",
-        "as long as you control a",
         "if you control another",
         "as long as you control another",
+        "if you control a",
+        "as long as you control a",
     ] {
         if let Some(i) = t.find(key) {
             let rest = t[i + key.len()..].trim_start_matches(['n', ' ']);
@@ -718,6 +1167,9 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
                 return Cond::Control(what, key.contains("another"));
             }
         }
+    }
+    if t.contains("behold a jace") {
+        return Cond::CanBeholdJace;
     }
     Cond::Chance(0.5)
 }
@@ -872,8 +1324,9 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             }
             Trig::Event(kind, f)
         }
+        // The parser counts each {X} as 2; the game picks X when it's activated.
         When::Activated(c) => Trig::Activated {
-            mana: c.mana.min(255) as u8,
+            mana: c.mana.saturating_sub(2 * act_cost(t).x as u32).min(255) as u8,
             tap: c.tap,
             sac_self: c.sacrifice && !c.discard,
             sac_other: c.sacrifice_other,
@@ -884,6 +1337,7 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 0
             },
             sorcery: t.contains("only as a sorcery"),
+            extra: act_cost(t),
         },
         When::PowerUp(c) => {
             // The parser keeps only the total; read the coloured cost from the text
@@ -903,6 +1357,356 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
     }
 }
 
+/// Card types named in a cost ("a creature or planeswalker", "another creature or artifact").
+fn types_in(phrase: &str) -> u16 {
+    let mut bits = 0;
+    for (word, bit) in [
+        ("creature", T_CREATURE),
+        ("artifact", T_ARTIFACT),
+        ("enchantment", T_ENCHANTMENT),
+        ("planeswalker", T_PLANESWALKER),
+        ("land", T_LAND),
+    ] {
+        if phrase.contains(word) && !phrase.contains(&format!("non{}", word)) {
+            bits |= bit;
+        }
+    }
+    if bits == 0 {
+        // "a permanent", "a nonland permanent"
+        bits = if phrase.contains("nonland") {
+            0xFFFF & !T_LAND
+        } else {
+            0xFFFF
+        };
+    }
+    bits
+}
+
+/// The parts of an activated ability's cost beyond mana, {T}, sacrifices, discards and life.
+fn act_cost(text: &str) -> ActCost {
+    let cost = text.split(": ").next().unwrap_or("");
+    let mut a = ActCost {
+        x: crate::card::symbols_in(cost)
+            .iter()
+            .filter(|s| s.eq_ignore_ascii_case("x"))
+            .count() as u8,
+        boast: text.contains("activate only if ~ attacked this turn"),
+        ..Default::default()
+    };
+    for part in cost.split(", ") {
+        let p = part.trim();
+        let count = |rest: &str| {
+            rest.split_whitespace()
+                .next()
+                .and_then(|w| {
+                    if w == "another" {
+                        Some(1)
+                    } else {
+                        number_word(w)
+                    }
+                })
+                .unwrap_or(1)
+        };
+        if let Some(rest) = p.strip_prefix("remove ") {
+            // "Remove three incubation counters from ~", "remove a +1/+1 counter from ~".
+            a.remove = count(rest);
+            a.remove_plus = rest.contains("+1/+1");
+            a.remove_all = rest.starts_with("any number");
+        } else if p.starts_with("put a ") && p.contains(" counter on ~") {
+            a.add_counter = if p.contains("stun") { 1 } else { 2 };
+        } else if let Some(rest) = p.strip_prefix("tap ").filter(|r| r.contains("untapped ")) {
+            // "Tap two untapped artifacts you control", "tap ten untapped elves you control".
+            a.tap_others = count(rest);
+            let what = rest.split("untapped ").nth(1).unwrap_or("");
+            let w = singular(what.split_whitespace().next().unwrap_or(""));
+            match w.as_str() {
+                "artifact" => a.tap_types = T_ARTIFACT,
+                "creature" => a.tap_types = T_CREATURE,
+                "land" => a.tap_types = T_LAND,
+                _ => {
+                    a.tap_types = T_CREATURE;
+                    a.tap_subtype = Some(w);
+                }
+            }
+        } else if p.starts_with("exile ~ from your graveyard") {
+            a.from_graveyard = true;
+        } else if p.starts_with("exile ~ from your hand") {
+            a.from_hand = true;
+        } else if p == "exile ~" {
+            a.exile_self = true;
+        } else if p.starts_with("return ~ to") {
+            a.return_self = true;
+        } else if let Some(rest) = p
+            .strip_prefix("exile ")
+            .filter(|_| p.contains("from your graveyard"))
+        {
+            if p.contains("black mana symbols") {
+                a.black_pips = number_before(p, " or more black").unwrap_or(15);
+            } else {
+                // "Exile another creature card from your graveyard", "exile two cards".
+                a.exile_cards = count(rest);
+                a.exile_creatures = rest.contains("creature");
+            }
+        }
+    }
+    a
+}
+
+/// A cost paid while the ability resolves: "you may pay {2}. If you do, ...", "remove a
+/// bait counter from ~. If you do, ...", "you may sacrifice another creature. When you do".
+fn pay_of(text: &str) -> Option<PayCost> {
+    let end = [". if you do,", ". when you do,"]
+        .iter()
+        .filter_map(|m| text.find(m))
+        .min()?;
+    // Gifts and overload have their own rules; "when the fourth plan counter is put on ~,
+    // sacrifice it. When you do" is sacrificed as the counter goes on.
+    if text.contains("gift") || text.contains("overload") || text.contains(" counter is put on") {
+        return None;
+    }
+    let before = &text[..end];
+    let start = before.rfind(". ").map(|i| i + 2).unwrap_or(0);
+    let sentence = &before[start..];
+    // A condition on the payment itself ("if it has six or more quest counters on it,
+    // sacrifice it").
+    let cond = sentence
+        .strip_prefix("then ")
+        .unwrap_or(sentence)
+        .strip_prefix("if ")
+        .map(|c| {
+            let c = c.replace(" of more ", " or more ");
+            if c.contains(" counters on it") && c.contains(" or more ") {
+                Cond::OtherCountersAtLeast(number_before(&c, " or more").unwrap_or(1) as i16)
+            } else {
+                cond_from(&c)
+            }
+        });
+    let (optional, phrase) = match sentence.find("you may ") {
+        Some(i) => (true, sentence[i + 8..].trim()),
+        None => (
+            false,
+            sentence
+                .rsplit(", ")
+                .next()
+                .unwrap_or(sentence)
+                .trim()
+                .trim_start_matches("then "),
+        ),
+    };
+    let cost = if phrase.starts_with("sacrifice ") {
+        if phrase == "sacrifice ~" || phrase == "sacrifice it" {
+            ResCost::SacrificeSelf
+        } else if phrase.contains(" or discard a card") {
+            ResCost::SacrificeOrDiscard(types_in(phrase.split(" or discard").next().unwrap_or("")))
+        } else {
+            ResCost::Sacrifice {
+                types: types_in(phrase),
+                other: phrase.contains("another"),
+            }
+        }
+    } else if let Some(rest) = phrase.strip_prefix("pay ") {
+        if rest.contains("life") {
+            ResCost::Life(number_word(rest.split_whitespace().next().unwrap_or("")).unwrap_or(2))
+        } else {
+            ResCost::Mana(Mana::parse(rest))
+        }
+    } else if phrase.starts_with("discard a card") {
+        ResCost::Discard
+    } else if phrase.starts_with("remove ") && phrase.contains("counter") {
+        ResCost::RemoveCounter {
+            plus: phrase.contains("+1/+1"),
+        }
+    } else if phrase.starts_with("exile ~ and") && phrase.contains("named ~") {
+        ResCost::ExileNamed(number_before(phrase, " cards named").unwrap_or(4))
+    } else if phrase == "exile it" || phrase == "exile ~" {
+        ResCost::ExileSelf
+    } else if optional {
+        ResCost::Free
+    } else {
+        return None;
+    };
+    let skip_from = abilities::effects_count(&text[..start]).min(255) as u8;
+    let first = if cost == ResCost::Free {
+        skip_from
+    } else {
+        abilities::effects_count(before).min(255) as u8
+    };
+    Some(PayCost {
+        cost,
+        optional,
+        cond,
+        skip_from,
+        first: first.max(skip_from),
+    })
+}
+
+/// "Return target creature card from your graveyard to your hand. If it's a Zombie card,
+/// draw a card." / "Reveal the top card of your library. If it's an artifact card, draw a
+/// card." / "Destroy target artifact or enchantment. If that permanent was a legendary
+/// enchantment, draw a card."
+fn gate_of(text: &str) -> Option<Gate> {
+    // "Put a +1/+1 counter on him. If he's attacking, untap him and there is an additional
+    // combat phase": only that part needs it.
+    if let Some(start) = [
+        ". if he's attacking",
+        ". if it's attacking",
+        ". if she's attacking",
+    ]
+    .iter()
+    .filter_map(|k| text.find(k))
+    .min()
+    {
+        let start = start + 2;
+        let sentence = text[start..].split(". ").next().unwrap_or("");
+        let through = format!("{}{}.", &text[..start], sentence);
+        return Some(Gate {
+            from: abilities::effects_count(&text[..start]).min(255) as u8,
+            to: abilities::effects_count(&through).min(255) as u8,
+            types: 0,
+            subtype: None,
+            top: false,
+            cond: Some(Cond::SourceAttacking),
+        });
+    }
+    card_gate(text)
+}
+
+/// The card-kind form of `gate_of`.
+fn card_gate(text: &str) -> Option<Gate> {
+    let start = [
+        ". if it's a",
+        ". if that card is a",
+        ". if that permanent was a",
+    ]
+    .iter()
+    .filter_map(|k| text.find(k))
+    .min()?
+        + 2;
+    let before = &text[..start];
+    let top = before.contains("top card of your library");
+    if !(top
+        || before.contains("destroy target")
+        || before.contains("return target") && before.contains("to your hand"))
+    {
+        return None;
+    }
+    let sentence = text[start..].split(". ").next().unwrap_or("");
+    let (cond, _) = sentence.split_once(", ")?;
+    let mut types = 0;
+    let mut subtype = None;
+    for w in cond
+        .split_whitespace()
+        .skip_while(|w| *w != "a" && *w != "an")
+        .skip(1)
+    {
+        match w {
+            "creature" => types |= T_CREATURE,
+            "artifact" => types |= T_ARTIFACT,
+            "enchantment" => types |= T_ENCHANTMENT,
+            "land" => types |= T_LAND,
+            "planeswalker" => types |= T_PLANESWALKER,
+            "instant" => types |= T_INSTANT,
+            "sorcery" => types |= T_SORCERY,
+            "legendary" => types |= T_LEGENDARY,
+            "card" | "permanent" => {}
+            w => subtype = Some(w.to_string()),
+        }
+    }
+    let through = format!("{}{}.", &text[..start], sentence);
+    Some(Gate {
+        from: abilities::effects_count(before).min(255) as u8,
+        to: abilities::effects_count(&through).min(255) as u8,
+        types,
+        subtype,
+        top,
+        cond: None,
+    })
+}
+
+/// "As an additional cost to cast this spell, sacrifice a creature or pay {3}{B}."
+fn extra_cost_of(abilities: &[SimAbility]) -> Option<ExtraCost> {
+    let key = "as an additional cost to cast ~, ";
+    let t = abilities
+        .iter()
+        .find(|a| a.text.contains(key))?
+        .text
+        .as_str();
+    let rest = t.split(key).nth(1)?;
+    let rest = rest.split('.').next().unwrap_or(rest);
+    let (what, pay) = match rest.split_once(" or pay ") {
+        Some((w, m)) => (w, Some(Mana::parse(m))),
+        None => (rest, None),
+    };
+    Some(if what.starts_with("sacrifice ") {
+        match pay {
+            Some(m) => ExtraCost::SacrificeOrPay(types_in(what), m),
+            None => ExtraCost::Sacrifice(types_in(what)),
+        }
+    } else if what.starts_with("discard a card") {
+        match pay {
+            Some(m) => ExtraCost::DiscardOrPay(m),
+            None => ExtraCost::Discard,
+        }
+    } else if let Some(sub) = what
+        .strip_prefix("behold an ")
+        .or_else(|| what.strip_prefix("behold a "))
+    {
+        ExtraCost::BeholdOrPay(sub.trim().to_string(), pay.unwrap_or_default())
+    } else {
+        return None;
+    })
+}
+
+/// "Ward {2}", "Ward—Pay 2 life", "Ward—{3}, Pay 3 life", "Ward—Discard a card or pay {2}".
+fn ward_of(words: &[String]) -> (u8, WardCost) {
+    let Some(k) = words.iter().find(|k| k.starts_with("ward")) else {
+        return (0, WardCost::default());
+    };
+    let rest = k["ward".len()..].trim_start_matches(['—', '-', ' ']);
+    let mana = Mana::parse(rest).total().min(255) as u8;
+    let mut w = WardCost::default();
+    if rest.contains(" life") {
+        w.life = number_after(rest, "pay").unwrap_or(2);
+    }
+    if rest.contains("discard") {
+        w.discard = true;
+        w.discard_or_mana = rest.contains(" or pay");
+    }
+    if let Some(n) = word_after(rest, "sacrifice ").and_then(number_word) {
+        w.sacrifice = n;
+    }
+    if rest.contains("poison") {
+        w.poison = word_after(rest, "get ").and_then(number_word).unwrap_or(3);
+    }
+    if mana == 0 && w == WardCost::default() {
+        return (2, w);
+    }
+    (mana, w)
+}
+
+/// Undoes the parser's "the first card drawn only replaces the one paid" reading where the
+/// simulator pays the discard itself: the draw is the full number again.
+fn redraw(effects: &mut [Effect]) {
+    if let Some(e) = effects
+        .iter_mut()
+        .find(|e| matches!(e, Effect::Loot) || matches!(e, Effect::Draw { you: true, .. }))
+    {
+        *e = match e {
+            Effect::Draw { amount, .. } => Effect::Draw {
+                amount: abilities::Amount {
+                    n: amount.n + 1,
+                    x: amount.x,
+                },
+                you: true,
+            },
+            _ => Effect::Draw {
+                amount: abilities::Amount::fixed(1),
+                you: true,
+            },
+        };
+    }
+}
+
 /// "When the third plan counter is put on ~": the counter count a reflexive ability waits for.
 fn counter_goal(text: &str) -> Option<i16> {
     let i = text.find(" counter is put")?;
@@ -917,6 +1721,7 @@ fn counter_goal(text: &str) -> Option<i16> {
 
 fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
     let mut out = Vec::new();
+    let mut instead: Vec<bool> = Vec::new();
     for a in &parsed.abilities {
         let cond = cond_of(&a.text, a.conditional);
         let whens: Vec<&When> = if a.when.is_empty() {
@@ -924,24 +1729,35 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
         } else {
             a.when.iter().collect()
         };
+        let pay = if a.modal { None } else { pay_of(&a.text) };
         for w in whens {
+            let trig = trig_of(w, a);
+            let mut effects = a.effects.clone();
+            // Discards the simulator pays itself: the parser's "draw one fewer" undone.
+            let body = a.text.split(": ").nth(1).unwrap_or("");
+            let pays_discard = matches!(trig, Trig::Activated { discard: true, .. })
+                && !body.contains("discard")
+                && !body.contains("connive")
+                || pay.as_ref().is_some_and(|p| {
+                    matches!(p.cost, ResCost::Discard | ResCost::SacrificeOrDiscard(_))
+                        && a.text.contains("if you do, draw")
+                });
+            if pays_discard {
+                redraw(&mut effects);
+            }
             out.push(SimAbility {
-                trig: trig_of(w, a),
+                trig,
                 cond: cond.clone(),
                 optional: a.optional,
                 once: a.once,
                 modal: a.modal,
-                modes: if a.modal && a.modes.len() == a.effects.len() {
-                    a.modes.clone()
-                } else {
-                    (0..a.effects.len() as u8).collect()
-                },
+                effects,
+                modes: a.modes.clone(),
                 mode_texts: if a.modal {
                     a.mode_texts.clone()
                 } else {
                     Vec::new()
                 },
-                effects: a.effects.clone(),
                 text: a.text.clone(),
                 until_eot: a.text.contains("until end of turn"),
                 counter_goal: if *w == When::Reflexive {
@@ -950,11 +1766,19 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                     None
                 },
                 filter: filter_of(&a.text),
-                once_per_turn: a.text.contains("only once each turn"),
-                second_draw: a.text.contains("second card"),
+                // "For the first time each turn", "your first noncreature spell each turn":
+                // the first such event each turn.
+                once_per_turn: a.text.contains("only once each turn")
+                    || a.text.contains("for the first time each turn")
+                    || a.text.contains("for the first time during each")
+                    || a.text.contains(" first ") && a.text.contains(" each turn"),
+                second_draw: a.text.contains("second card") || a.text.contains("second spell"),
                 from_graveyard: graveyard_ability(&a.text)
                     && !matches!(w, When::Dies | When::Spell | When::Static),
+                pay: pay.clone(),
+                gate: gate_of(&a.text),
             });
+            instead.push(a.instead);
         }
     }
     // A reflexive "when you do" without its own counter goal belongs to the counters of the
@@ -974,7 +1798,7 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
         if out[i].text.contains("if not, ") {
             // "X if <c>. Otherwise, Y": Y when the condition fails.
             out[i].cond = Cond::Not(Box::new(out[i - 1].cond.clone()));
-        } else if out[i].text.contains("instead") && out[i].cond != Cond::Always {
+        } else if (instead[i] || out[i].text.contains("instead")) && out[i].cond != Cond::Always {
             // "X. If <c>, Y instead": X only when the condition fails.
             out[i - 1].cond = Cond::Not(Box::new(out[i].cond.clone()));
         }
@@ -1125,11 +1949,13 @@ fn back_face(card: &Card, parsed: &abilities::Parsed) -> Option<BackFace> {
     } else {
         BackKind::Other
     };
+    let abilities = compile_abilities(back);
     Some(BackFace {
         kind,
         cost,
         types,
-        abilities: compile_abilities(back),
+        extra_cost: extra_cost_of(&abilities),
+        abilities,
     })
 }
 
@@ -1282,9 +2108,12 @@ pub fn compile(card: &Card) -> SimCard {
             return None;
         }
         let i = a.text.find("cost {")?;
-        // "Power-up abilities ... cost {3} less", "equip abilities ... cost {2} less" aren't
-        // about spells.
-        if !a.text.contains("less") || a.text.contains("opponent") || !a.text[..i].contains("spell")
+        // "Power-up abilities ... cost {3} less to activate", "equip abilities ... cost {2}
+        // less" aren't about spells.
+        if !a.text.contains("less")
+            || a.text.contains("opponent")
+            || a.text.contains("activate")
+            || !a.text[..i].contains("spell")
         {
             return None;
         }
@@ -1297,6 +2126,27 @@ pub fn compile(card: &Card) -> SimCard {
         let what = a.text[..i].to_string();
         Some((n, filter_of(&what)))
     });
+    let power_up_less = abilities
+        .iter()
+        .filter(|a| a.trig == Trig::Static && a.text.contains("power-up abilities"))
+        .find_map(|a| number_after(&a.text, "cost {"))
+        .unwrap_or(0);
+    let self_less = if front_text.contains("costs {x} less to cast") {
+        if front_text.contains("greatest toughness") {
+            Some(SelfLess::GreatestToughness)
+        } else if front_text.contains("greatest power") {
+            Some(SelfLess::GreatestPower)
+        } else if front_text.contains("total power of creatures you control with flying") {
+            Some(SelfLess::TotalPowerFlying)
+        } else if front_text.contains("total power") {
+            Some(SelfLess::TotalPower)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let (ward, ward_cost) = ward_of(kw_words);
     let chapters = abilities
         .iter()
         .filter_map(|a| match a.trig {
@@ -1333,11 +2183,8 @@ pub fn compile(card: &Card) -> SimCard {
         toughness,
         loyalty,
         kw,
-        ward: if kw_words.iter().any(|k| k.starts_with("ward")) {
-            kw_num("ward").unwrap_or(2)
-        } else {
-            0
-        },
+        ward,
+        ward_cost,
         protection,
         toxic: kw_num("toxic").unwrap_or(0),
         produces,
@@ -1345,12 +2192,18 @@ pub fn compile(card: &Card) -> SimCard {
         enters_tapped: front_text.contains("enters tapped") && !front_text.contains("unless"),
         enters_tapped_unless: enters_tapped_unless(&own_text),
         no_untap: own_text.contains("~ doesn't untap during your untap step"),
-        // "Equip {3}. This ability costs {1} less ..." isn't a keyword line.
+        behold_untapped: front_text.contains("you may behold a jace. if you don't"),
+        // ("Equip {3}. This ability costs {1} less ..." isn't a keyword line.)
         equip: (types & T_EQUIPMENT != 0).then(|| {
-            kw_num("equip")
-                .or_else(|| number_after(&front_text, "equip {"))
-                .unwrap_or(2)
+            keyword_cost(kw_words, "equip")
+                .or_else(|| number_after(&front_text, "equip {").map(|n| Mana::generic(n as u32)))
+                .unwrap_or(Mana::generic(2))
         }),
+        equip_life: kw_words
+            .iter()
+            .find(|k| k.starts_with("equip") && k.contains(" life"))
+            .and_then(|k| number_after(k, "pay"))
+            .unwrap_or(0),
         crew: kw_words
             .iter()
             .any(|k| k.starts_with("crew"))
@@ -1366,6 +2219,9 @@ pub fn compile(card: &Card) -> SimCard {
             (digits.parse().unwrap_or(2), find)
         }),
         flashback: keyword_cost(kw_words, "flashback"),
+        flashback_discard: kw_words
+            .iter()
+            .any(|k| k.starts_with("flashback") && k.contains("discard")),
         kicker: keyword_cost(kw_words, "kicker"),
         overload: keyword_cost(kw_words, "overload"),
         sneak: keyword_cost(kw_words, "sneak"),
@@ -1389,6 +2245,9 @@ pub fn compile(card: &Card) -> SimCard {
         chapters,
         storied: kw_words.iter().any(|k| k == "storied"),
         cost_reduction,
+        self_less,
+        power_up_less,
+        extra_cost: extra_cost_of(&abilities),
         mana_ability,
         mana_count,
         abilities,

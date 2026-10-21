@@ -75,6 +75,33 @@ pub enum Src {
     Prepared(u32),
 }
 
+/// How an additional cost to cast a spell is paid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExtraPay {
+    /// Sacrifice this permanent (by id).
+    Sacrifice(u32),
+    Discard,
+    Mana(Mana),
+    /// Beheld: nothing to pay.
+    Nothing,
+}
+
+/// `a` plus `b` (generic, coloured, colourless and hybrid symbols).
+pub fn add_mana(mut a: Mana, b: &Mana) -> Mana {
+    a.generic = a.generic.saturating_add(b.generic);
+    a.colorless = a.colorless.saturating_add(b.colorless);
+    for i in 0..5 {
+        a.pips[i] = a.pips[i].saturating_add(b.pips[i]);
+    }
+    for &h in b.hybrid.iter().filter(|&&h| h != 0) {
+        match a.hybrid.iter().position(|&s| s == 0) {
+            Some(slot) => a.hybrid[slot] = h,
+            None => a.generic = a.generic.saturating_add(1),
+        }
+    }
+    a
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CastOpts {
     /// Cast the back face (Adventure / other double-faced spell) from hand.
@@ -118,6 +145,9 @@ impl<'a> Game<'a> {
                 life_gained_turn: 0,
                 discarded_turn: 0,
                 extra_lands: 0,
+                lost_life_last_turn: false,
+                scried_turn: false,
+                loyalty_turn: false,
                 enduring_story: false,
                 hijacked: false,
                 pool: 0,
@@ -139,6 +169,9 @@ impl<'a> Game<'a> {
             rng,
             start_life: life,
             died_this_turn: 0,
+            dead: Vec::new(),
+            last_excess: 0,
+            focus_card: None,
             pending: Vec::new(),
             fog: false,
             in_combat: false,
@@ -194,6 +227,67 @@ impl<'a> Game<'a> {
 
     /// What casting from `src` costs right now (tax, reductions, extras), if it's allowed.
     pub fn cast_cost(&self, p: usize, src: Src, opts: CastOpts) -> Option<Mana> {
+        self.cast_plan(p, src, opts).map(|c| c.0)
+    }
+
+    /// How an additional cost ("sacrifice a creature or pay {3}{B}") would be paid by `p`
+    /// casting card `c`; None if it can't be. `base` is the mana cost without it.
+    pub fn extra_payment(
+        &self,
+        p: usize,
+        e: &ExtraCost,
+        base: &Mana,
+        from_hand: bool,
+    ) -> Option<ExtraPay> {
+        let others_in_hand = self.players[p].hand.len() - usize::from(from_hand);
+        Some(match e {
+            ExtraCost::Sacrifice(t) => {
+                ExtraPay::Sacrifice(self.perms[ai::sac_for_cost(self, p, *t)?].id)
+            }
+            ExtraCost::Discard => {
+                if others_in_hand == 0 {
+                    return None;
+                }
+                ExtraPay::Discard
+            }
+            ExtraCost::SacrificeOrPay(t, m) => match ai::fodder(self, p, *t, u32::MAX) {
+                Some(i) => ExtraPay::Sacrifice(self.perms[i].id),
+                None => ExtraPay::Mana(*m),
+            },
+            ExtraCost::DiscardOrPay(m) => {
+                if self.can_pay(p, &add_mana(*base, m)) || others_in_hand == 0 {
+                    ExtraPay::Mana(*m)
+                } else {
+                    ExtraPay::Discard
+                }
+            }
+            ExtraCost::BeholdOrPay(sub, m) => {
+                let pl = &self.players[p];
+                let in_hand = pl
+                    .hand
+                    .iter()
+                    .filter(|&&h| pl.cards[h as usize].has_subtype(sub))
+                    .count();
+                let controls = self
+                    .perms
+                    .iter()
+                    .any(|x| x.ctrl as usize == p && x.subtypes.iter().any(|s| s == sub));
+                if controls || in_hand > 0 {
+                    ExtraPay::Nothing
+                } else {
+                    ExtraPay::Mana(*m)
+                }
+            }
+        })
+    }
+
+    /// The cost of a cast, the X it pays for, and how its additional cost is paid.
+    pub fn cast_plan(
+        &self,
+        p: usize,
+        src: Src,
+        opts: CastOpts,
+    ) -> Option<(Mana, Option<i32>, Option<ExtraPay>)> {
         let (idx, back) = self.spell_card(p, src, opts)?;
         let c = &self.players[p].cards[idx as usize];
         if c.is(T_LAND) && !back {
@@ -201,6 +295,10 @@ impl<'a> Game<'a> {
         }
         if let Src::Graveyard(_) = src {
             if !self.players[p].recast.contains(&idx) && c.flashback.is_none() {
+                return None;
+            }
+            // "Flashback—{1}{U/R}{U/R}, Discard a card".
+            if c.flashback_discard && self.players[p].hand.is_empty() {
                 return None;
             }
         }
@@ -221,17 +319,37 @@ impl<'a> Game<'a> {
         } else {
             (c.cost, c.types, &c.subtypes)
         };
+        let mut x = None;
         if cost.x {
             // X spells: spend about half the remaining mana on X.
-            cost =
-                cost.plus_generic((self.mana_available(p).saturating_sub(cost.total()) / 2).max(1));
+            let n = (self.mana_available(p).saturating_sub(cost.total()) / 2).max(1);
+            cost = cost.plus_generic(n);
+            x = Some(n as i32);
         }
         if let Src::Command(k) = src {
             let slot = self.players[p].command[k].1 as usize;
             cost = cost.plus_generic(2 * self.players[p].casts[slot.min(2)] as u32);
         }
         if opts.free {
-            return Some(Mana::default());
+            return Some((Mana::default(), x, None));
+        }
+        // "This spell costs {X} less to cast, where X is the greatest power among creatures
+        // you control" (the Ghaltas).
+        if let (Some(s), false) = (c.self_less, back) {
+            let mine = self
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == p && x.is_creature());
+            let n = match s {
+                SelfLess::GreatestToughness => mine.map(|x| x.t.max(0) as u32).max().unwrap_or(0),
+                SelfLess::GreatestPower => mine.map(|x| x.p.max(0) as u32).max().unwrap_or(0),
+                SelfLess::TotalPower => mine.map(|x| x.p.max(0) as u32).sum(),
+                SelfLess::TotalPowerFlying => mine
+                    .filter(|x| x.has(FLYING))
+                    .map(|x| x.p.max(0) as u32)
+                    .sum(),
+            };
+            cost = cost.minus_generic(n);
         }
         // "Spells you cast cost {N} less" (and the like).
         let mut less = 0;
@@ -271,7 +389,21 @@ impl<'a> Game<'a> {
                 }
             }
         }
-        Some(cost)
+        // "As an additional cost to cast this spell, ...".
+        let extra = if back {
+            c.back.as_ref().and_then(|b| b.extra_cost.as_ref())
+        } else {
+            c.extra_cost.as_ref()
+        };
+        let mut pay = None;
+        if let Some(e) = extra {
+            let how = self.extra_payment(p, e, &cost, matches!(src, Src::Hand(_)))?;
+            if let ExtraPay::Mana(m) = &how {
+                cost = add_mana(cost, m);
+            }
+            pay = Some(how);
+        }
+        Some((cost, x, pay))
     }
 
     /// Creatures (convoke) or artifacts (improvise) that could be tapped to help pay.
@@ -300,13 +432,14 @@ impl<'a> Game<'a> {
         let Some((idx, back)) = self.spell_card(p, src, opts) else {
             return false;
         };
-        let Some(cost) = self.cast_cost(p, src, opts) else {
+        let Some((cost, x, extra)) = self.cast_plan(p, src, opts) else {
             return false;
         };
+        let by_flashback =
+            matches!(src, Src::Graveyard(_)) && !self.players[p].recast.contains(&idx);
         let c: &'a SimCard = &self.players[p].cards[idx as usize];
-        // X paid (`cast_cost` spends about half the spare mana on it).
-        let x_paid = (!back && c.cost.x && !opts.free)
-            .then(|| (self.mana_available(p).saturating_sub(c.cost.total()) / 2).max(1) as i32);
+        // X paid (for "enters with X counters" and the spell's own X).
+        let x_paid = x;
         // Pyromancer's Goggles: its mana casting a red instant or sorcery copies it.
         let goggles = if c.is(T_INSTANT | T_SORCERY) && !back && c.colors & (1 << 3) != 0 {
             self.perms.iter().position(|x| {
@@ -401,6 +534,21 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        // Additional costs: the sacrifice or discard (mana was paid with the rest).
+        if !opts.free {
+            match extra {
+                Some(ExtraPay::Sacrifice(id)) => {
+                    if let Some(i) = self.idx(id) {
+                        self.sacrifice(i);
+                    }
+                }
+                Some(ExtraPay::Discard) => self.discard(p),
+                _ => {}
+            }
+            if by_flashback && c.flashback_discard {
+                self.discard(p);
+            }
+        }
         let gift = opts.gift && c.gift;
         if gift {
             if let Some(o) = ai::choose_opponent(self, p, 0) {
@@ -461,10 +609,12 @@ impl<'a> Game<'a> {
             };
             let id = self.perms[i].id;
             self.perms[i].commander = commander_slot;
+            // ("Enters with X +1/+1 counters", "a divinity counter": see `enter_card`.)
             for pend in self.pending.iter_mut().filter(|x| x.source == Some(id)) {
                 pend.teamwork = teamwork;
                 pend.gift = gift;
                 pend.kicked = kicked;
+                pend.x = x;
             }
             // Auras attach as they enter.
             if c.is(T_AURA) {
@@ -523,6 +673,7 @@ impl<'a> Game<'a> {
                         from_graveyard,
                         kicked,
                         overloaded,
+                        x,
                     });
                 }
             }
@@ -568,6 +719,111 @@ impl<'a> Game<'a> {
 
     /// The mana an activated ability needs now (None if it can't be activated).
     pub fn activation_cost(&self, p: usize, i: usize, k: usize) -> Option<Mana> {
+        self.activation_plan(p, i, k).map(|c| c.0)
+    }
+
+    /// Permanents `p` would tap for a "tap N untapped artifacts / Elves you control" cost.
+    fn tap_helpers(&self, p: usize, src_id: u32, e: &ActCost) -> Vec<u32> {
+        let mut c: Vec<&Perm> = self
+            .perms
+            .iter()
+            .filter(|x| {
+                x.ctrl as usize == p
+                    && x.id != src_id
+                    && !x.tapped
+                    && (x.is(e.tap_types) || e.tap_types & T_CREATURE != 0 && x.is_creature())
+                    && e.tap_subtype
+                        .as_ref()
+                        .is_none_or(|s| x.subtypes.iter().any(|t| t == s))
+            })
+            .collect();
+        // Spare the mana makers and the biggest attackers.
+        c.sort_by_key(|x| (x.card.is_some_and(|r| self.card(r).mana_ability), x.p + x.t));
+        c.iter().take(e.tap_others as usize).map(|x| x.id).collect()
+    }
+
+    /// Graveyard cards a cost would exile ("exile another creature card from your graveyard",
+    /// "black cards with fifteen or more black mana symbols"), not counting graveyard slot
+    /// `skip` (the card using the ability). None if there aren't enough.
+    fn gy_cost(&self, p: usize, e: &ActCost, skip: Option<usize>) -> Option<Vec<usize>> {
+        let pl = &self.players[p];
+        let ok = |k: &usize| Some(*k) != skip;
+        if e.black_pips > 0 {
+            let mut out = Vec::new();
+            let mut pips = 0u32;
+            for k in (0..pl.graveyard.len()).filter(ok) {
+                let b = pl.cards[pl.graveyard[k] as usize].cost.pips[2] as u32;
+                if b > 0 {
+                    out.push(k);
+                    pips += b;
+                }
+                if pips >= e.black_pips as u32 {
+                    return Some(out);
+                }
+            }
+            return None;
+        }
+        if e.exile_cards == 0 {
+            return Some(Vec::new());
+        }
+        let mut cands: Vec<usize> = (0..pl.graveyard.len())
+            .filter(ok)
+            .filter(|&k| !e.exile_creatures || pl.cards[pl.graveyard[k] as usize].is(T_CREATURE))
+            .collect();
+        // The least useful cards go.
+        cands.sort_by(|&a, &b| {
+            let v = |k: usize| pl.cards[pl.graveyard[k] as usize].value;
+            v(a).partial_cmp(&v(b)).unwrap()
+        });
+        (cands.len() >= e.exile_cards as usize)
+            .then(|| cands.into_iter().take(e.exile_cards as usize).collect())
+    }
+
+    /// Exiles graveyard cards at these slots.
+    fn exile_from_graveyard(&mut self, p: usize, mut slots: Vec<usize>) {
+        if slots.is_empty() {
+            return;
+        }
+        slots.sort_unstable();
+        for k in slots.into_iter().rev() {
+            if k < self.players[p].graveyard.len() {
+                let c = self.players[p].graveyard.remove(k);
+                self.players[p].exile.push(c);
+            }
+        }
+        self.emit(Ev::LeavesGraveyard, p, None);
+    }
+
+    /// The X to pay for an ability with {X} in its cost, given the rest of its mana.
+    fn choose_x(&self, p: usize, i: usize, ab: &SimAbility, fixed: u32, xs: u8) -> Option<i32> {
+        let spare = self.mana_available(p).saturating_sub(fixed);
+        let most = (spare / xs.max(1) as u32).min(12) as i32;
+        if ab.text.contains("mana value x") {
+            // Steel Hellkite: the mana value that destroys the most of the players it hit.
+            let hit = self.perms[i].hit_turn;
+            let mut best: Option<(f32, i32)> = None;
+            for v in 0..=most {
+                let gain: f32 = (0..self.perms.len())
+                    .filter(|&i| {
+                        let y = &self.perms[i];
+                        !y.is(T_LAND)
+                            && ai::perm_mv(self, y) as i32 == v
+                            && hit & (1 << y.ctrl.min(7)) != 0
+                    })
+                    .map(|i| ai::perm_value(self, i))
+                    .sum();
+                if gain > 0.0 && best.is_none_or(|b| gain > b.0) {
+                    best = Some((gain, v));
+                }
+            }
+            return best.map(|b| b.1);
+        }
+        (most >= 1).then_some(most)
+    }
+
+    /// The mana an activated ability needs now and the X it pays (None if it can't be
+    /// activated: a cost can't be paid, it's used up, or its "activate only if" fails).
+    pub fn activation_plan(&self, p: usize, i: usize, k: usize) -> Option<(Mana, Option<i32>)> {
         let x = &self.perms[i];
         if x.ctrl as usize != p {
             return None;
@@ -583,6 +839,7 @@ impl<'a> Game<'a> {
                 sac_other,
                 discard,
                 life,
+                extra,
                 ..
             } => {
                 if ab
@@ -591,8 +848,13 @@ impl<'a> Game<'a> {
                     .any(|e| matches!(e, crate::abilities::Effect::AddMana(_)))
                     && *tap
                     && *mana == 0
+                    && extra.tap_others == 0
                 {
                     return None; // mana abilities are used as mana sources
+                }
+                // Abilities that work from the graveyard or the hand, not the battlefield.
+                if extra.from_graveyard || extra.from_hand || ab.graveyard_only() {
+                    return None;
                 }
                 if *tap && (x.tapped || (x.is_creature() && x.sick && !x.has(HASTE))) {
                     return None;
@@ -609,10 +871,45 @@ impl<'a> Game<'a> {
                 if ab.once && x.powered {
                     return None;
                 }
+                if ab.once_per_turn && k < 32 && x.fired & (1 << k) != 0 {
+                    return None;
+                }
                 if x.activations >= 3 {
                     return None; // keep loops in check
                 }
-                Some(Mana::generic(*mana as u32))
+                if extra.remove > 0 {
+                    let have = if extra.remove_plus {
+                        x.counters
+                    } else {
+                        x.other_counters
+                    };
+                    if have < extra.remove as i16 {
+                        return None;
+                    }
+                }
+                if extra.tap_others > 0
+                    && self.tap_helpers(p, x.id, extra).len() < extra.tap_others as usize
+                {
+                    return None;
+                }
+                self.gy_cost(p, extra, None)?;
+                // "Activate only if ..." (Boast: only if it attacked this turn).
+                if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, Some(i)) {
+                    return None;
+                }
+                // "Remove any number of +1/+1 counters": all of them, X = how many.
+                let mut x_paid = extra.remove_all.then_some(if extra.remove_plus {
+                    x.counters as i32
+                } else {
+                    x.other_counters as i32
+                });
+                let mut total = *mana as u32;
+                if extra.x > 0 {
+                    let v = self.choose_x(p, i, ab, total, extra.x)?;
+                    total += v as u32 * extra.x as u32;
+                    x_paid = Some(v);
+                }
+                Some((Mana::generic(total), x_paid))
             }
             Trig::PowerUp(full) => {
                 if x.powered {
@@ -633,13 +930,26 @@ impl<'a> Game<'a> {
                         cost = cost.minus_generic(spare);
                     }
                 }
-                Some(cost)
+                // "Power-up abilities of other creatures you control cost {3} less" (Hulk).
+                let less: u32 = self
+                    .perms
+                    .iter()
+                    .filter(|y| y.ctrl as usize == p && y.id != x.id)
+                    .filter_map(|y| y.card)
+                    .map(|r| self.card(r).power_up_less as u32)
+                    .sum();
+                Some((cost.minus_generic(less), None))
             }
             Trig::Loyalty(n) => {
                 if x.loyalty_used || x.loyalty + (*n as i16) < 0 {
                     return None;
                 }
-                Some(Mana::default())
+                // "[0]: ... Activate only if there are twenty-five or more loyalty counters
+                // among Jaces you control."
+                if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, Some(i)) {
+                    return None;
+                }
+                Some((Mana::default(), None))
             }
             _ => None,
         }
@@ -648,7 +958,7 @@ impl<'a> Game<'a> {
     /// Activates ability `k` of permanent `id` (paying all its costs). False if it couldn't.
     pub fn activate(&mut self, p: usize, id: u32, k: usize) -> bool {
         let Some(i) = self.idx(id) else { return false };
-        let Some(cost) = self.activation_cost(p, i, k) else {
+        let Some((cost, x_paid)) = self.activation_plan(p, i, k) else {
             return false;
         };
         if !self.pay(p, &cost) {
@@ -665,6 +975,7 @@ impl<'a> Game<'a> {
                 sac_other,
                 discard,
                 life,
+                extra,
                 ..
             } => {
                 if *tap {
@@ -680,6 +991,36 @@ impl<'a> Game<'a> {
                 if ab.once {
                     self.perms[i].powered = true;
                 }
+                if ab.once_per_turn && k < 32 {
+                    self.perms[i].fired |= 1 << k;
+                }
+                if extra.remove > 0 {
+                    let y = &mut self.perms[i];
+                    let n = match x_paid {
+                        Some(n) if extra.remove_all => n as i16,
+                        _ => extra.remove as i16,
+                    };
+                    if extra.remove_plus {
+                        y.counters -= n;
+                    } else {
+                        y.other_counters -= n;
+                    }
+                }
+                match extra.add_counter {
+                    1 => self.perms[i].stun += 1,
+                    2 => self.add_other_counters(i, 1),
+                    _ => {}
+                }
+                for t in self.tap_helpers(p, id, extra) {
+                    if let Some(j) = self.idx(t) {
+                        self.perms[j].tapped = true;
+                    }
+                }
+                if let Some(slots) = self.gy_cost(p, extra, None) {
+                    if !slots.is_empty() {
+                        self.exile_from_graveyard(p, slots);
+                    }
+                }
                 if *life > 0 {
                     self.lose_life(p, *life as i32);
                 }
@@ -691,10 +1032,16 @@ impl<'a> Game<'a> {
                         self.sacrifice(f);
                     }
                 }
-                if *sac_self {
+                if *sac_self || extra.exile_self || extra.return_self {
                     snapshot = Some(x.clone());
                     if let Some(i) = self.idx(id) {
-                        self.sacrifice(i);
+                        if *sac_self {
+                            self.sacrifice(i);
+                        } else if extra.exile_self {
+                            self.leave(i, Zone::Exile, false);
+                        } else {
+                            self.leave(i, Zone::Hand, false);
+                        }
                     }
                 }
             }
@@ -702,6 +1049,7 @@ impl<'a> Game<'a> {
             Trig::Loyalty(n) => {
                 self.perms[i].loyalty += *n as i16;
                 self.perms[i].loyalty_used = true;
+                self.players[p].loyalty_turn = true;
                 self.emit(Ev::LoyaltyActivated, p, Some(id));
             }
             _ => return false,
@@ -723,112 +1071,93 @@ impl<'a> Game<'a> {
             from_graveyard: false,
             kicked: false,
             overloaded: false,
+            x: x_paid,
         });
         self.run_pending();
         self.sba();
         true
     }
 
-    /// The mana ability `k` of the card at `gy` in `p`'s graveyard needs to be activated
-    /// from there ("{1}{B}: Return ~ from your graveyard to the battlefield"), if it can be.
-    pub fn graveyard_activation_cost(&self, p: usize, gy: usize, k: usize) -> Option<Mana> {
-        let idx = *self.players[p].graveyard.get(gy)?;
-        let c = &self.players[p].cards[idx as usize];
+    /// What activating ability `k` of the card in graveyard slot `gk` costs ("{4}{B}{B},
+    /// Exile this card from your graveyard: ..."); None if it can't be activated.
+    pub fn graveyard_activation_cost(&self, p: usize, gk: usize, k: usize) -> Option<Mana> {
+        let pl = &self.players[p];
+        let c = &pl.cards[*pl.graveyard.get(gk)? as usize];
         let ab = c.abilities.get(k)?;
         let Trig::Activated {
             mana,
-            sac_other,
-            discard,
+            tap: false,
             life,
+            discard,
+            sac_other,
+            extra,
             ..
         } = &ab.trig
         else {
             return None;
         };
-        if !ab.from_graveyard || !self.cond_holds(&ab.cond, p, None) {
+        // "Exile ~ from your graveyard: ...", "{1}{B}: Return ~ from your graveyard to the
+        // battlefield tapped".
+        if !(extra.from_graveyard || ab.graveyard_only()) {
             return None;
         }
-        let cost = ab.text.split(": ").next().unwrap_or("");
-        if *sac_other && self.sac_fodder(p, u32::MAX, &ab.text).is_none()
-            || *discard && self.players[p].hand.is_empty()
-            || *life as i32 >= self.players[p].life
-        {
+        if ab.text.contains("only as a sorcery") && self.active != p {
             return None;
         }
-        // "Exile another creature card from your graveyard" (Gallia).
-        if cost.contains("exile another creature card from your graveyard")
-            && self.other_creature_card(p, gy).is_none()
-        {
+        if *life as i32 >= pl.life || *discard && pl.hand.is_empty() {
             return None;
         }
-        if ab.text.contains("activate only as a sorcery") && self.active != p {
+        if *sac_other && self.sac_fodder(p, u32::MAX, &ab.text).is_none() {
             return None;
         }
-        let m = Mana::parse(cost);
-        Some(if m.total() == 0 && *mana > 0 {
-            Mana::generic(*mana as u32)
-        } else {
-            m
-        })
+        if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, None) {
+            return None;
+        }
+        self.gy_cost(p, extra, Some(gk))?;
+        Some(Mana::generic(*mana as u32))
     }
 
-    /// Another creature card in `p`'s graveyard (the least valuable), not the one at `gy`.
-    fn other_creature_card(&self, p: usize, gy: usize) -> Option<usize> {
-        let pl = &self.players[p];
-        (0..pl.graveyard.len())
-            .filter(|&j| j != gy && pl.cards[pl.graveyard[j] as usize].is(T_CREATURE))
-            .min_by(|&a, &b| {
-                let va = pl.cards[pl.graveyard[a] as usize].value;
-                let vb = pl.cards[pl.graveyard[b] as usize].value;
-                va.partial_cmp(&vb).unwrap()
-            })
-    }
-
-    /// Activates ability `k` of the card at `gy` in `p`'s graveyard, paying its costs.
-    pub fn activate_from_graveyard(&mut self, p: usize, gy: usize, k: usize) -> bool {
-        let Some(cost) = self.graveyard_activation_cost(p, gy, k) else {
+    /// Activates an ability of a card in the graveyard (paying its costs).
+    pub fn activate_from_graveyard(&mut self, p: usize, gk: usize, k: usize) -> bool {
+        let Some(cost) = self.graveyard_activation_cost(p, gk, k) else {
             return false;
         };
         if !self.pay(p, &cost) {
             return false;
         }
-        let idx = self.players[p].graveyard[gy];
+        let idx = self.players[p].graveyard[gk];
         let c: &'a SimCard = &self.players[p].cards[idx as usize];
         let ab = &c.abilities[k];
         let Trig::Activated {
-            sac_other,
-            discard,
             life,
+            discard,
+            sac_other,
+            extra,
             ..
-        } = ab.trig
+        } = &ab.trig
         else {
             return false;
         };
-        let cost_text = ab.text.split(": ").next().unwrap_or("");
-        if life > 0 {
-            self.lose_life(p, life as i32);
+        if *life > 0 {
+            self.lose_life(p, *life as i32);
         }
-        if discard {
-            self.discard(p);
-        }
-        if sac_other {
+        if *sac_other {
             if let Some(f) = self.sac_fodder(p, u32::MAX, &ab.text) {
                 self.sacrifice(f);
             }
         }
-        if cost_text.contains("exile another creature card from your graveyard") {
-            if let Some(j) = self.other_creature_card(p, gy) {
-                let e = self.players[p].graveyard.remove(j);
-                self.players[p].exile.push(e);
-            }
+        if *discard {
+            self.discard(p);
         }
-        // "Exile ~ from your graveyard: ..." - the card itself is the cost.
-        if cost_text.contains("exile ~ from your graveyard") {
-            if let Some(j) = self.players[p].graveyard.iter().position(|&x| x == idx) {
-                self.players[p].graveyard.remove(j);
-                self.players[p].exile.push(idx);
-            }
+        // The card may have moved in the graveyard (a sacrifice or discard adds cards on top).
+        let Some(gk) = self.players[p].graveyard.iter().rposition(|&c| c == idx) else {
+            return false;
+        };
+        let mut slots = self.gy_cost(p, extra, Some(gk)).unwrap_or_default();
+        if extra.from_graveyard {
+            slots.push(gk);
         }
+        self.exile_from_graveyard(p, slots);
         self.note(|| format!("P{} activates {} from the graveyard", p, c.name));
         self.pending.push(Pending {
             ctrl: p as u8,
@@ -843,6 +1172,7 @@ impl<'a> Game<'a> {
             from_graveyard: true,
             kicked: false,
             overloaded: false,
+            x: None,
         });
         self.run_pending();
         self.sba();
@@ -856,9 +1186,17 @@ impl<'a> Game<'a> {
         let Some(r) = self.perms[e].card else {
             return false;
         };
-        let cost = Mana::generic(self.card(r).equip.unwrap_or(2) as u32);
-        if self.perms[e].attached == Some(target_id) || !self.pay(p, &cost) {
+        let c = self.card(r);
+        let cost = c.equip.unwrap_or(Mana::generic(2));
+        let life = c.equip_life as i32;
+        if self.perms[e].attached == Some(target_id)
+            || life > 0 && self.players[p].life <= life
+            || !self.pay(p, &cost)
+        {
             return false;
+        }
+        if life > 0 {
+            self.lose_life(p, life);
         }
         if let Some(e) = self.idx(equip_id) {
             self.perms[e].attached = Some(target_id);
@@ -962,6 +1300,7 @@ impl<'a> Game<'a> {
                             from_graveyard: false,
                             kicked: false,
                             overloaded: false,
+                            x: None,
                         });
                     }
                 }
@@ -996,9 +1335,10 @@ impl<'a> Game<'a> {
                                 subject: None,
                                 teamwork: false,
                                 gift: false,
-                                from_graveyard: true,
+                                from_graveyard: false,
                                 kicked: false,
                                 overloaded: false,
+                                x: None,
                             });
                         }
                     }
@@ -1014,6 +1354,7 @@ impl<'a> Game<'a> {
     pub fn take_turn(&mut self, a: usize, first_turn: bool) {
         self.active = a;
         self.died_this_turn = 0;
+        self.dead.clear();
         for pl in self.players.iter_mut() {
             pl.lands_played = 0;
             pl.spells_this_turn = 0;
@@ -1022,10 +1363,13 @@ impl<'a> Game<'a> {
             pl.drawn_this_turn = 0;
             pl.attacked_this_turn = false;
             pl.gained_life_turn = false;
+            pl.lost_life_last_turn = pl.lost_life_turn;
             pl.lost_life_turn = false;
             pl.life_gained_turn = 0;
             pl.discarded_turn = 0;
             pl.extra_lands = 0;
+            pl.scried_turn = false;
+            pl.loyalty_turn = false;
             for g in pl.grudge.iter_mut() {
                 *g *= 0.8;
             }
@@ -1036,6 +1380,10 @@ impl<'a> Game<'a> {
                 x.goad = None;
             }
             x.fired = 0;
+            x.hit_turn = 0;
+            x.hurt_by = 0;
+            x.attacked_turn = false;
+            x.entered_turn = false;
         }
         // Untap.
         // "~ doesn't untap during your untap step" (Bombur: unless an enduring story).

@@ -23,6 +23,10 @@ pub struct Ctx<'a> {
     pub until_eot: bool,
     /// Cast with overload: "target" means "each" (of the opponents' things).
     pub overload: bool,
+    /// The X paid for the spell or ability.
+    pub x: Option<i32>,
+    /// What was sacrificed to pay for it ("damage equal to that creature's power").
+    pub paid: Option<Perm>,
 }
 
 /// Labels of `Effect::Rule` the simulator acts on; the rest change nothing in its games.
@@ -111,6 +115,36 @@ impl<'a> Game<'a> {
         }
         let t = ctx.text;
         let me = ctx.ctrl;
+        // The sacrificed creature: "damage equal to that creature's power".
+        if let Some(s) = &ctx.paid {
+            if t.contains("that creature's power") || t.contains("sacrificed creature's power") {
+                return s.p.max(0) as i32;
+            }
+        }
+        // "Draw a card for each graveyard with seven or more cards in it".
+        if t.contains("for each graveyard with") {
+            let need = t
+                .split("for each graveyard with ")
+                .nth(1)
+                .and_then(|r| r.split_whitespace().next())
+                .and_then(|w| match w {
+                    "seven" => Some(7),
+                    "ten" => Some(10),
+                    d => d.parse().ok(),
+                })
+                .unwrap_or(7);
+            return self
+                .players
+                .iter()
+                .filter(|p| p.alive && p.graveyard.len() >= need)
+                .count() as i32;
+        }
+        // X paid for the spell or ability ("draw X cards").
+        if let Some(x) = ctx.x {
+            if !t.contains("where x is") && !t.contains("for each") {
+                return x.max(0);
+            }
+        }
         let subject_or_src = |f: &dyn Fn(&Perm) -> i32| -> Option<i32> {
             ctx.subject
                 .and_then(|id| self.idx(id))
@@ -560,7 +594,9 @@ impl<'a> Game<'a> {
             if !side {
                 continue;
             }
-            if another && Some(x.id) == src_id && (!t.mass || t.other) {
+            // "Put a +1/+1 counter on each other creature you control": not the source.
+            let mass_other = t.other || text.contains("each other ") || text.contains("all other ");
+            if Some(x.id) == src_id && (another && !t.mass || t.mass && mass_other) {
                 continue;
             }
             if t.restricted && !t.mass {
@@ -576,13 +612,73 @@ impl<'a> Game<'a> {
                 if x.protection & src_colors != 0 && !mine {
                     continue;
                 }
-                if !mine && x.ward > 0 && !self.can_pay(me, &Mana::generic(x.ward as u32)) {
+                if !mine && !self.ward_payable(me, x) {
                     continue;
                 }
             }
             out.push(i);
         }
         out
+    }
+
+    /// Can `me` pay the ward of permanent `x` (mana, life, a discard, sacrifices, poison),
+    /// without paying too much for it?
+    pub fn ward_payable(&self, me: usize, x: &Perm) -> bool {
+        let w = x.card.map(|r| self.card(r).ward_cost).unwrap_or_default();
+        let pl = &self.players[me];
+        let mana_ok = x.ward == 0 || self.can_pay(me, &Mana::generic(x.ward as u32));
+        let discard_ok = !pl.hand.is_empty();
+        if w.discard_or_mana {
+            return mana_ok || discard_ok;
+        }
+        let mine = self
+            .perms
+            .iter()
+            .filter(|y| y.ctrl as usize == me && y.commander == 0)
+            .count();
+        mana_ok
+            && (!w.discard || discard_ok)
+            && (w.life == 0 || pl.life > w.life as i32 + 5)
+            && (w.poison == 0 || (pl.poison as u32 + w.poison as u32) < 10)
+            && (w.sacrifice == 0 || mine > w.sacrifice as usize + 2)
+    }
+
+    /// Pays the ward of permanent `i` targeted by `me`. False if it can't be paid (the
+    /// spell or ability is countered).
+    pub fn pay_ward(&mut self, me: usize, i: usize) -> bool {
+        let x = &self.perms[i];
+        let w = x.card.map(|r| self.card(r).ward_cost).unwrap_or_default();
+        let mana = Mana::generic(x.ward as u32);
+        if x.ward == 0 && w == WardCost::default() {
+            return true;
+        }
+        if !self.ward_payable(me, x) {
+            return false;
+        }
+        if w.discard_or_mana {
+            if !self.pay(me, &mana) {
+                self.discard(me);
+            }
+            return true;
+        }
+        if x.ward > 0 && !self.pay(me, &mana) {
+            return false;
+        }
+        if w.life > 0 {
+            self.lose_life(me, w.life as i32);
+        }
+        if w.discard {
+            self.discard(me);
+        }
+        for _ in 0..w.sacrifice {
+            if let Some(j) = ai::sacrifice_choice(self, me, 0xFFFF) {
+                self.sacrifice(j);
+            }
+        }
+        if w.poison > 0 {
+            self.players[me].poison = self.players[me].poison.saturating_add(w.poison);
+        }
+        true
     }
 
     /// Picks targets and handles targeting side effects (ward is paid, "becomes the target"
@@ -610,8 +706,7 @@ impl<'a> Game<'a> {
             let Some(i) = self.idx(id) else { continue };
             let owner = self.perms[i].ctrl as usize;
             if owner != ctx.ctrl {
-                let ward = self.perms[i].ward;
-                if ward > 0 && !self.pay(ctx.ctrl, &Mana::generic(ward as u32)) {
+                if !self.pay_ward(ctx.ctrl, i) {
                     continue; // countered by ward
                 }
                 if harmful && ai::protect(self, owner, id) {
@@ -688,11 +783,29 @@ impl<'a> Game<'a> {
             return;
         };
         let src_idx = pend.source.and_then(|id| self.idx(id));
+        // The creature the event was about, as it is or as it last was (if it died).
+        let subject = pend.subject.and_then(|id| {
+            self.idx(id)
+                .map(|i| self.perms[i].clone())
+                .or_else(|| self.dead.iter().rev().find(|x| x.id == id).cloned())
+        });
+        let source = src_idx
+            .map(|i| self.perms[i].clone())
+            .or_else(|| pend.snapshot.clone());
         let eval = |c: &Cond| match c {
             Cond::Teamwork => pend.teamwork,
             Cond::Gift => pend.gift,
             Cond::CastFromGraveyard => pend.from_graveyard,
             Cond::Kicked => pend.kicked,
+            Cond::XAtLeast(n) => pend.x.unwrap_or(0) >= *n,
+            Cond::SubjectBigger => match (&subject, &source) {
+                (Some(s), Some(it)) => s.p > it.p || s.t > it.t,
+                _ => false,
+            },
+            Cond::SubjectWasAttacking => subject.as_ref().is_some_and(|s| s.attacking),
+            Cond::SubjectHurtBySource => subject
+                .as_ref()
+                .is_some_and(|s| pend.source.is_some_and(|id| s.hurt_by == id)),
             c => self.cond_holds(c, me, src_idx),
         };
         let holds = match &ab.cond {
@@ -713,6 +826,8 @@ impl<'a> Game<'a> {
             text: &ab.text,
             until_eot: ab.until_eot,
             overload: pend.overloaded,
+            x: pend.x,
+            paid: None,
         };
         // "Any opponent may sacrifice a creature. If a player does, tap ~ and ..."
         // (Desecration Demon): an opponent feeds it a spare creature to tap it down; if
@@ -730,7 +845,34 @@ impl<'a> Game<'a> {
                 }
             }
         }
-        if ab.optional && !ai::wants_optional(self, &ctx, ab) {
+        // A cost paid as it resolves ("you may sacrifice another creature. If you do, ..."):
+        // the effects after it need the payment; the AI decides whether it's worth it.
+        let mut paid_ok = true;
+        if let Some(pc) = &ab.pay {
+            let s = pend.source.and_then(|id| self.idx(id));
+            let allowed = pc.cond.as_ref().is_none_or(|c| self.cond_holds(c, me, s));
+            let want = allowed && (!pc.optional || ai::wants_to_pay(self, &ctx, ab, pc));
+            // "You may pay {X}. When you do, put X +1/+1 counters on ~": the X it can spare.
+            if let (true, ResCost::Mana(m)) = (want, &pc.cost) {
+                if m.x {
+                    let x = self.mana_available(me).saturating_sub(m.total()).min(6) as i32;
+                    ctx.x = Some(x);
+                }
+            }
+            let cost = match (&pc.cost, ctx.x) {
+                (ResCost::Mana(m), Some(x)) if m.x => ResCost::Mana(m.plus_generic(x as u32)),
+                (c, _) => c.clone(),
+            };
+            paid_ok = want
+                && ctx.x != Some(0)
+                && match self.pay_res_cost(&ctx, &cost) {
+                    Some(snap) => {
+                        ctx.paid = snap;
+                        true
+                    }
+                    None => false,
+                };
+        } else if ab.optional && !ai::wants_optional(self, &ctx, ab) {
             return;
         }
         let picks: Vec<usize> = if ab.modal {
@@ -747,7 +889,7 @@ impl<'a> Game<'a> {
             if fresh {
                 if let Some(i) = pend.source.and_then(|id| self.idx(id)) {
                     for &k in &picks {
-                        let m = ab.modes.get(k).copied().unwrap_or(k as u8);
+                        let m = ab.mode_of(k);
                         if m < 32 {
                             self.perms[i].modes_used |= 1 << m;
                         }
@@ -756,7 +898,12 @@ impl<'a> Game<'a> {
             }
             picks
         } else {
-            (0..ab.effects.len()).collect()
+            (0..ab.effects.len())
+                .filter(|&k| match &ab.pay {
+                    Some(pc) => k < pc.skip_from as usize || paid_ok && k >= pc.first as usize,
+                    None => true,
+                })
+                .collect()
         };
         self.note(|| {
             format!(
@@ -769,16 +916,32 @@ impl<'a> Game<'a> {
         self.reborn = None;
         self.last_countered.clear();
         self.last_targets.clear();
+        // "Reveal the top card of your library. If it's an artifact card, draw a card."
+        self.focus_card = ab
+            .gate
+            .as_ref()
+            .filter(|g| g.top)
+            .and_then(|_| self.players[me].library.last().map(|&c| (me as u8, c)));
         for k in picks {
             if !self.players[me].alive {
                 return;
             }
+            if let Some(gt) = &ab.gate {
+                let ok = match &gt.cond {
+                    Some(c) => {
+                        let s = pend.source.and_then(|id| self.idx(id));
+                        self.cond_holds(c, me, s)
+                    }
+                    None => self.focus_is(gt),
+                };
+                if (gt.from as usize..gt.to as usize).contains(&k) && !ok {
+                    continue;
+                }
+            }
             // A mode reads its own bullet's text.
-            let m = ab.modes.get(k).copied().unwrap_or(0) as usize;
-            ctx.text = match ab.mode_texts.get(m) {
-                Some(t) if ab.modal => t,
-                _ => &ab.text,
-            };
+            if ab.modal {
+                ctx.text = ab.mode_text(ab.mode_of(k));
+            }
             self.apply(&ctx, &ab.effects[k]);
             // Back from the graveyard by its own ability: the rest is about the new permanent.
             if let Some(id) = self.reborn.take() {
@@ -800,9 +963,37 @@ impl<'a> Game<'a> {
         {
             self.players[me].last_ability = Some(pend.clone());
         }
+        // "If ~ is a Scout, it becomes a Human Faerie Detective" (Kellan): its new types
+        // (and size) count for the next "if ~ is a Detective".
+        if ab.text.contains("if ~ is a ") {
+            if let (Some(rest), Some(i)) = (
+                ab.text.split("it becomes a ").nth(1),
+                pend.source.and_then(|id| self.idx(id)),
+            ) {
+                let words: Vec<&str> = rest
+                    .split([' ', '.'])
+                    .take_while(|w| !w.is_empty() && *w != "and")
+                    .collect();
+                let x = &mut self.perms[i];
+                for w in &words {
+                    if let Some((p, t)) = w.split_once('/') {
+                        if let (Ok(p), Ok(t)) = (p.parse(), t.parse()) {
+                            x.base_p = p;
+                            x.base_t = t;
+                        }
+                    }
+                }
+                x.subtypes = words
+                    .iter()
+                    .filter(|w| !w.contains('/'))
+                    .map(|w| w.to_string())
+                    .collect();
+                self.recalc();
+            }
+        }
         // "When you do, ..." right after this ability (not the counter-goal kind).
         if let Some(next) = abilities.get(pend.ability as usize + 1) {
-            if next.trig == Trig::Reflexive && next.counter_goal.is_none() {
+            if next.trig == Trig::Reflexive && next.counter_goal.is_none() && paid_ok {
                 self.pending.insert(
                     0,
                     Pending {
@@ -810,6 +1001,113 @@ impl<'a> Game<'a> {
                         ..pend.clone()
                     },
                 );
+            }
+        }
+    }
+
+    /// "If target player has exactly 10 life, ~ deals 10 damage to that player": Some(the
+    /// opponent at exactly that life, if any) for such texts.
+    fn exact_life_target(&self, me: usize, text: &str) -> Option<Option<usize>> {
+        let life = text
+            .split("player has exactly ")
+            .nth(1)?
+            .split_whitespace()
+            .next()?
+            .parse::<i32>()
+            .ok()?;
+        Some(
+            self.opponents(me)
+                .into_iter()
+                .find(|&o| self.players[o].life == life),
+        )
+    }
+
+    /// Is the card the ability dealt with of the kind a gate asks for?
+    fn focus_is(&self, gt: &Gate) -> bool {
+        let Some(r) = self.focus_card else {
+            return false;
+        };
+        let c = self.card(r);
+        c.types & gt.types == gt.types && gt.subtype.as_ref().is_none_or(|s| c.has_subtype(s))
+    }
+
+    /// Pays a cost while an ability resolves ("you may sacrifice another creature. If you
+    /// do"). None if it can't be paid; otherwise what was sacrificed, if anything.
+    pub fn pay_res_cost(&mut self, ctx: &Ctx, cost: &ResCost) -> Option<Option<Perm>> {
+        let me = ctx.ctrl;
+        let src = ctx.src.unwrap_or(u32::MAX);
+        match cost {
+            ResCost::Free => Some(None),
+            ResCost::Sacrifice { types, other } => {
+                let i = ai::fodder(self, me, *types, if *other { src } else { u32::MAX })?;
+                let snap = self.perms[i].clone();
+                self.sacrifice(i);
+                Some(Some(snap))
+            }
+            ResCost::SacrificeOrDiscard(types) => {
+                if let Some(i) = ai::fodder(self, me, *types, src) {
+                    let snap = self.perms[i].clone();
+                    self.sacrifice(i);
+                    Some(Some(snap))
+                } else if !self.players[me].hand.is_empty() {
+                    self.discard(me);
+                    Some(None)
+                } else {
+                    None
+                }
+            }
+            ResCost::SacrificeSelf => {
+                let i = self.src_idx(ctx)?;
+                let snap = self.perms[i].clone();
+                self.sacrifice(i);
+                Some(Some(snap))
+            }
+            ResCost::Mana(m) => self.pay(me, m).then_some(None),
+            ResCost::Life(n) => {
+                if self.players[me].life <= *n as i32 {
+                    return None;
+                }
+                self.lose_life(me, *n as i32);
+                Some(None)
+            }
+            ResCost::Discard => {
+                if self.players[me].hand.is_empty() {
+                    return None;
+                }
+                self.discard(me);
+                Some(None)
+            }
+            ResCost::RemoveCounter { plus } => {
+                let i = self.src_idx(ctx)?;
+                let x = &mut self.perms[i];
+                if *plus && x.counters > 0 {
+                    x.counters -= 1;
+                } else if !*plus && x.other_counters > 0 {
+                    x.other_counters -= 1;
+                } else {
+                    return None;
+                }
+                Some(None)
+            }
+            ResCost::ExileSelf => {
+                let i = self.src_idx(ctx)?;
+                self.leave(i, Zone::Exile, false);
+                Some(None)
+            }
+            ResCost::ExileNamed(n) => {
+                let name = &ctx.card?.name;
+                let pl = &self.players[me];
+                let same: Vec<usize> = (0..pl.graveyard.len())
+                    .filter(|&k| pl.cards[pl.graveyard[k] as usize].name == *name)
+                    .collect();
+                if same.len() < *n as usize {
+                    return None;
+                }
+                for &k in same.iter().take(*n as usize).rev() {
+                    let c = self.players[me].graveyard.remove(k);
+                    self.players[me].exile.push(c);
+                }
+                Some(None)
             }
         }
     }
@@ -875,6 +1173,7 @@ impl<'a> Game<'a> {
                             from_graveyard: false,
                             kicked: false,
                             overloaded: false,
+                            x: None,
                         });
                         if sac {
                             if let Some(j) = self.idx(x.id) {
@@ -902,6 +1201,7 @@ impl<'a> Game<'a> {
                                 from_graveyard: false,
                                 kicked: false,
                                 overloaded: false,
+                                x: None,
                             });
                         }
                     }
@@ -1001,6 +1301,17 @@ impl<'a> Game<'a> {
         if ctx.text.contains("would die this turn, exile it instead") {
             self.perms[i].finality = true;
         }
+        // "If excess damage was dealt this way": beyond what was lethal.
+        let x = &mut self.perms[i];
+        let lethal = if x.is(T_PLANESWALKER) && !x.is_creature() {
+            x.loyalty
+        } else if deathtouch {
+            1
+        } else {
+            x.t - x.damage
+        };
+        self.last_excess = n - lethal.max(0) as i32;
+        x.hurt_by = ctx.src.unwrap_or(0);
         self.damage_perm(i, n as i16, deathtouch);
         if src.is_some_and(|s| s.has(LIFELINK) && s.is_creature()) {
             self.gain_life(ctx.ctrl, n);
@@ -1048,11 +1359,31 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+            // "Destroy each nonland permanent with mana value X whose controller was dealt
+            // combat damage by ~ this turn" (Steel Hellkite), with the X paid.
+            Effect::Destroy(_) if text.contains("mana value x") && ctx.x.is_some() => {
+                let x = ctx.x.unwrap_or(0);
+                let hit = self.src_perm(ctx).map(|s| s.hit_turn).unwrap_or(0);
+                let only_hit = text.contains("dealt combat damage by");
+                let ids: Vec<u32> = self
+                    .perms
+                    .iter()
+                    .filter(|y| !y.is(T_LAND) && ai::perm_mv(self, y) as i32 == x)
+                    .filter(|y| !only_hit || hit & (1 << y.ctrl.min(7)) != 0)
+                    .map(|y| y.id)
+                    .collect();
+                for id in ids {
+                    if let Some(i) = self.idx(id) {
+                        self.destroy(i);
+                    }
+                }
+            }
             Effect::Destroy(t) => {
                 let harmful = t.whose != Whose::Yours;
                 let mut n = 0;
                 for id in self.choose(ctx, t, harmful) {
                     if let Some(i) = self.idx(id) {
+                        self.focus_card = self.perms[i].card.filter(|_| !t.mass);
                         if self.destroy(i) {
                             n += 1;
                         }
@@ -1086,8 +1417,15 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Damage { amount, to } => {
+                self.last_excess = 0;
                 let n = self.x_value(ctx, amount);
                 if n <= 0 {
+                    return;
+                }
+                if let Some(o) = self.exact_life_target(me, text) {
+                    if let Some(o) = o {
+                        self.hurt_player(ctx, o, n);
+                    }
                     return;
                 }
                 let each_opp = text.contains("each opponent") || text.contains("each player");
@@ -1128,8 +1466,16 @@ impl<'a> Game<'a> {
                                 .iter()
                                 .any(|&i| self.perms[i].id == id)
                             {
-                                self.emit_targeted(id);
-                                self.hurt(ctx, id, n);
+                                let paid = match self.idx(id) {
+                                    Some(i) if self.perms[i].ctrl as usize != me => {
+                                        self.pay_ward(me, i)
+                                    }
+                                    _ => true,
+                                };
+                                if paid {
+                                    self.emit_targeted(id);
+                                    self.hurt(ctx, id, n);
+                                }
                             }
                         }
                         ai::Hit::None => {}
@@ -1154,9 +1500,11 @@ impl<'a> Game<'a> {
                     };
                     let (pa, da) = (self.perms[a].p, self.perms[a].has(DEATHTOUCH));
                     let (pb, db) = (self.perms[b].p, self.perms[b].has(DEATHTOUCH));
+                    self.perms[b].hurt_by = my_id;
                     self.damage_perm(b, pa, da);
                     if !text.contains("deals damage equal to its power") || text.contains("fight") {
                         if let Some(a) = self.idx(my_id) {
+                            self.perms[a].hurt_by = id;
                             self.damage_perm(a, pb, db);
                         }
                     }
@@ -1577,11 +1925,32 @@ impl<'a> Game<'a> {
                 let n = self.x_value(ctx, amount);
                 let victims: Vec<usize> = if *each {
                     self.opponents(me)
+                } else if let Some(o) = self.exact_life_target(me, text) {
+                    o.into_iter().collect()
                 } else {
                     ai::choose_opponent(self, me, n).into_iter().collect()
                 };
                 let mut total = 0;
                 for o in victims {
+                    // "... loses 3 life unless that player sacrifices a nonland permanent or
+                    // discards a card": they pay with something they can spare.
+                    if text.contains(" unless that player") {
+                        let types = if text.contains("nonland permanent") {
+                            0xFFFF & !T_LAND
+                        } else {
+                            T_CREATURE
+                        };
+                        if text.contains("sacrifices") {
+                            if let Some(i) = ai::fodder(self, o, types, u32::MAX) {
+                                self.sacrifice(i);
+                                continue;
+                            }
+                        }
+                        if text.contains("discards a card") && !self.players[o].hand.is_empty() {
+                            self.discard(o);
+                            continue;
+                        }
+                    }
                     if text.contains("damage") {
                         self.hurt_player(ctx, o, n);
                     } else {
@@ -1644,6 +2013,27 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+            // "Return this card from your graveyard to the battlefield tapped" (Gallia).
+            Effect::Reanimate if text.contains("return ~ from your graveyard") => {
+                let Some(c) = ctx.card else { return };
+                let pl = &self.players[me];
+                let Some(k) = (0..pl.graveyard.len())
+                    .rev()
+                    .find(|&k| pl.cards[pl.graveyard[k] as usize].name == c.name)
+                else {
+                    return;
+                };
+                let card = self.players[me].graveyard.remove(k);
+                self.emit(Ev::LeavesGraveyard, me, None);
+                if let Some(i) = self.enter_card(me, card, me, false) {
+                    if text.contains("tapped") {
+                        self.perms[i].tapped = true;
+                    }
+                    if text.contains("+1/+1 counter") {
+                        self.perms[i].counters += 1;
+                    }
+                }
+            }
             Effect::Reanimate => {
                 let any = text.contains("a graveyard")
                     || text.contains("any graveyard")
@@ -1662,7 +2052,16 @@ impl<'a> Game<'a> {
             }
             Effect::Regrowth => {
                 let creature = text.contains("creature card");
-                let pick = if text.contains("return that card") || text.contains("return it") {
+                let own = ctx
+                    .card
+                    .filter(|_| text.contains("return ~ from your graveyard"));
+                let pick = if let Some(c) = own {
+                    // "Return this card from your graveyard to your hand".
+                    let pl = &self.players[me];
+                    (0..pl.graveyard.len())
+                        .rev()
+                        .find(|&k| pl.cards[pl.graveyard[k] as usize].name == c.name)
+                } else if text.contains("return that card") || text.contains("return it") {
                     // The card that just went there (e.g. the creature that died).
                     self.players[me].graveyard.len().checked_sub(1)
                 } else {
@@ -1671,6 +2070,7 @@ impl<'a> Game<'a> {
                 if let Some(k) = pick {
                     let c = self.players[me].graveyard.remove(k);
                     self.players[me].hand.push(c);
+                    self.focus_card = Some((me as u8, c));
                     self.emit(Ev::LeavesGraveyard, me, None);
                     // "Up to two target creature cards".
                     if text.contains("up to two target") || text.contains("two target") {
@@ -1784,7 +2184,16 @@ impl<'a> Game<'a> {
                 // Anything else ("copy those exiled cards") is read by other effects.
             }
             Effect::Empower(n) => {
-                let k = self.x_value(ctx, n) as i16;
+                // "If excess damage was dealt this way, empower Jace X, where X is that
+                // excess damage": no excess, no Jace.
+                let k = if text.contains("that excess damage") {
+                    self.last_excess.max(0) as i16
+                } else {
+                    self.x_value(ctx, n) as i16
+                };
+                if k <= 0 && text.contains("excess damage") {
+                    return;
+                }
                 let jace = self
                     .perms
                     .iter()
@@ -1804,7 +2213,14 @@ impl<'a> Game<'a> {
                 self.perms[i].loyalty += k;
             }
             Effect::Amass(n) => {
-                let k = self.x_value(ctx, n);
+                let k = if text.contains("that excess damage") {
+                    self.last_excess.max(0)
+                } else {
+                    self.x_value(ctx, n)
+                };
+                if k <= 0 && text.contains("excess damage") {
+                    return;
+                }
                 let army = self
                     .perms
                     .iter()
@@ -2411,6 +2827,7 @@ impl<'a> Game<'a> {
                     from_graveyard: false,
                     kicked: false,
                     overloaded: false,
+                    x: None,
                 });
             }
         }
@@ -2545,6 +2962,7 @@ impl<'a> Game<'a> {
                             from_graveyard: false,
                             kicked: false,
                             overloaded: false,
+                            x: None,
                         });
                     }
                 }
