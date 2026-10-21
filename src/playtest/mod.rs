@@ -39,6 +39,14 @@ pub struct Prepared {
 }
 
 impl Prepared {
+    /// The commanders' names (for logs).
+    pub fn commanders_names(&self) -> Vec<String> {
+        self.commanders
+            .iter()
+            .map(|(i, _)| self.cards[*i as usize].name.clone())
+            .collect()
+    }
+
     pub fn new(deck: &Deck, db: &CardDb) -> Prepared {
         let mut cards = Vec::new();
         let mut library = Vec::new();
