@@ -237,6 +237,12 @@ pub fn ability_value(a: &Ability) -> f32 {
     } else {
         vals.iter().sum()
     };
+    // Paid by removing counters the card has to build up first (Ramos' five): an occasional
+    // burst that also shrinks it, not a repeatable ability.
+    let counter_cost = matches!(a.when.first(), Some(When::Activated(c)) if c.other)
+        && a.text.contains("remove ")
+        && (a.text.contains("counters from ~") || a.text.contains("counters from this"));
+    let v = if counter_cost && v > 0.0 { v * 0.35 } else { v };
     v * times(a) * ABILITY_SCALE
 }
 
