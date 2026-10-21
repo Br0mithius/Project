@@ -773,3 +773,364 @@ fn instant_speed_plays_at_end_of_turn_and_in_combat() {
     ai::before_blocks(&mut g, 1, &at);
     assert!(g.idx(giant).is_none(), "removal on the attacker");
 }
+
+// ------------------------------------------------------------ card readings (league cards)
+
+/// Resolves ability `k` of card `idx` (player 0's list) as if it triggered or was activated
+/// from permanent `src` (None: from nowhere / the graveyard).
+fn fire(g: &mut Game, idx: u16, k: usize, src: Option<u32>) {
+    g.pending.push(Pending {
+        ctrl: 0,
+        source: src,
+        card: (0, idx),
+        back: false,
+        ability: k as u16,
+        snapshot: None,
+        subject: None,
+        teamwork: false,
+        gift: false,
+        from_graveyard: false,
+        kicked: false,
+        overloaded: false,
+    });
+    g.run_pending();
+    g.sba();
+}
+
+/// The index of the first ability of card `idx` whose text contains `what`.
+fn ability(d: &Prepared, idx: u16, what: &str) -> usize {
+    d.cards[idx as usize]
+        .abilities
+        .iter()
+        .position(|a| a.text.contains(what))
+        .unwrap_or_else(|| panic!("no ability with {:?}", what))
+}
+
+#[test]
+fn cards_that_return_themselves_from_the_graveyard() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Reassembling Skeleton",
+            "Hellcat, Undying Vigilante",
+            "Heroes' Bane",
+            "Gallia, Tragic Host",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    // Reassembling Skeleton: "{1}{B}: Return ~ from your graveyard to the battlefield
+    // tapped" - from the graveyard only, and it brings back itself, not the best creature.
+    let skel = put(&mut g, 0, 1);
+    let i = g.idx(skel).unwrap();
+    let k = ability(&d, 1, "from your graveyard");
+    assert!(
+        g.activation_cost(0, i, k).is_none(),
+        "not activated on the battlefield"
+    );
+    g.destroy(i);
+    g.players[0].graveyard.push(3); // a better creature card (Heroes' Bane) is there too
+    let gy = g.players[0].graveyard.iter().position(|&c| c == 1).unwrap();
+    assert!(g.graveyard_activation_cost(0, gy, k).is_some());
+    assert!(g.activate_from_graveyard(0, gy, k));
+    let back = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, 1)))
+        .expect("Skeleton is back");
+    assert!(back.tapped, "it returns tapped");
+    assert_eq!(g.players[0].graveyard, vec![3], "Heroes' Bane stays put");
+    // Gallia needs another creature card to exile as part of the cost.
+    g.players[0].graveyard = vec![4];
+    let k = ability(&d, 4, "from your graveyard");
+    assert!(
+        g.graveyard_activation_cost(0, 0, k).is_none(),
+        "no other creature card to exile"
+    );
+    // Hellcat: dies -> returns with a +1/+1 counter, no abilities but haste; the second time
+    // she stays dead.
+    let cat = put(&mut g, 0, 2);
+    g.destroy(g.idx(cat).unwrap());
+    g.run_pending();
+    g.sba();
+    let i = g
+        .perms
+        .iter()
+        .position(|x| x.card == Some((0, 2)))
+        .expect("Hellcat returned");
+    let x = &g.perms[i];
+    assert_eq!((x.p, x.t), (3, 3));
+    assert!(x.no_abilities && x.has(HASTE));
+    g.destroy(i);
+    g.run_pending();
+    g.sba();
+    assert!(
+        !g.perms.iter().any(|x| x.card == Some((0, 2))),
+        "without her abilities she doesn't come back again"
+    );
+}
+
+#[test]
+fn spell_copies_and_token_copies() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Pyromancer's Goggles",
+            "Lightning Strike",
+            "Electroduplicate",
+            "Guttersnipe",
+            "Loki Laufeyson",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'R');
+    // Pyromancer's Goggles: its mana casting a red instant copies it (3 + 3 damage).
+    put(&mut g, 0, 1);
+    let life = g.players[1].life;
+    g.players[0].hand.push(2);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[1].life, life - 6, "Lightning Strike and its copy");
+    // The Goggles' own ability makes no token copy of a creature.
+    assert!(!g.perms.iter().any(|x| x.tok == Tok::Other));
+    // Electroduplicate: a token copy of our creature, with haste, gone at the end step.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'R');
+    let ogre = put(&mut g, 0, 4);
+    g.players[0].hand.push(3);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let copy = g
+        .perms
+        .iter()
+        .find(|x| x.tok == Tok::Other && x.card == Some((0, 4)))
+        .expect("a token copy of the creature");
+    assert!(copy.has(HASTE) && copy.sac_at_end);
+    assert_eq!(copy.p, perm(&g, ogre).p);
+    // Loki: "when you next cast an instant or sorcery spell ... copy that spell".
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'R');
+    let loki = put(&mut g, 0, 5);
+    let k = ability(&d, 5, "next cast");
+    fire(&mut g, 5, k, Some(loki));
+    assert_eq!(g.players[0].copy_next, vec![2], "up to Loki's power");
+    assert!(
+        !g.perms.iter().any(|x| x.tok != Tok::None),
+        "no token copy of a creature"
+    );
+}
+
+#[test]
+fn counters_on_entering_and_counted_power() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Forest",
+            "Heroes' Bane",
+            "Guiding Hydra",
+            "Crusader of Odric",
+            "Tarmogoyf",
+            "Blanchwood Armor",
+            "Brass's Bounty",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'G');
+    // "Enters with four +1/+1 counters" on a 0/0: it lives.
+    let bane = put(&mut g, 0, 1);
+    assert_eq!(perm(&g, bane).p, 4);
+    // "Enters with X +1/+1 counters": the X paid.
+    g.entering_x = Some(3);
+    let hydra = put(&mut g, 0, 2);
+    assert_eq!(perm(&g, hydra).p, 4, "1/0 with three counters");
+    // Crusader of Odric: P/T = creatures you control (Bane, Hydra and itself).
+    let crusader = put(&mut g, 0, 3);
+    assert_eq!((perm(&g, crusader).p, perm(&g, crusader).t), (3, 3));
+    // Tarmogoyf: card types among cards in all graveyards (a land and an instant: 2/3).
+    g.players[1].graveyard = vec![0, 6];
+    let goyf = put(&mut g, 0, 4);
+    assert_eq!((perm(&g, goyf).p, perm(&g, goyf).t), (2, 3));
+    // Blanchwood Armor: +1/+1 for each Forest you control (two).
+    let ai = g.enter_card(0, 5, 0, false).unwrap();
+    g.perms[ai].attached = Some(bane);
+    g.sba();
+    assert_eq!(perm(&g, bane).p, 6);
+    // Brass's Bounty: a Treasure for each land you control.
+    g.players[0].hand.push(6);
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    lands(&mut g, 0, 5, 'G');
+    let n_lands = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 0 && x.is(T_LAND))
+        .count();
+    let k = ability(&d, 6, "for each land");
+    fire(&mut g, 6, k, None);
+    let treasures = g.perms.iter().filter(|x| x.tok == Tok::Treasure).count();
+    assert_eq!(treasures, n_lands);
+}
+
+#[test]
+fn end_step_sacrifice_and_untap_rules() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &["Mountain", "Ball Lightning", "Traxos, Scourge Eternal"],
+    );
+    let mut g = game(&[&d, &d]);
+    let ball = put(&mut g, 0, 1);
+    g.phase_triggers(0, Phase::End);
+    assert!(
+        g.idx(ball).is_none(),
+        "sacrificed at the beginning of the end step"
+    );
+    // Traxos doesn't untap during its controller's untap step.
+    let traxos = put(&mut g, 0, 2);
+    let i = g.idx(traxos).unwrap();
+    g.perms[i].tapped = true;
+    g.take_turn(0, false);
+    assert!(perm(&g, traxos).tapped);
+}
+
+#[test]
+fn land_searches_and_lands_without_mana() {
+    let db = db();
+    let d = prep_db(&db, &["Forest", "Evolving Wilds", "Cultivate", "Island"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![0, 3, 0, 3, 0];
+    // Evolving Wilds makes no mana; it fetches a basic.
+    let wilds = put(&mut g, 0, 1);
+    assert_eq!(g.mana_available(0), 0, "no mana ability, no mana");
+    let k = ability(&d, 1, "search your library");
+    assert!(g.activate(0, wilds, k));
+    assert_eq!(
+        g.perms.iter().filter(|x| x.is(T_LAND)).count(),
+        1,
+        "Wilds sacrificed, a basic fetched"
+    );
+    // Cultivate: one basic onto the battlefield, the other into the hand.
+    let hand = g.players[0].hand.len();
+    let lands_before = g.perms.iter().filter(|x| x.is(T_LAND)).count();
+    fire(&mut g, 2, 0, None);
+    assert_eq!(g.players[0].hand.len(), hand + 1);
+    assert_eq!(
+        g.perms.iter().filter(|x| x.is(T_LAND)).count(),
+        lands_before + 1
+    );
+}
+
+#[test]
+fn hands_life_and_the_game() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Dragon Mage",
+            "Demonic Pact",
+            "Feed the Swarm",
+            "Chart a Course",
+            "Herald of Eternal Dawn",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    // Dragon Mage: each player discards their hand, then draws seven.
+    g.players[0].hand = vec![0, 0];
+    g.players[1].hand = vec![0, 0, 0];
+    let mage = put(&mut g, 0, 1);
+    let k = ability(&d, 1, "discards their hand");
+    fire(&mut g, 1, k, Some(mage));
+    assert_eq!(g.players[0].hand.len(), 7);
+    assert_eq!(g.players[1].hand.len(), 7);
+    assert_eq!(
+        g.players[1].graveyard.len(),
+        3,
+        "the old hand was discarded"
+    );
+    // Chart a Course: draw two, then discard one (no attack this turn).
+    let (hand, gy) = (g.players[0].hand.len(), g.players[0].graveyard.len());
+    fire(&mut g, 4, 0, None);
+    assert_eq!(g.players[0].hand.len(), hand + 1);
+    assert_eq!(g.players[0].graveyard.len(), gy + 1);
+    // Feed the Swarm: you lose life equal to the destroyed permanent's mana value.
+    let target = put(&mut g, 1, 1);
+    let life = g.players[0].life;
+    fire(&mut g, 3, 0, None);
+    assert!(g.idx(target).is_none());
+    assert_eq!(g.players[0].life, life - 7, "Dragon Mage's mana value");
+    // Demonic Pact: each mode once ("deals 4 damage and you gain 4 life" is one mode); the
+    // last one left loses the game.
+    let pact = put(&mut g, 0, 2);
+    let k = ability(&d, 2, "upkeep");
+    let modes = &d.cards[2].abilities[k].modes;
+    assert_eq!(modes.iter().max(), Some(&3), "four modes");
+    for _ in 0..3 {
+        fire(&mut g, 2, k, Some(pact));
+    }
+    assert!(g.players[0].alive);
+    let i = g.idx(pact).unwrap();
+    assert_eq!(g.perms[i].modes_used, 0b0111, "the three good modes first");
+    fire(&mut g, 2, k, Some(pact));
+    assert!(!g.players[0].alive, "the fourth mode: you lose the game");
+    // Herald of Eternal Dawn: you can't lose the game.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 5);
+    g.players[0].life = 0;
+    g.sba();
+    assert!(g.players[0].alive);
+}
+
+#[test]
+fn trigger_timing_and_filters() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Guttersnipe",
+            "Lightning Strike",
+            "Scrawling Crawler",
+            "The Theorist, Jace Beleren",
+            "Gardenize",
+        ],
+    );
+    // Guttersnipe triggers on an instant (no "Orc" read in "sorcery").
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    put(&mut g, 0, 1);
+    let life = g.players[1].life;
+    g.players[0].hand.push(2);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.players[1].life <= life - 2, "Guttersnipe's 2 damage");
+    // Scrawling Crawler: an opponent's draws cost them life, ours don't.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 3);
+    let (mine, theirs) = (g.players[0].life, g.players[1].life);
+    g.draw(0, 1);
+    g.draw(1, 1);
+    g.run_pending();
+    assert_eq!(g.players[0].life, mine);
+    assert_eq!(g.players[1].life, theirs - 1);
+    // The Theorist: "each opponent's draw step" - not on our own turn.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 4);
+    let hand = g.players[0].hand.len();
+    g.phase_triggers(0, Phase::Upkeep);
+    assert_eq!(g.players[0].hand.len(), hand);
+    g.phase_triggers(1, Phase::Upkeep);
+    assert_eq!(g.players[0].hand.len(), hand + 1);
+    // Gardenize: "at the beginning of your first main phase", not the upkeep.
+    let k = ability(&d, 5, "main phase");
+    assert!(matches!(
+        d.cards[5].abilities[k].trig,
+        Trig::Phase {
+            phase: Phase::Main,
+            ..
+        }
+    ));
+}

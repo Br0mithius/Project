@@ -2472,6 +2472,14 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
             };
             let mut ability = read_line(&header_line, card, is_spell);
             if let Some(a) = ability.as_mut() {
+                // The whole header ("choose one that hasn't been chosen", "choose two"),
+                // without an ability-word label in front.
+                a.text = normalize_label(&line);
+                if let Some((label, rest)) = a.text.clone().split_once(" — ") {
+                    if !label.contains("choose") {
+                        a.text = rest.to_string();
+                    }
+                }
                 a.effects.clear();
                 a.modes.clear();
                 for (k, m) in modes.iter().enumerate() {

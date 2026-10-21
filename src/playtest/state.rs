@@ -889,7 +889,7 @@ impl<'a> Game<'a> {
         }
         // Dies / leaves triggers of the permanent itself.
         if let Some(r) = perm.card {
-            if to_gy && perm.tok == Tok::None {
+            if to_gy && perm.tok == Tok::None && !perm.no_abilities {
                 let abilities = &self.card(r).abilities;
                 for (ai, a) in abilities.iter().enumerate() {
                     if a.trig == Trig::Dies {
