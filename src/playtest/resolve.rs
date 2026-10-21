@@ -572,11 +572,21 @@ impl<'a> Game<'a> {
         let src_id = ctx.src;
         let text = ctx.text;
         // "equipped creature" / "enchanted creature": what the source is attached to.
-        if (text.contains("equipped creature") || text.contains("enchanted creature")) && !t.mass {
+        // ("Target creature other than enchanted creature" is any other creature.)
+        let other_than_host = text.contains("other than enchanted creature")
+            || text.contains("other than equipped creature");
+        if (text.contains("equipped creature") || text.contains("enchanted creature"))
+            && !t.mass
+            && !other_than_host
+        {
             if let Some(a) = self.src_perm(ctx).and_then(|s| s.attached) {
                 return self.idx(a).into_iter().collect();
             }
         }
+        let host = self
+            .src_perm(ctx)
+            .and_then(|s| s.attached)
+            .filter(|_| other_than_host);
         if t.kind == Kind::It {
             return self.src_idx(ctx).into_iter().collect();
         }
@@ -629,6 +639,9 @@ impl<'a> Game<'a> {
                 }
             };
             if !side {
+                continue;
+            }
+            if host == Some(x.id) {
                 continue;
             }
             // "Put a +1/+1 counter on each other creature you control": not the source.
@@ -2432,20 +2445,69 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Copy if text.contains("becomes a copy") => {
-                // The permanent itself takes on the best target's size and keywords.
-                let Some(s) = self.src_idx(ctx) else { return };
-                let any = !text.contains("you control");
-                if let Some(t) = ai::best_to_copy(self, me, any).filter(|&t| t != s) {
-                    let (bp, bt, kw, types) = {
-                        let x = &self.perms[t];
-                        (x.base_p, x.base_t, x.kw, x.types)
-                    };
-                    let src = &mut self.perms[s];
-                    src.base_p = bp;
-                    src.base_t = bt;
-                    src.kw |= kw;
-                    src.types |= types & (T_CREATURE | T_ARTIFACT);
+                // Who becomes the copy: the enchanted creature (Secret Invasion), one of our
+                // artifacts (Shuri: the least valuable), or the permanent itself.
+                let copier = if text.contains("enchanted creature becomes a copy")
+                    || text.contains("equipped creature becomes a copy")
+                {
+                    self.src_perm(ctx)
+                        .and_then(|s| s.attached)
+                        .and_then(|id| self.idx(id))
+                } else if text.contains("target artifact you control becomes a copy") {
+                    (0..self.perms.len())
+                        .filter(|&i| {
+                            let x = &self.perms[i];
+                            x.ctrl as usize == me && x.is(T_ARTIFACT) && !x.is(T_LAND)
+                        })
+                        .min_by(|&a, &b| {
+                            ai::perm_value(self, a)
+                                .partial_cmp(&ai::perm_value(self, b))
+                                .unwrap()
+                        })
+                } else {
+                    self.src_idx(ctx)
+                };
+                let Some(s) = copier else { return };
+                let s_id = self.perms[s].id;
+                // What it copies: the creature just exiled ("a copy of that creature"), our
+                // best other artifact ("a second target artifact you control"), or the best
+                // creature it may copy.
+                let model: Option<Perm> = if text.contains("copy of that creature") {
+                    self.last_left.clone()
+                } else if text.contains("second target artifact you control") {
+                    (0..self.perms.len())
+                        .filter(|&i| {
+                            let x = &self.perms[i];
+                            x.ctrl as usize == me && x.is(T_ARTIFACT) && x.id != s_id
+                        })
+                        .max_by(|&a, &b| {
+                            ai::perm_value(self, a)
+                                .partial_cmp(&ai::perm_value(self, b))
+                                .unwrap()
+                        })
+                        .map(|i| self.perms[i].clone())
+                } else {
+                    let any = !text.contains("you control");
+                    ai::best_to_copy(self, me, any)
+                        .filter(|&t| t != s)
+                        .map(|t| self.perms[t].clone())
+                };
+                let Some(m) = model else { return };
+                let eot = text.contains("until end of turn");
+                let x = &mut self.perms[s];
+                if eot {
+                    x.temp_base = Some((m.base_p, m.base_t));
+                    x.temp_kw |= m.kw;
+                    if m.is_creature() {
+                        x.temp_creature = true;
+                    }
+                } else {
+                    x.base_p = m.base_p;
+                    x.base_t = m.base_t;
+                    x.kw |= m.kw;
+                    x.types |= m.types & (T_CREATURE | T_ARTIFACT);
                 }
+                self.recalc();
             }
             Effect::Copy => {
                 if text.contains("your next instant or sorcery")
@@ -2661,6 +2723,14 @@ impl<'a> Game<'a> {
             Effect::FreeSpell if free_from_top_of(text).is_some() => {
                 let spec = free_from_top_of(text).unwrap_or_default();
                 self.free_from_top(ctx, spec);
+            }
+            // Uldaros Theorix: "exile up to one target nonland card of each card type from
+            // your graveyard. Copy those cards. You may cast any number of spells with total
+            // mana value 6 or less from among the copies" - permanents become tokens.
+            Effect::FreeSpell
+                if text.contains("from among the copies") && text.contains("of each card type") =>
+            {
+                self.cast_graveyard_copies(ctx);
             }
             Effect::FreeSpell => {
                 let limit = text
@@ -4036,6 +4106,55 @@ fn base_pt_of(text: &str) -> Option<(i16, i16)> {
 }
 
 impl<'a> Game<'a> {
+    /// Uldaros Theorix: the best graveyard card of each card type, total mana value up to
+    /// the limit, exiled and cast as free copies (permanents as tokens).
+    fn cast_graveyard_copies(&mut self, ctx: &Ctx) {
+        let me = ctx.ctrl;
+        let total = ctx
+            .text
+            .split("total mana value ")
+            .nth(1)
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|d| d.parse::<u32>().ok())
+            .unwrap_or(6);
+        let pl = &self.players[me];
+        let mut order: Vec<usize> = (0..pl.graveyard.len())
+            .filter(|&k| !pl.cards[pl.graveyard[k] as usize].is(T_LAND))
+            .collect();
+        order.sort_by(|&a, &b| {
+            let v = |k: usize| pl.cards[pl.graveyard[k] as usize].value;
+            v(b).partial_cmp(&v(a)).unwrap()
+        });
+        let mut types_used = 0u16;
+        let mut mv = 0u32;
+        let mut picks: Vec<u16> = Vec::new();
+        let main = T_CREATURE | T_ARTIFACT | T_ENCHANTMENT | T_PLANESWALKER | T_INSTANT | T_SORCERY;
+        for k in order {
+            let c = &pl.cards[pl.graveyard[k] as usize];
+            let t = c.types & main;
+            if t & types_used != 0 || mv + c.mv as u32 > total {
+                continue;
+            }
+            types_used |= t;
+            mv += c.mv as u32;
+            picks.push(pl.graveyard[k]);
+        }
+        for c in picks {
+            if let Some(k) = self.players[me].graveyard.iter().rposition(|&x| x == c) {
+                self.players[me].graveyard.remove(k);
+                self.players[me].exile.push(c);
+            }
+            let r = (me as u8, c);
+            if self.card(r).is_permanent() {
+                let i = self.new_perm(me, me, Some(r), Tok::Other);
+                self.after_enter(i);
+            } else {
+                self.copy_spell(me, (r, false));
+            }
+        }
+        self.emit(Ev::LeavesGraveyard, me, None);
+    }
+
     /// Casts the best spells from the top of the libraries `spec` names, free; the rest
     /// stay exiled or go to the bottom.
     fn free_from_top(&mut self, ctx: &Ctx, spec: FreeTop) {

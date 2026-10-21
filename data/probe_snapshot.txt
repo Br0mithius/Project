@@ -10269,11 +10269,15 @@ ABILITIES:
 Secret Invasion | {1}{U}{U} | Enchantment — Aura
 TEXT: Enchant creature you control / When this Aura enters, exile up to one target creature other than enchanted creature until this Aura leaves the battlefield. Enchanted creature becomes a copy of that creature until this Aura leaves the battlefield. / Enchanted creature has ward {2}.
 On entering (attached to your Bear):
-      itself: 6/6 flying
-      -> (nothing changes)
+      itself: 
+      -> Opp A: exile +1
+      -> Your Bear: 2/2 -> 6/6, gains flying
+      -> Opp A's Dragon left the battlefield
 ABILITIES:
   Enters: "when ~ enters, exile up to one target creature other than enchanted creature until ~ leaves the battlefield. enchanted creature becomes a copy of that creature until ~ leaves the battlefield."
-      -> Your Secret Invasion: 0/0 -> 6/6, becomes a creature, gains flying
+      -> Opp A: exile +1
+      -> Your Bear: 2/2 -> 6/6, gains flying
+      -> Opp A's Dragon left the battlefield
   Static: "enchanted creature has ward {2}."
       (static: shown under "On entering")
 
@@ -10448,7 +10452,7 @@ ABILITIES:
   Static: "artifact spells you cast cost {1} less to cast."
       (no effects read)
   Activated (1 mana, tap, sorcery speed): "{1}, {t}: target artifact you control becomes a copy of a second target artifact you control until end of turn, except it isn't legendary. activate only as a sorcery."
-      -> Your Shuri, Wakandan Inventor: 2/1 -> 6/6, gains flying
+      -> (nothing changes)
 
 Silence the Echo | {1}{B} | Sorcery
 TEXT: As an additional cost to cast this spell, sacrifice a creature or planeswalker or pay {3}. / Destroy target creature or planeswalker.
@@ -12919,12 +12923,12 @@ TEXT: Flying / When Uldaros Theorix enters, if you cast him, exile up to one tar
 SIM: keywords flying
 On entering:
       itself: 5/5 flying
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> You: graveyard -1, exile +1
+      -> You gets Dragon (token copy) 6/6 with flying
 ABILITIES:
   Enters [may]: "when ~ enters, if you cast him, exile up to one target nonland card of each card type from your graveyard. copy those cards. you may cast any number of spells with total mana value 6 or less from among the copies without paying their mana costs."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> You: graveyard -1, exile +1
+      -> You gets Dragon (token copy) 6/6 with flying
 
 Ultron Drone | {3} | Artifact Creature — Robot Villain | 2/3
 TEXT: Power-up — {6}: Put two +1/+1 counters on this creature and create a 2/2 colorless Robot Villain artifact creature token. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)

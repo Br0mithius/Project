@@ -2332,3 +2332,60 @@ fn free_spells_from_the_top_of_libraries() {
     assert_eq!((hunter.ctrl, hunter.owner), (0, 1));
     assert_eq!(g.players[0].exile.len(), 1, "our Island stays exiled");
 }
+
+#[test]
+fn copies_go_on_the_right_permanent() {
+    let db = db();
+    let mut cards: Vec<Card> = ["Island", "Secret Invasion", "Shuri, Wakandan Inventor"]
+        .iter()
+        .map(|n| db.get(n).unwrap().clone())
+        .collect();
+    cards.push(card(
+        "Drake",
+        "{2}{U}",
+        "Creature — Drake",
+        "Flying",
+        Some(("2", "2")),
+    ));
+    cards.push(card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "Trample",
+        Some(("5", "5")),
+    ));
+    cards.push(card("Relic", "{1}", "Artifact", "", None));
+    cards.push(card(
+        "Golem",
+        "{3}",
+        "Artifact Creature — Golem",
+        "",
+        Some(("3", "3")),
+    ));
+    let d = prep(&cards);
+    // Secret Invasion: the opponent's Giant is exiled and our enchanted Drake becomes a copy
+    // of it (not the Aura).
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'U');
+    let drake = put(&mut g, 0, 3);
+    let giant = put(&mut g, 1, 4);
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(giant).is_none(), "exiled until the Aura leaves");
+    let x = perm(&g, drake);
+    assert_eq!((x.p, x.t), (5, 5));
+    assert!(x.has(TRAMPLE));
+    // Shuri: our least valuable artifact becomes a copy of the best other one this turn.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'U');
+    let shuri = put(&mut g, 0, 2);
+    let relic = put(&mut g, 0, 5);
+    put(&mut g, 0, 6);
+    let k = ability(&d, 2, "becomes a copy");
+    assert!(g.activate(0, shuri, k));
+    let x = perm(&g, relic);
+    assert!(x.is_creature() && (x.p, x.t) == (3, 3));
+    g.cleanup(0);
+    g.recalc();
+    assert!(!perm(&g, relic).is_creature(), "until end of turn");
+}
