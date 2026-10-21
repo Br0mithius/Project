@@ -353,6 +353,17 @@ pub struct Game<'a> {
     pub rules: [u32; 8],
     /// "End the turn" (Time Stop): the rest of the turn is skipped.
     pub end_turn: bool,
+    /// Per-game statistics for audits (None: not collected).
+    pub stats: Option<Box<super::audit::Stats>>,
+    /// What is acting right now, why the next permanent leaves, the effect resolving, and
+    /// whether the life being lost is damage: kept for logs and statistics only (the game
+    /// never reads them).
+    pub cause: super::audit::Cause,
+    pub leave_why: super::audit::LeaveWhy,
+    pub effect_kind: &'static str,
+    pub dmg_flag: bool,
+    /// The permanent entering is a land played or a spell cast (its entry isn't logged).
+    pub quiet_enter: bool,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -591,9 +602,28 @@ impl<'a> Game<'a> {
         &cards[r.1 as usize]
     }
 
+    /// Adds a line to the game log (if there is one), prefixed with the round; a line
+    /// repeating the one before becomes "... (xN)".
     pub fn note(&mut self, f: impl FnOnce() -> String) {
+        let round = self.round;
         if let Some(l) = &mut self.log {
-            l.push(f());
+            let s = format!("R{} {}", round, f());
+            if let Some(last) = l.last_mut() {
+                if *last == s {
+                    *last = format!("{} (x2)", s);
+                    return;
+                }
+                let n = last
+                    .strip_prefix(s.as_str())
+                    .and_then(|r| r.strip_prefix(" (x"))
+                    .and_then(|r| r.strip_suffix(')'))
+                    .and_then(|n| n.parse::<u32>().ok());
+                if let Some(n) = n {
+                    *last = format!("{} (x{})", s, n + 1);
+                    return;
+                }
+            }
+            l.push(s);
         }
     }
 
@@ -1468,6 +1498,11 @@ impl<'a> Game<'a> {
         let Some((idxs, from_pool)) = self.plan_payment(p, cost) else {
             return false;
         };
+        if self.stats.is_some() {
+            if let Some(t) = self.turn_stat(p) {
+                t.mana_spent += cost.total();
+            }
+        }
         self.players[p].pool -= from_pool;
         let mut sac = Vec::new();
         for i in idxs {
@@ -1487,6 +1522,7 @@ impl<'a> Game<'a> {
         }
         for id in sac {
             if let Some(i) = self.idx(id) {
+                self.leave_why = super::audit::LeaveWhy::ManaCost;
                 self.leave(i, Zone::Graveyard, true);
             }
         }
@@ -1501,9 +1537,20 @@ impl<'a> Game<'a> {
                 Some(c) => {
                     self.players[p].hand.push(c);
                     self.players[p].drawn_this_turn += 1;
+                    if self.log.is_some() {
+                        let name = self.players[p].cards[c as usize].name.clone();
+                        let tag = self.cause_tag();
+                        self.note(|| format!("  P{} draws {}{}", p, name, tag));
+                    }
                     self.emit(Ev::Draw, p, None);
                 }
                 None => {
+                    if self.auditing() {
+                        if let Some(s) = self.stats.as_mut() {
+                            s.players[p].decked = true;
+                        }
+                        self.note(|| format!("P{} draws from an empty library", p));
+                    }
                     if !self.cant_lose(p) {
                         self.players[p].alive = false;
                     }
@@ -1520,7 +1567,11 @@ impl<'a> Game<'a> {
         if self.no_lifegain() {
             return;
         }
+        let before = self.players[p].life;
         self.players[p].life += n;
+        if self.auditing() {
+            self.audit_life(p, before, true);
+        }
         self.players[p].gained_life_turn = true;
         self.players[p].life_gained_turn += n;
         self.emit(Ev::GainLife, p, None);
@@ -1538,7 +1589,11 @@ impl<'a> Game<'a> {
         if n <= 0 || !self.players[p].alive {
             return;
         }
+        let before = self.players[p].life;
         self.players[p].life -= n;
+        if self.auditing() {
+            self.audit_life(p, before, false);
+        }
         self.players[p].lost_life_turn = true;
         self.emit(Ev::LoseLife, p, None);
     }
@@ -1548,9 +1603,18 @@ impl<'a> Game<'a> {
         if n <= 0 {
             return;
         }
+        let outer = std::mem::replace(&mut self.dmg_flag, true);
         self.lose_life(to, n);
+        self.dmg_flag = outer;
         if toxic > 0 {
             self.players[to].poison = self.players[to].poison.saturating_add(toxic);
+            if self.auditing() {
+                if let Some(s) = self.stats.as_mut() {
+                    s.players[to].last_poison_by = Some(from);
+                }
+                let total = self.players[to].poison;
+                self.note(|| format!("  P{} gets {} poison (total {})", to, toxic, total));
+            }
         }
         if from != to {
             self.players[to].grudge[from] += n as f32;
@@ -1560,6 +1624,7 @@ impl<'a> Game<'a> {
     /// Moves a permanent off the battlefield. `sba` = by state-based actions (no replacement
     /// choice for commanders is needed: they always go to the command zone).
     pub fn leave(&mut self, i: usize, to: Zone, _sba: bool) {
+        let why = std::mem::take(&mut self.leave_why);
         let perm = self.perms.remove(i);
         self.last_left = Some(perm.clone());
         // A finality counter, or Garruk ("if a creature an opponent controls would die,
@@ -1573,6 +1638,9 @@ impl<'a> Game<'a> {
         } else {
             to
         };
+        if self.auditing() {
+            self.audit_leave(&perm, to, why);
+        }
         let id = perm.id;
         // Attachments: Auras fall off (to the graveyard), Equipment stays unattached.
         let mut fall = Vec::new();
@@ -1657,6 +1725,7 @@ impl<'a> Game<'a> {
         }
         for fid in fall {
             if let Some(fi) = self.idx(fid) {
+                self.leave_why = super::audit::LeaveWhy::AuraFell;
                 self.leave(fi, Zone::Graveyard, true);
             }
         }
@@ -1697,6 +1766,7 @@ impl<'a> Game<'a> {
             x.damage = 0;
             return false;
         }
+        self.leave_why = super::audit::LeaveWhy::Destroyed;
         self.leave(i, Zone::Graveyard, false);
         true
     }
@@ -1704,6 +1774,7 @@ impl<'a> Game<'a> {
     pub fn sacrifice(&mut self, i: usize) {
         let p = self.perms[i].ctrl as usize;
         let subject = self.perms[i].clone();
+        self.leave_why = super::audit::LeaveWhy::Sacrificed;
         self.leave(i, Zone::Graveyard, false);
         self.emit_about(Ev::Sacrifice, p, &subject);
     }
@@ -1954,6 +2025,9 @@ impl<'a> Game<'a> {
 
     /// Enters-the-battlefield bookkeeping: triggers, Sagas, living weapon, Auras, legend rule.
     pub fn after_enter(&mut self, i: usize) {
+        if self.log.is_some() {
+            self.audit_enter(i);
+        }
         let id = self.perms[i].id;
         let ctrl = self.perms[i].ctrl as usize;
         let snap = self.perms[i].clone();
@@ -1969,6 +2043,7 @@ impl<'a> Game<'a> {
                 if let Some(old) = self.perms.iter().position(|x| {
                     x.id != id && x.ctrl as usize == ctrl && x.card == Some(r) && x.tok == Tok::None
                 }) {
+                    self.leave_why = super::audit::LeaveWhy::LegendRule;
                     self.leave(old, Zone::Graveyard, true);
                 }
             }
@@ -2496,6 +2571,7 @@ impl<'a> Game<'a> {
                     x.shield -= 1;
                     x.damage = 0;
                 } else {
+                    self.leave_why = super::audit::LeaveWhy::Sba;
                     self.leave(i, Zone::Graveyard, true);
                 }
                 changed = true;
@@ -2503,6 +2579,9 @@ impl<'a> Game<'a> {
             if !changed {
                 break;
             }
+        }
+        if self.stats.is_some() {
+            self.audit_eliminations();
         }
     }
 

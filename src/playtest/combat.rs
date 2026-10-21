@@ -145,7 +145,16 @@ impl<'a> Game<'a> {
     /// One combat phase for the active player `a`.
     pub fn combat(&mut self, a: usize) {
         ai::crew_for_combat(self, a);
-        let mut declared = ai::declare_attacks(self, a);
+        let mut declared = if self.log.is_some() {
+            let mut why = Vec::new();
+            let d = ai::declare_attacks_why(self, a, Some(&mut why));
+            for w in why {
+                self.note(|| format!("AI P{} attack: {}", a, w));
+            }
+            d
+        } else {
+            ai::declare_attacks(self, a)
+        };
         // "Creatures can't attack you unless their controller pays {2} for each": what
         // can't be paid for stays home.
         if self.rule_anywhere(R_ATTACK_TAX) {
@@ -214,7 +223,9 @@ impl<'a> Game<'a> {
             }
         }
         self.recalc();
-        self.note(|| format!("P{} attacks with {} creature(s)", a, attacks.len()));
+        if self.auditing() {
+            self.audit_attacks(a, &attacks);
+        }
         // "Whenever ~ attacks" and "whenever you attack" triggers.
         for at in &attacks {
             let Some(i) = self.idx(at.attacker) else {
@@ -291,7 +302,16 @@ impl<'a> Game<'a> {
                 .filter(|at| self.def_player(at.def) == Some(d))
                 .cloned()
                 .collect();
-            let blocks = ai::declare_blocks(self, d, &mine);
+            let blocks = if self.log.is_some() {
+                let mut why = Vec::new();
+                let b = ai::declare_blocks_why(self, d, &mine, Some(&mut why));
+                for w in why {
+                    self.note(|| format!("AI P{} block: {}", d, w));
+                }
+                b
+            } else {
+                ai::declare_blocks(self, d, &mine)
+            };
             for (b, at_id) in blocks {
                 let (Some(bi), Some(ai_)) = (self.idx(b), self.idx(at_id)) else {
                     continue;
@@ -323,19 +343,22 @@ impl<'a> Game<'a> {
                 self.emit_about(Ev::Blocks, snap.ctrl as usize, &snap);
             }
         }
-        let nblocks: usize = attacks.iter().map(|at| at.blockers.len()).sum();
-        if nblocks > 0 {
-            self.note(|| format!("AI blocks with {} creature(s)", nblocks));
-        }
         // Menace needs two or more blockers.
         for at in attacks.iter_mut() {
             let menace = self
                 .idx(at.attacker)
                 .is_some_and(|i| self.perms[i].has(MENACE));
             if menace && at.blockers.len() == 1 {
+                if self.log.is_some() {
+                    let (x, b) = (self.id_desc(at.attacker), self.id_desc(at.blockers[0]));
+                    self.note(|| format!("  menace: {} can't be blocked by {} alone", x, b));
+                }
                 at.blockers.clear();
             }
             at.blocked = !at.blockers.is_empty();
+        }
+        if self.auditing() {
+            self.audit_blocks(&attacks);
         }
         // Flanking: blockers without it get -1/-1.
         for at in &attacks {
@@ -366,6 +389,8 @@ impl<'a> Game<'a> {
         if !self.fog {
             self.damage_step(a, &attacks, true);
             self.damage_step(a, &attacks, false);
+        } else {
+            self.note(|| "  combat damage is prevented (fog)".into());
         }
         self.in_combat = false;
         self.end_combat();
@@ -405,7 +430,7 @@ impl<'a> Game<'a> {
         }
         // (target perm or player, amount, source id)
         let mut to_perms: Vec<(u32, i16, u32)> = Vec::new();
-        let mut to_players: Vec<(usize, i32, u32)> = Vec::new();
+        let mut to_players: Vec<(usize, i32, u32, bool)> = Vec::new();
         let mut to_walkers: Vec<(u32, i16)> = Vec::new();
         for at in attacks {
             let Some(ai_) = self.idx(at.attacker) else {
@@ -417,7 +442,7 @@ impl<'a> Game<'a> {
             if strikes(&x) && power > 0 {
                 if !at.blocked {
                     match at.def {
-                        Def::Player(p) => to_players.push((p, power as i32, x.id)),
+                        Def::Player(p) => to_players.push((p, power as i32, x.id, false)),
                         Def::Walker(w) => to_walkers.push((w, power)),
                     }
                 } else {
@@ -442,7 +467,7 @@ impl<'a> Game<'a> {
                     }
                     if x.has(TRAMPLE) && left > 0 {
                         match at.def {
-                            Def::Player(p) => to_players.push((p, left as i32, x.id)),
+                            Def::Player(p) => to_players.push((p, left as i32, x.id, true)),
                             Def::Walker(w) => to_walkers.push((w, left)),
                         }
                     }
@@ -465,14 +490,39 @@ impl<'a> Game<'a> {
                 (x.id, (x.ctrl, x.eff_kw, x.colors, x.commander, toxic))
             })
             .collect();
-        let mut lifelink: Vec<(usize, i32)> = Vec::new();
+        let mut lifelink: Vec<(usize, i32, u32)> = Vec::new();
+        let outer_cause = self.cause;
         for (target, n, src) in to_perms {
             let Some(&(ctrl, kw, colors, _, _)) = src_info.get(&src) else {
                 continue;
             };
             let Some(ti) = self.idx(target) else { continue };
             if self.perms[ti].protection & colors != 0 {
+                if self.log.is_some() {
+                    let (s, t) = (self.id_desc(src), self.id_desc(target));
+                    self.note(|| format!("  {} -> {}: {} damage prevented (protection)", s, t, n));
+                }
                 continue;
+            }
+            if self.log.is_some() {
+                let (s, t) = (self.id_desc(src), self.id_desc(target));
+                let dt = if kw & DEATHTOUCH != 0 {
+                    " (deathtouch)"
+                } else {
+                    ""
+                };
+                let ll = if kw & LIFELINK != 0 {
+                    " (lifelink)"
+                } else {
+                    ""
+                };
+                let step = if first { " [first strike]" } else { "" };
+                self.note(|| {
+                    format!(
+                        "  {} deals {} combat damage to {}{}{}{}",
+                        s, n, t, dt, ll, step
+                    )
+                });
             }
             self.perms[ti].hurt_by = src;
             if let Some(si) = self.idx(src) {
@@ -484,16 +534,20 @@ impl<'a> Game<'a> {
                 self.perms[si].dealt_damage = true;
             }
             if kw & LIFELINK != 0 {
-                lifelink.push((ctrl as usize, n as i32));
+                lifelink.push((ctrl as usize, n as i32, src));
             }
         }
         for (w, n) in to_walkers {
             if let Some(wi) = self.idx(w) {
                 self.perms[wi].loyalty -= n;
+                if self.log.is_some() {
+                    let d = self.id_desc(w);
+                    self.note(|| format!("  {} combat damage to planeswalker {}", n, d));
+                }
             }
         }
         let mut dealt: Vec<u32> = Vec::new();
-        for (p, n, src) in to_players {
+        for (p, n, src, trample) in to_players {
             let Some(&(ctrl, kw, _, cmd, toxic)) = src_info.get(&src) else {
                 continue;
             };
@@ -502,15 +556,26 @@ impl<'a> Game<'a> {
             } else {
                 n
             };
+            if trample && self.log.is_some() {
+                let d = self.id_desc(src);
+                self.note(|| format!("  {} tramples over for {}", d, n));
+            }
+            if let Some(s) = self.stats.as_mut() {
+                s.players[a].combat_to[p % 8] += n;
+            }
+            self.cause = super::audit::Cause::Combat(src, ctrl);
             self.damage_player(a, p, n, toxic);
+            self.cause = outer_cause;
             if let Some(si) = self.idx(src) {
                 self.perms[si].dealt_damage = true;
             }
             if cmd > 0 {
                 self.players[p].cmd_damage[a][cmd as usize % 3] += n;
+                let total = self.players[p].cmd_damage[a][cmd as usize % 3];
+                self.note(|| format!("  commander damage to P{} from P{}: {} total", p, a, total));
             }
             if kw & LIFELINK != 0 {
-                lifelink.push((ctrl as usize, n));
+                lifelink.push((ctrl as usize, n, src));
             }
             if let Some(si) = self.idx(src) {
                 self.perms[si].hit_turn |= 1 << p.min(7);
@@ -518,8 +583,10 @@ impl<'a> Game<'a> {
             }
             dealt.push(src);
         }
-        for (p, n) in lifelink {
+        for (p, n, src) in lifelink {
+            self.cause = super::audit::Cause::Combat(src, p as u8);
             self.gain_life(p, n);
+            self.cause = outer_cause;
         }
         // "Whenever ~ deals combat damage to a player."
         for id in dealt {

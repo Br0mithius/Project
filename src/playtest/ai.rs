@@ -114,6 +114,52 @@ pub fn perm_value(g: &Game, i: usize) -> f32 {
     v
 }
 
+/// `perm_value` without filling the cache (for logs and statistics: they must not change
+/// what the AI later reads from it).
+pub fn perm_value_peek(g: &Game, i: usize) -> f32 {
+    if let Some(&(t, cid, v)) = g.vcache.borrow().get(i) {
+        if t == g.tick && cid == g.perms[i].id {
+            return v;
+        }
+    }
+    perm_value_uncached(g, i)
+}
+
+/// `threat` without filling caches.
+pub fn threat_peek(g: &Game, o: usize) -> f32 {
+    if !g.players[o].alive {
+        return 0.0;
+    }
+    if o < 8 {
+        let (t, v) = g.tcache.borrow()[o];
+        if t == g.tick {
+            return v;
+        }
+    }
+    let board: f32 = (0..g.perms.len())
+        .filter(|&i| g.perms[i].ctrl as usize == o && !g.perms[i].is(T_LAND))
+        .map(|i| perm_value_peek(g, i))
+        .sum();
+    board + g.players[o].hand.len() as f32 * 0.4 + g.players[o].life as f32 * 0.05
+}
+
+/// `weight` without filling caches.
+pub fn weight_peek(g: &Game, me: usize, o: usize) -> f32 {
+    if o == me || !g.players[o].alive {
+        return 0.0;
+    }
+    if me < 8 && o < 8 {
+        let (t, v) = g.wcache.borrow()[me][o];
+        if t == g.tick {
+            return v;
+        }
+    }
+    let opps = g.opponents(me);
+    let max = opps.iter().map(|&q| threat_peek(g, q)).fold(0.1, f32::max);
+    let low = if g.players[o].life <= 10 { 0.4 } else { 0.0 };
+    1.0 + 0.7 * threat_peek(g, o) / max + (g.players[me].grudge[o] / 15.0).min(0.5) + low
+}
+
 fn perm_value_uncached(g: &Game, i: usize) -> f32 {
     let x = &g.perms[i];
     let abilities = g.abilities_of(x);
@@ -220,6 +266,27 @@ pub fn best_parity(g: &Game, p: usize, src: Option<u32>) -> (bool, f32) {
     } else {
         (false, even)
     }
+}
+
+/// The nets `best_parity` weighs (odd, even), read without filling caches (for logs).
+pub fn parity_values_peek(g: &Game, p: usize, src: Option<u32>) -> (f32, f32) {
+    let net = |odd: bool| -> f32 {
+        g.perms
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.is_creature() && Some(x.id) != src && !x.has(INDESTRUCTIBLE))
+            .filter(|(_, x)| (perm_mv(g, x) % 2 == 1) == odd)
+            .map(|(i, x)| {
+                let o = x.ctrl as usize;
+                if o == p {
+                    -perm_value_peek(g, i)
+                } else {
+                    perm_value_peek(g, i) * weight_peek(g, p, o) * 0.8
+                }
+            })
+            .sum()
+    };
+    (net(true), net(false))
 }
 
 pub fn weight(g: &Game, me: usize, o: usize) -> f32 {
@@ -880,15 +947,65 @@ pub fn mulligan(g: &mut Game, p: usize) {
             }
         }
         g.players[p].mulligans = attempt;
-        if keepable(g, p) || attempt == 2 {
+        let keep = keepable(g, p);
+        if g.log.is_some() {
+            let pl = &g.players[p];
+            let lands = pl
+                .hand
+                .iter()
+                .filter(|&&c| pl.cards[c as usize].is(T_LAND))
+                .count();
+            let early = pl
+                .hand
+                .iter()
+                .filter(|&&c| {
+                    let card = &pl.cards[c as usize];
+                    !card.is(T_LAND) && card.mv as usize <= lands.max(2) + 1
+                })
+                .count();
+            let names: Vec<String> = pl
+                .hand
+                .iter()
+                .map(|&c| pl.cards[c as usize].name.clone())
+                .collect();
+            let verdict = if keep {
+                "keepable"
+            } else if attempt == 2 {
+                "not keepable, kept anyway (third hand)"
+            } else {
+                "not keepable (needs 2-5 lands and an early play, or 3+ lands): mulligan"
+            };
+            g.note(|| {
+                format!(
+                    "P{} opening hand #{}: {} lands, {} early plays -> {} | {}",
+                    p,
+                    attempt + 1,
+                    lands,
+                    early,
+                    verdict,
+                    names.join("; ")
+                )
+            });
+        }
+        if keep || attempt == 2 {
             // Bottom one card per mulligan after the free one.
             let bottom = attempt.saturating_sub(1);
             for _ in 0..bottom {
                 if let Some(h) = discard_choice(g, p) {
                     let c = g.players[p].hand.remove(h);
+                    if g.log.is_some() {
+                        let name = g.players[p].cards[c as usize].name.clone();
+                        g.note(|| format!("P{} puts {} on the bottom", p, name));
+                    }
                     g.players[p].library.insert(0, c);
                 }
             }
+            let kept = g.players[p].hand.len() as u8;
+            if let Some(s) = g.stats.as_mut() {
+                s.players[p].mulligans = attempt;
+                s.players[p].kept = kept;
+            }
+            g.note(|| format!("P{} keeps {} cards after {} mulligan(s)", p, kept, attempt));
             return;
         }
     }
@@ -2054,6 +2171,60 @@ fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
     if held + value * 0.6 >= full { cost } else { 0 }
 }
 
+/// What an action is, for the log.
+fn act_name(g: &Game, p: usize, act: &Act) -> String {
+    match *act {
+        Act::Cast(src, opts) => {
+            let Some((idx, back)) = g.spell_card(p, src, opts) else {
+                return format!("{:?}", act);
+            };
+            let c = &g.players[g.spell_list(p, src)].cards[idx as usize];
+            let name = match (&c.back, back) {
+                (Some(b), true) => b.name.clone(),
+                _ => c.name.clone(),
+            };
+            match src {
+                Src::Hand(_) => name,
+                Src::Command(_) => format!("{} (cmdr)", name),
+                Src::Graveyard(_) => format!("{} (gy)", name),
+                Src::Exile(_) => format!("{} (exile)", name),
+                Src::Adventure(_) => format!("{} (adventure)", name),
+                Src::Prepared(_) => format!("{} (prepared)", name),
+            }
+        }
+        Act::Activate(id, k) => match g.idx(id) {
+            Some(i) => {
+                let x = &g.perms[i];
+                let text: String = g
+                    .abilities_of(x)
+                    .get(k)
+                    .map(|a| a.text.chars().take(40).collect())
+                    .unwrap_or_default();
+                format!("{}: {}", g.perm_name(x), text)
+            }
+            None => format!("{:?}", act),
+        },
+        Act::ActivateGy(gk, _) => g.players[p]
+            .graveyard
+            .get(gk)
+            .map(|&c| format!("{} (gy ability)", g.players[p].cards[c as usize].name))
+            .unwrap_or_else(|| format!("{:?}", act)),
+        Act::Equip(e, t) => match (g.idx(e), g.idx(t)) {
+            (Some(e), Some(t)) => format!(
+                "equip {} -> {}",
+                g.perm_name(&g.perms[e]),
+                g.perm_name(&g.perms[t])
+            ),
+            _ => format!("{:?}", act),
+        },
+        Act::Cycle(h) => g.players[p]
+            .hand
+            .get(h)
+            .map(|&c| format!("cycle {}", g.players[p].cards[c as usize].name))
+            .unwrap_or_else(|| format!("{:?}", act)),
+    }
+}
+
 /// A main phase: land, then the best plan for the mana, re-planned after each action.
 pub fn main_phase(g: &mut Game, p: usize, post: bool) {
     let mut failed: Vec<String> = Vec::new();
@@ -2073,6 +2244,9 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
                 continue;
             }
         }
+        if !post && g.stats.is_some() {
+            g.audit_mana_avail(p);
+        }
         let opts: Vec<(f32, u32, Act)> = options(g, p, post)
             .into_iter()
             .filter(|o| !failed.contains(&format!("{:?}", o.2)))
@@ -2081,36 +2255,65 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
             return;
         }
         let avail = g.mana_available(p);
-        if g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok() {
-            let list: Vec<String> = opts
-                .iter()
-                .map(|o| {
-                    let what = match o.2 {
-                        Act::Cast(Src::Hand(h), _) => g.players[p].cards
-                            [g.players[p].hand[h] as usize]
-                            .name
-                            .clone(),
-                        other => format!("{:?}", other).chars().take(30).collect(),
-                    };
-                    format!("{} v{:.1} c{}", what, o.0, o.1)
-                })
-                .collect();
-            g.note(|| format!("   P{} options ({} mana): {}", p, avail, list.join(" | ")));
-        }
         let reserve = holdup(g, p, &opts, avail);
         if reserve > 0 {
             g.note(|| format!("AI P{} holds up {} mana", p, reserve));
         }
         // The whole turn is planned together; before combat, only its pre-combat parts happen.
-        let Some((i, _)) = plan_where(&opts, avail.saturating_sub(reserve), &|i| {
+        let pick = plan_where(&opts, avail.saturating_sub(reserve), &|i| {
             post || !waits_for_combat(g, p, &opts[i].2)
-        }) else {
+        });
+        if g.log.is_some() {
+            let mut order: Vec<usize> = (0..opts.len()).collect();
+            order.sort_by(|&a, &b| opts[b].0.partial_cmp(&opts[a].0).unwrap());
+            let list: Vec<String> = order
+                .iter()
+                .take(8)
+                .map(|&k| {
+                    format!(
+                        "{} v{:.1} c{}",
+                        act_name(g, p, &opts[k].2),
+                        opts[k].0,
+                        opts[k].1
+                    )
+                })
+                .collect();
+            let more = opts.len().saturating_sub(8);
+            let chosen = match pick {
+                Some((i, total)) => {
+                    format!("{} (plan worth {:.1})", act_name(g, p, &opts[i].2), total)
+                }
+                None if post => "nothing (no plan worth it)".into(),
+                None => "nothing before combat".into(),
+            };
+            g.note(|| {
+                format!(
+                    "AI P{} {} options ({} mana{}): {}{} -> {}",
+                    p,
+                    if post { "post-combat" } else { "main" },
+                    avail,
+                    if reserve > 0 {
+                        format!(", holding {}", reserve)
+                    } else {
+                        String::new()
+                    },
+                    list.join(" | "),
+                    if more > 0 {
+                        format!(" | +{} more", more)
+                    } else {
+                        String::new()
+                    },
+                    chosen
+                )
+            });
+        }
+        let Some((i, _)) = pick else {
             return;
         };
         let act = opts[i].2;
         let ok = do_act(g, p, act);
-        if g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok() {
-            g.note(|| format!("   P{} did {:?}: {}", p, act, ok));
+        if !ok {
+            g.note(|| format!("   P{} couldn't do {:?}", p, act));
         }
         if !ok {
             failed.push(format!("{:?}", act));
@@ -2121,11 +2324,16 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
 // ------------------------------------------------------------ instant speed
 
 /// Casts an instant from hand aimed at `focus` (if any). True if it was cast.
-fn cast_instant(g: &mut Game, p: usize, h: usize, focus: Option<u32>) -> bool {
-    let name = g.players[p].cards[g.players[p].hand[h] as usize]
-        .name
-        .clone();
-    g.note(|| format!("AI P{} instant-speed: {}", p, name));
+fn cast_instant(g: &mut Game, p: usize, h: usize, focus: Option<u32>, why: &str) -> bool {
+    if g.log.is_some() {
+        let name = g.players[p].cards[g.players[p].hand[h] as usize]
+            .name
+            .clone();
+        let at = focus
+            .map(|id| format!(" at {}", g.id_desc(id)))
+            .unwrap_or_default();
+        g.note(|| format!("AI P{} instant-speed {}{} ({})", p, name, at, why));
+    }
     g.focus = focus;
     let ok = g.cast(p, Src::Hand(h), CastOpts::default());
     g.focus = None;
@@ -2224,7 +2432,24 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
             .filter(|&&c| is_counter(&g.players[o].cards[c as usize]))
             .count();
         let threshold = if counters_in_hand > 1 { 3.5 } else { 4.5 };
-        if spell_threat(g, o, caster, card, back) < threshold {
+        let threat_v = spell_threat(g, o, caster, card, back);
+        if g.log.is_some() {
+            let cname = g.players[o].cards[g.players[o].hand[h] as usize]
+                .name
+                .clone();
+            let verdict = if threat_v < threshold {
+                "lets it resolve"
+            } else {
+                "counters"
+            };
+            g.note(|| {
+                format!(
+                    "  AI P{} holds {}: spell threat {:.1} vs threshold {:.1} -> {}",
+                    o, cname, threat_v, threshold, verdict
+                )
+            });
+        }
+        if threat_v < threshold {
             continue;
         }
         let counter_idx = g.players[o].hand[h];
@@ -2277,7 +2502,8 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                 });
             }
         }
-        g.note(|| format!("AI P{} counters it", o));
+        g.note(|| format!("AI P{} casts {} to counter it", o, counter.name));
+        let mut paid_off = false;
         // "Unless its controller pays {N}".
         if let Some(i) = text.find("pays {") {
             let n: u32 = text[i + 6..]
@@ -2286,9 +2512,33 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                 .collect::<String>()
                 .parse()
                 .unwrap_or(2);
-            if g.pay(caster, &Mana::generic(n)) {
-                return false;
+            paid_off = g.pay(caster, &Mana::generic(n));
+            g.note(|| {
+                format!(
+                    "  P{} {} {{{}}}",
+                    caster,
+                    if paid_off { "pays" } else { "can't pay" },
+                    n
+                )
+            });
+        }
+        if g.stats.is_some() {
+            let opps = g.opponents(o);
+            let tc = threat_peek(g, caster);
+            let leader = opps.iter().all(|&q| threat_peek(g, q) <= tc);
+            let mv = g.ext.countered_mv.unwrap_or(0);
+            if let Some(s) = g.stats.as_mut() {
+                s.players[o].counters.push(super::audit::CounterUse {
+                    caster: caster as u8,
+                    mv,
+                    permanent: !back && spell.is_permanent(),
+                    caster_threat_leader: leader,
+                    paid_off,
+                });
             }
+        }
+        if paid_off {
+            return false;
         }
         return true;
     }
@@ -2304,7 +2554,7 @@ pub fn protect(g: &mut Game, owner: usize, id: u32) -> bool {
     let Some(h) = hand_find(g, owner, is_protection) else {
         return false;
     };
-    cast_instant(g, owner, h, Some(id))
+    cast_instant(g, owner, h, Some(id), "protect a targeted permanent")
 }
 
 /// Defender's window after attacks are declared: Fog a lethal swing, kill a dangerous
@@ -2334,7 +2584,7 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
     let life = g.players[d].life;
     if total >= life || (total * 2 >= life && blockers == 0) {
         if let Some(h) = hand_find(g, d, is_fog) {
-            cast_instant(g, d, h, None);
+            cast_instant(g, d, h, None, "fog: the attack would be lethal or near it");
             return;
         }
     }
@@ -2342,12 +2592,13 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
     if let Some(&(id, pw)) = incoming.iter().max_by_key(|x| x.1) {
         if pw >= 4 || pw as i32 * 3 >= life {
             if let Some(h) = hand_find(g, d, is_instant_removal) {
-                cast_instant(g, d, h, Some(id));
+                cast_instant(g, d, h, Some(id), "removal on the biggest attacker");
             }
         }
     }
     // Flash creatures as surprise blockers.
     if let Some(h) = hand_find(g, d, |c| c.is(T_CREATURE) && has_flash(g, d, c)) {
+        g.note(|| format!("AI P{} flashes in a surprise blocker", d));
         g.cast(d, Src::Hand(h), CastOpts::default());
     }
 }
@@ -2534,6 +2785,17 @@ fn dmg_of(g: &Game, x: &Perm) -> i32 {
 /// How `d` blocks: kill-and-survive first, good trades, double blocks on big threats,
 /// chump blocks only to stay alive. Careful about tricks when the attacker has mana up.
 pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)> {
+    declare_blocks_why(g, d, attacks, None)
+}
+
+/// `declare_blocks`, with the reasons written to `why` (for the game log).
+pub fn declare_blocks_why(
+    g: &Game,
+    d: usize,
+    attacks: &[Attack],
+    mut why: Option<&mut Vec<String>>,
+) -> Vec<(u32, u32)> {
+    let name = |i: usize| g.perm_name(&g.perms[i]);
     let mut used: Vec<u32> = Vec::new();
     let mut out = Vec::new();
     let mut atts: Vec<usize> = attacks.iter().filter_map(|at| g.idx(at.attacker)).collect();
@@ -2564,6 +2826,13 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
             })
             .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
         if let (Some(b), false) = (safe, menace) {
+            if let Some(w) = why.as_deref_mut() {
+                w.push(format!(
+                    "{} blocked by {}: kills it and survives",
+                    name(a),
+                    name(b)
+                ));
+            }
             used.push(g.perms[b].id);
             out.push((g.perms[b].id, at.id));
             continue;
@@ -2579,6 +2848,15 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
             })
             .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
         if let (Some(b), false) = (trade, menace) {
+            if let Some(w) = why.as_deref_mut() {
+                w.push(format!(
+                    "{} (v{:.1}) blocked by {} (v{:.1}): a trade in our favour",
+                    name(a),
+                    av,
+                    name(b),
+                    perm_value(g, b)
+                ));
+            }
             used.push(g.perms[b].id);
             out.push((g.perms[b].id, at.id));
             continue;
@@ -2601,13 +2879,33 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
                     }
                 }
             }
-            if let Some((b1, b2, _)) = pair {
+            if let Some((b1, b2, loss)) = pair {
+                if let Some(w) = why.as_deref_mut() {
+                    w.push(format!(
+                        "{} (v{:.1}) double-blocked by {} and {} (risking v{:.1})",
+                        name(a),
+                        av,
+                        name(b1),
+                        name(b2),
+                        loss
+                    ));
+                }
                 used.push(g.perms[b1].id);
                 used.push(g.perms[b2].id);
                 out.push((g.perms[b1].id, at.id));
                 out.push((g.perms[b2].id, at.id));
                 continue;
             }
+        }
+        if let Some(w) = why.as_deref_mut() {
+            w.push(format!(
+                "{} (v{:.1}, {} power) not blocked: {} possible blocker(s), no safe kill or good trade{}",
+                name(a),
+                av,
+                dmg_of(g, at),
+                can.len(),
+                if menace { " (menace)" } else { "" }
+            ));
         }
         unblocked.push(a);
     }
@@ -2638,10 +2936,24 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
             .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
         match chump {
             Some(b) if !at.has(MENACE) => {
+                if let Some(w) = why.as_deref_mut() {
+                    w.push(format!(
+                        "{} chump-blocked by {}: the unblocked damage would be lethal",
+                        name(a),
+                        name(b)
+                    ));
+                }
                 used.push(g.perms[b].id);
                 out.push((g.perms[b].id, at.id));
             }
-            _ => {}
+            _ => {
+                if let Some(w) = why.as_deref_mut() {
+                    w.push(format!(
+                        "{} would be lethal but can't be chump-blocked",
+                        name(a)
+                    ));
+                }
+            }
         }
         k += 1;
     }
@@ -2683,6 +2995,16 @@ fn attack_gain(g: &Game, me: usize, a: usize, o: usize, taken: &[u32]) -> f32 {
 /// Attacks for the active player: lethal swings first, then every attack that pays off,
 /// keeping enough back to survive the next turn around the table.
 pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
+    declare_attacks_why(g, me, None)
+}
+
+/// `declare_attacks`, with the reasons written to `why` (for the game log).
+pub fn declare_attacks_why(
+    g: &Game,
+    me: usize,
+    mut why: Option<&mut Vec<String>>,
+) -> Vec<(u32, Def)> {
+    let name = |i: usize| g.perm_name(&g.perms[i]);
     let mut ready: Vec<usize> = (0..g.perms.len())
         .filter(|&i| g.perms[i].ctrl as usize == me && g.can_attack(i))
         .collect();
@@ -2720,6 +3042,12 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
             }
         }
         if through >= g.players[o].life {
+            if let Some(w) = why.as_deref_mut() {
+                w.push(format!(
+                    "lethal on P{}: {} damage gets through vs life {} -> everything attacks P{}",
+                    o, through, g.players[o].life, o
+                ));
+            }
             return ready
                 .iter()
                 .map(|&a| (g.perms[a].id, Def::Player(o)))
@@ -2799,10 +3127,33 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
             }
             value -= tax as f32 * 0.35 * group.len() as f32;
             if bad.is_empty() {
+                if let Some(wh) = why.as_deref_mut() {
+                    let names: Vec<String> = group.iter().map(|&a| name(a)).collect();
+                    let blocked = blocks.len();
+                    wh.push(format!(
+                        "group vs P{} (life {}, threat {:.1}, weight {:.2}): [{}] predicted {} block(s), plan value {:.1}{}",
+                        o,
+                        g.players[o].life,
+                        threat_peek(g, o),
+                        w,
+                        names.join(", "),
+                        blocked,
+                        value,
+                        if value > 0.2 { "" } else { " (not worth it)" }
+                    ));
+                }
                 if value > 0.2 && best_plan.as_ref().is_none_or(|b| value > b.0) {
                     best_plan = Some((value, o, group.clone()));
                 }
                 break;
+            }
+            if let Some(wh) = why.as_deref_mut() {
+                let names: Vec<String> = bad.iter().map(|&a| name(a)).collect();
+                wh.push(format!(
+                    "group vs P{}: drops [{}] (would die for less)",
+                    o,
+                    names.join(", ")
+                ));
             }
             group.retain(|a| !bad.contains(a));
         }
@@ -2810,6 +3161,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
     let mut out: Vec<(u32, Def)> = Vec::new();
     let mut gains: Vec<(f32, usize)> = Vec::new();
     if let Some((v, o, group)) = &best_plan {
+        if let Some(wh) = why.as_deref_mut() {
+            wh.push(format!("chosen group plan: P{} (value {:.1})", o, v));
+        }
         let each = v / group.len().max(1) as f32;
         for &a in group {
             out.push((g.perms[a].id, Def::Player(*o)));
@@ -2850,6 +3204,29 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                     best = Some((v2, Def::Walker(wk.id)));
                 }
             }
+        }
+        if let Some(wh) = why.as_deref_mut() {
+            let gains_s: Vec<String> = choices
+                .iter()
+                .map(|&o| format!("P{} {:.1}", o, attack_gain(g, me, a, o, &[])))
+                .collect();
+            let verdict = match best {
+                Some((v, d)) if v > 0.2 || g.must_attack(a) => format!(
+                    "attacks {}{}",
+                    match d {
+                        Def::Player(o) => format!("P{}", o),
+                        Def::Walker(id) => g.id_desc(id),
+                    },
+                    if v > 0.2 { "" } else { " (must attack)" }
+                ),
+                _ => "stays home".into(),
+            };
+            wh.push(format!(
+                "alone: {} gains [{}] -> {}",
+                name(a),
+                gains_s.join(", "),
+                verdict
+            ));
         }
         if let Some((v, d)) = best {
             if v > 0.2 || g.must_attack(a) {
@@ -2895,6 +3272,15 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
     while incoming - defenders(&out) >= my_life * 3 / 4 && k < gains.len() {
         let id = g.perms[gains[k].1].id;
         if !g.must_attack(gains[k].1) {
+            if let Some(wh) = why.as_deref_mut() {
+                wh.push(format!(
+                    "keeps {} home: crack-back {} vs life {} with {} defence",
+                    name(gains[k].1),
+                    incoming,
+                    my_life,
+                    defenders(&out)
+                ));
+            }
             out.retain(|(x, _)| *x != id);
         }
         k += 1;
@@ -2956,7 +3342,7 @@ pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
             let better = (before.0 && !after.0) || (!before.1 && after.1);
             if better && perm_value(g, theirs) + perm_value(g, mine) >= 3.0 {
                 let id = g.perms[mine].id;
-                cast_instant(g, p, h, Some(id));
+                cast_instant(g, p, h, Some(id), "combat trick: wins the fight");
                 return;
             }
         }
@@ -2971,7 +3357,7 @@ pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
                     .sum();
                 if total < g.players[d].life && total + dp as i32 >= g.players[d].life {
                     let id = g.perms[a].id;
-                    cast_instant(g, p, h, Some(id));
+                    cast_instant(g, p, h, Some(id), "combat trick: pump for lethal");
                     return;
                 }
             }

@@ -51,6 +51,11 @@ fn main() {
             );
         }
         for line in log {
+            // Lines start with the round ("R5 "): not part of the kind of event.
+            let line = match line.split_once(' ') {
+                Some((r, rest)) if r.starts_with('R') => rest.trim_start().to_string(),
+                _ => line,
+            };
             // Group by kind of event (strip card-specific detail for AI decisions).
             let key: String = if line.starts_with("AI ") {
                 line.split(':')

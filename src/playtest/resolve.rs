@@ -866,6 +866,10 @@ impl<'a> Game<'a> {
                 } else {
                     ai::choose_friends(self, ctx.ctrl, &cands, n)
                 };
+                if self.auditing() {
+                    let ids: Vec<u32> = picks.iter().map(|&i| self.perms[i].id).collect();
+                    self.audit_targets(ctx.ctrl, &ids, harmful, &cands);
+                }
                 for i in picks {
                     let id = self.perms[i].id;
                     self.actor = ctx.ctrl as u8;
@@ -899,12 +903,18 @@ impl<'a> Game<'a> {
             self.last_ctrl = Some(self.perms[i].ctrl);
         }
         let ids: Vec<u32> = picks.iter().map(|&i| self.perms[i].id).collect();
+        if self.auditing() {
+            self.audit_targets(ctx.ctrl, &ids, harmful, &cands);
+        }
         let mut out = Vec::new();
         for id in ids {
             let Some(i) = self.idx(id) else { continue };
             let owner = self.perms[i].ctrl as usize;
             if owner != ctx.ctrl {
                 if !self.pay_ward(ctx.ctrl, i) {
+                    self.note(|| {
+                        "    (the target's ward isn't paid: that part is countered)".into()
+                    });
                     continue; // countered by ward
                 }
                 if harmful && ai::protect(self, owner, id) {
@@ -930,6 +940,17 @@ impl<'a> Game<'a> {
 
     /// Resolves one pending trigger or spell ability.
     pub fn resolve_pending(&mut self, pend: Pending) {
+        let cause = if pend.card.1 == NO_CARD {
+            super::audit::Cause::Token(pend.ctrl)
+        } else {
+            super::audit::Cause::Card(pend.card, pend.ctrl)
+        };
+        let outer = std::mem::replace(&mut self.cause, cause);
+        self.resolve_pending_inner(pend);
+        self.cause = outer;
+    }
+
+    fn resolve_pending_inner(&mut self, pend: Pending) {
         let me = pend.ctrl as usize;
         if !self.players.get(me).is_some_and(|p| p.alive) {
             return;
@@ -1111,6 +1132,7 @@ impl<'a> Game<'a> {
         self.last_ctrl = None;
         self.targeted = false;
         // (effect, the text and card restriction it resolves with): a mode reads its own.
+        let mut chosen_modes: Option<String> = None;
         let picks: Vec<(usize, &str, crate::restrict::Restr)> = if ab.modal {
             let groups = ab.mode_groups();
             // "Choose one that hasn't been chosen" (Demonic Pact): each mode once.
@@ -1123,6 +1145,25 @@ impl<'a> Game<'a> {
                 0
             };
             let modes = ai::choose_modes(self, &ctx, ab, used);
+            if self.log.is_some() {
+                let texts: Vec<String> = modes
+                    .iter()
+                    .map(|&m| match ab.mode_texts.get(m) {
+                        // (Without the ability's own text it starts with.)
+                        Some(t) => {
+                            let same = t
+                                .char_indices()
+                                .zip(ab.text.chars())
+                                .take_while(|((_, a), b)| a == b)
+                                .last()
+                                .map_or(0, |((i, a), _)| i + a.len_utf8());
+                            t[same..].trim_start_matches([' ', '—', '-']).to_string()
+                        }
+                        None => format!("mode {}", m + 1),
+                    })
+                    .collect();
+                chosen_modes = Some(texts.join(" + "));
+            }
             if fresh {
                 if let Some(i) = pend.source.and_then(|id| self.idx(id)) {
                     for &m in &modes {
@@ -1150,10 +1191,13 @@ impl<'a> Game<'a> {
         };
         self.note(|| {
             format!(
-                "P{} resolves {}: {}",
+                "P{} resolves {}: {}{}",
                 me,
                 card.map(|c| c.name.as_str()).unwrap_or("token"),
-                ab.text
+                ab.text,
+                chosen_modes
+                    .map(|m| format!(" => chosen: {}", m))
+                    .unwrap_or_default()
             )
         });
         self.reborn = None;
@@ -1515,6 +1559,11 @@ impl<'a> Game<'a> {
     pub fn discard(&mut self, p: usize) {
         if let Some(h) = ai::discard_choice(self, p) {
             let c = self.players[p].hand.remove(h);
+            if self.log.is_some() {
+                let name = self.players[p].cards[c as usize].name.clone();
+                let tag = self.cause_tag();
+                self.note(|| format!("  P{} discards {}{}", p, name, tag));
+            }
             self.put_discarded(p, c);
         }
     }
@@ -1861,6 +1910,10 @@ impl<'a> Game<'a> {
     }
 
     pub fn mill(&mut self, p: usize, n: i32) {
+        if self.log.is_some() && n > 0 {
+            let (tag, left) = (self.cause_tag(), self.players[p].library.len());
+            self.note(|| format!("  P{} mills {} (library {}){}", p, n, left, tag));
+        }
         for _ in 0..n {
             if let Some(c) = self.players[p].library.pop() {
                 self.players[p].graveyard.push(c);
@@ -2045,13 +2098,35 @@ impl<'a> Game<'a> {
 
     /// Applies one effect.
     pub fn apply(&mut self, ctx: &Ctx, e: &Effect) {
+        if !self.auditing() {
+            return self.apply_inner(ctx, e);
+        }
+        let outer = std::mem::replace(&mut self.effect_kind, super::audit::effect_kind(e));
+        self.apply_inner(ctx, e);
+        self.effect_kind = outer;
+    }
+
+    fn apply_inner(&mut self, ctx: &Ctx, e: &Effect) {
         let me = ctx.ctrl;
         let text = ctx.text;
         match e {
             Effect::Destroy(_) if text.contains("odd or even") => {
                 // Thanos: pick the parity that hurts the table most and spares the most of
                 // our own; "each other creature" never includes the source.
-                let (odd, _) = ai::best_parity(self, me, ctx.src);
+                let (odd, net) = ai::best_parity(self, me, ctx.src);
+                if self.log.is_some() {
+                    let (o, e) = ai::parity_values_peek(self, me, ctx.src);
+                    self.note(|| {
+                        format!(
+                            "  AI P{} parity: odd nets {:.1}, even nets {:.1} -> {} ({:.1})",
+                            me,
+                            o,
+                            e,
+                            if odd { "odd" } else { "even" },
+                            net
+                        )
+                    });
+                }
                 let ids: Vec<u32> = self
                     .perms
                     .iter()
@@ -2248,6 +2323,9 @@ impl<'a> Game<'a> {
                     return;
                 }
                 if let ai::Hit::Perm(id) = ai::damage_target(self, ctx, to, n) {
+                    if self.auditing() {
+                        self.audit_targets(me, &[id], true, &[]);
+                    }
                     if let Some(i) = self.idx(id) {
                         if self.perms[i].ctrl as usize == me || self.pay_ward(me, i) {
                             self.actor = me as u8;
@@ -2338,8 +2416,14 @@ impl<'a> Game<'a> {
                 if to.kind == Kind::AnyTarget || to.whose == Whose::Theirs || to.whose == Whose::Any
                 {
                     match ai::damage_target(self, ctx, to, n) {
-                        ai::Hit::Player(o) => self.hurt_player(ctx, o, n),
+                        ai::Hit::Player(o) => {
+                            self.note(|| format!("    {} damage aimed at P{}", n, o));
+                            self.hurt_player(ctx, o, n)
+                        }
                         ai::Hit::Perm(id) => {
+                            if self.auditing() {
+                                self.audit_targets(me, &[id], true, &[]);
+                            }
                             let t1 = Target { count: 1, ..*to };
                             // Go through `choose` for ward/protection/targeted triggers.
                             if self

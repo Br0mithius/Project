@@ -12,6 +12,7 @@
 //! reads, the simulator plays what was read.
 
 pub mod ai;
+pub mod audit;
 pub mod combat;
 pub mod compile;
 pub mod lab;
@@ -45,6 +46,11 @@ impl Prepared {
             .iter()
             .map(|(i, _)| self.cards[*i as usize].name.clone())
             .collect()
+    }
+
+    /// Cards in the library at the start (the deck without its commanders).
+    pub fn library_size(&self) -> usize {
+        self.library.len()
     }
 
     pub fn new(deck: &Deck, db: &CardDb) -> Prepared {
@@ -133,6 +139,18 @@ pub struct CastOpts {
 
 impl<'a> Game<'a> {
     pub fn new(decks: &[&'a Prepared], rules: &Rules, rng: Rng) -> Game<'a> {
+        Game::new_audited(decks, rules, rng, false, false)
+    }
+
+    /// A game with a log (`log`) and/or statistics (`stats`) from the start, so mulligans
+    /// are recorded too. A log comes with statistics (they name who eliminated whom).
+    pub fn new_audited(
+        decks: &[&'a Prepared],
+        rules: &Rules,
+        rng: Rng,
+        log: bool,
+        stats: bool,
+    ) -> Game<'a> {
         let life = rules.starting_life.max(1) as i32;
         let players = decks
             .iter()
@@ -227,7 +245,21 @@ impl<'a> Game<'a> {
             ext: Default::default(),
             rules: [0; 8],
             end_turn: false,
+            stats: (log || stats).then(|| Box::new(audit::Stats::new(decks.len()))),
+            cause: Default::default(),
+            leave_why: Default::default(),
+            effect_kind: "other",
+            dmg_flag: false,
+            quiet_enter: false,
         };
+        if log {
+            g.log = Some(Vec::new());
+        }
+        if let Some(s) = g.stats.as_mut() {
+            for (p, d) in decks.iter().enumerate() {
+                s.players[p].commander = d.commanders_names().join(" + ");
+            }
+        }
         for p in 0..g.players.len() {
             g.players[p].px.chosen_type = g.most_common_type(p);
         }
@@ -649,6 +681,20 @@ impl<'a> Game<'a> {
     /// Casts a spell: pays, moves the card, fires cast triggers, lets opponents respond,
     /// then resolves it. False if it couldn't be cast.
     pub fn cast(&mut self, p: usize, src: Src, opts: CastOpts) -> bool {
+        let Some((idx, _)) = self.spell_card(p, src, opts) else {
+            return false;
+        };
+        let list = self.spell_list(p, src);
+        let outer = std::mem::replace(
+            &mut self.cause,
+            audit::Cause::Card((list as u8, idx), p as u8),
+        );
+        let ok = self.cast_inner(p, src, opts);
+        self.cause = outer;
+        ok
+    }
+
+    fn cast_inner(&mut self, p: usize, src: Src, opts: CastOpts) -> bool {
         let Some((idx, back)) = self.spell_card(p, src, opts) else {
             return false;
         };
@@ -843,21 +889,21 @@ impl<'a> Game<'a> {
                 self.players[p].inst_sorc_this_turn.saturating_add(1);
         }
         self.on_cast(p, &probe_card);
-        self.note(|| {
-            format!(
-                "P{} casts {}{}",
-                p,
-                c.name,
-                if back { " (back face)" } else { "" }
-            )
-        });
+        if self.auditing() {
+            self.audit_cast(p, src, (list, idx), back, &cost, x, opts, commander_slot);
+        }
         // Opponents may counter it.
         // (Sphinx of the Final Word, Samut: instants and sorceries can't be countered.)
         let uncounterable = c.cant_be_countered
             || spell_types & (T_INSTANT | T_SORCERY) != 0
                 && self.rules[p % 8] & R_SPELLS_UNCOUNTERABLE != 0;
         if !uncounterable && ai::respond_to_spell(self, p, (list as u8, idx), back) {
-            self.note(|| format!("  {} is countered", c.name));
+            let to = if commander_slot > 0 {
+                "command zone"
+            } else {
+                "graveyard"
+            };
+            self.note(|| format!("  {} is countered (-> {})", c.name, to));
             match src {
                 Src::Prepared(_) => {}
                 _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
@@ -1260,6 +1306,18 @@ impl<'a> Game<'a> {
     /// Activates ability `k` of permanent `id` (paying all its costs). False if it couldn't.
     pub fn activate(&mut self, p: usize, id: u32, k: usize) -> bool {
         let Some(i) = self.idx(id) else { return false };
+        let cause = match (self.perms[i].card, self.perms[i].tok) {
+            (Some(r), Tok::None | Tok::Creature | Tok::Other) => audit::Cause::Card(r, p as u8),
+            _ => audit::Cause::Token(p as u8),
+        };
+        let outer = std::mem::replace(&mut self.cause, cause);
+        let ok = self.activate_inner(p, id, k);
+        self.cause = outer;
+        ok
+    }
+
+    fn activate_inner(&mut self, p: usize, id: u32, k: usize) -> bool {
+        let Some(i) = self.idx(id) else { return false };
         let Some((cost, x_paid)) = self.activation_plan(p, i, k) else {
             return false;
         };
@@ -1268,6 +1326,17 @@ impl<'a> Game<'a> {
         }
         let Some(i) = self.idx(id) else { return false };
         let x = self.perms[i].clone();
+        if self.log.is_some() {
+            let d = self.perm_desc(&x);
+            let text = self.abilities_of(&x)[k].text.clone();
+            let left = self.mana_available(p);
+            let paid = if cost.total() > 0 {
+                format!(" (paid {}, {} mana left)", audit::fmt_mana(&cost), left)
+            } else {
+                String::new()
+            };
+            self.note(|| format!("P{} activates {}: {}{}", p, d, text, paid));
+        }
         let ab = &self.abilities_of(&x)[k];
         let mut snapshot = None;
         match &ab.trig {
@@ -1366,7 +1435,6 @@ impl<'a> Game<'a> {
         let card = x.card.unwrap_or((p as u8, NO_CARD));
         let snapshot =
             snapshot.or_else(|| (x.card.is_none() || x.tok != Tok::None).then(|| x.clone()));
-        self.note(|| format!("P{} activates {}", p, ab.text));
         self.pending.push(Pending {
             ctrl: p as u8,
             source: Some(id),
@@ -1428,6 +1496,16 @@ impl<'a> Game<'a> {
 
     /// Activates an ability of a card in the graveyard (paying its costs).
     pub fn activate_from_graveyard(&mut self, p: usize, gk: usize, k: usize) -> bool {
+        let Some(&idx) = self.players[p].graveyard.get(gk) else {
+            return false;
+        };
+        let outer = std::mem::replace(&mut self.cause, audit::Cause::Card((p as u8, idx), p as u8));
+        let ok = self.activate_from_graveyard_inner(p, gk, k);
+        self.cause = outer;
+        ok
+    }
+
+    fn activate_from_graveyard_inner(&mut self, p: usize, gk: usize, k: usize) -> bool {
         let Some(cost) = self.graveyard_activation_cost(p, gk, k) else {
             return false;
         };
@@ -1594,6 +1672,11 @@ impl<'a> Game<'a> {
             self.perms[e].attached = Some(target_id);
         }
         self.recalc();
+        if self.log.is_some() {
+            let (e, t) = (self.id_desc(equip_id), self.id_desc(target_id));
+            let m = audit::fmt_mana(&cost);
+            self.note(|| format!("P{} equips {} to {} (paid {})", p, e, t, m));
+        }
         true
     }
 
@@ -1619,6 +1702,10 @@ impl<'a> Game<'a> {
             self.perms[v].sick = false;
         }
         self.recalc();
+        if self.log.is_some() {
+            let v = self.id_desc(vehicle_id);
+            self.note(|| format!("P{} crews {}", p, v));
+        }
         true
     }
 
@@ -1631,6 +1718,10 @@ impl<'a> Game<'a> {
             return false;
         }
         let card = self.players[p].hand.remove(h);
+        if self.log.is_some() {
+            let name = self.players[p].cards[card as usize].name.clone();
+            self.note(|| format!("P{} cycles {} (paid {{{}}})", p, name, cost));
+        }
         self.put_discarded(p, card);
         if find.is_empty() {
             self.draw(p, 1);
@@ -1670,7 +1761,17 @@ impl<'a> Game<'a> {
             r.1
         };
         self.players[p].lands_played += 1;
-        self.enter_card(p, c, p, false);
+        self.quiet_enter = true;
+        let i = self.enter_card(p, c, p, false);
+        self.quiet_enter = false;
+        if self.auditing() {
+            let from = if gy {
+                " from the graveyard"
+            } else {
+                " from exile"
+            };
+            self.audit_land(p, c, i, from);
+        }
         self.run_pending();
         self.sba();
     }
@@ -1678,7 +1779,12 @@ impl<'a> Game<'a> {
     pub fn play_land(&mut self, p: usize, h: usize) {
         let c = self.players[p].hand.remove(h);
         self.players[p].lands_played += 1;
-        self.enter_card(p, c, p, false);
+        self.quiet_enter = true;
+        let i = self.enter_card(p, c, p, false);
+        self.quiet_enter = false;
+        if self.auditing() {
+            self.audit_land(p, c, i, "");
+        }
         self.run_pending();
         self.sba();
     }
@@ -1857,40 +1963,8 @@ impl<'a> Game<'a> {
         for id in untapping {
             self.emit(Ev::Untapped, a, Some(id));
         }
-        if self.log.is_some() {
-            let lands = self
-                .perms
-                .iter()
-                .filter(|x| x.ctrl as usize == a && x.is(T_LAND))
-                .count();
-            let creatures: Vec<String> = self
-                .perms
-                .iter()
-                .filter(|x| x.ctrl as usize == a && x.is_creature())
-                .map(|x| format!("{}/{}", x.p, x.t))
-                .collect();
-            let (life, hand, round) =
-                (self.players[a].life, self.players[a].hand.len(), self.round);
-            let names: Vec<String> = self.players[a]
-                .hand
-                .iter()
-                .map(|&c| {
-                    let c = &self.players[a].cards[c as usize];
-                    format!("{} {}", c.name, c.mv)
-                })
-                .collect();
-            self.note(|| {
-                format!(
-                    "-- P{} round {}: life {}, {} lands, hand {}, creatures [{}] | hand: {}",
-                    a,
-                    round,
-                    life,
-                    lands,
-                    hand,
-                    creatures.join(" "),
-                    names.join("; ")
-                )
-            });
+        if self.auditing() {
+            self.audit_turn_start(a);
         }
         let hijacked = std::mem::take(&mut self.players[a].hijacked);
         self.phase_triggers(a, Phase::Upkeep);
@@ -2001,8 +2075,13 @@ impl<'a> Game<'a> {
 
     /// The cleanup step of player `a`'s turn: hand size, damage and "this turn" effects end.
     fn cleanup(&mut self, a: usize) {
+        let outer = std::mem::replace(&mut self.cause, audit::Cause::Rule("hand size"));
         while self.players[a].hand.len() > 7 {
             self.discard(a);
+        }
+        self.cause = outer;
+        if self.stats.is_some() {
+            self.audit_turn_end(a);
         }
         for x in self.perms.iter_mut() {
             x.damage = 0;
@@ -2227,6 +2306,10 @@ pub fn play_game(decks: &[&Prepared], rules: &Rules, rng: &mut Rng) -> usize {
 }
 
 pub fn play(g: &mut Game) -> usize {
+    // A log set after `Game::new` still gets statistics (they name who eliminated whom).
+    if g.log.is_some() && g.stats.is_none() {
+        g.stats = Some(Box::new(audit::Stats::new(g.players.len())));
+    }
     let n = g.players.len();
     for round in 1..=MAX_ROUNDS {
         g.round = round;
@@ -2237,15 +2320,35 @@ pub fn play(g: &mut Game) -> usize {
             g.take_turns(a, round == 1 && a == 0);
             let alive: Vec<usize> = (0..n).filter(|&i| g.players[i].alive).collect();
             match alive.len() {
-                0 => return a,
-                1 => return alive[0],
+                0 => {
+                    g.audit_game_end(a, false, true);
+                    return a;
+                }
+                1 => {
+                    g.audit_game_end(alive[0], false, false);
+                    return alive[0];
+                }
                 _ => {}
             }
         }
     }
-    (0..n)
+    let w = (0..n)
         .max_by(|&x, &y| g.standing(x).partial_cmp(&g.standing(y)).unwrap())
-        .unwrap_or(0)
+        .unwrap_or(0);
+    if g.log.is_some() {
+        let st: Vec<String> = (0..n)
+            .filter(|&p| g.players[p].alive)
+            .map(|p| format!("P{} {:.1}", p, g.standing(p)))
+            .collect();
+        g.note(|| {
+            format!(
+                "Round limit reached: standings (life + board/2 - 3 x poison): {}",
+                st.join(", ")
+            )
+        });
+    }
+    g.audit_game_end(w, true, false);
+    w
 }
 
 /// Win rate of `deck` in `games` 4-player games against random picks from `gauntlet`
