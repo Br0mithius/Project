@@ -694,7 +694,7 @@ fn patterns() -> &'static Patterns {
         Patterns {
             destroy: re(r"destroy (?:up to {N} )?(?:(other|another) )?target ([^.;]*)"),
             destroy_all: re(r"destroy (?:all|each) ([^.;]*)"),
-            exile: re(r"exile (?:up to {N} )?(?:(other|another) )?target ([^.;]*?)(?: until ([^.;]*))?(?:\.|$|,| and )"),
+            exile: re(r"exile (?:up to )?(?:{N} )?(?:(other|another) )?target ([^.;]*?)(?: until ([^.;]*))?(?:\.|$|,| and )"),
             exile_all: re(r"exile (?:all|each) ([^.;]*)"),
             damage: re(r"deals? (\d+|x|that much|damage equal to [^,.]*?|damage)(?: damage)?(?: divided as you choose among| to) ([^.;]*)"),
             fight: re(r"fights? (?:up to one )?(?:(other|another) )?(target [^.;]*|it|that creature)"),
@@ -711,7 +711,7 @@ fn patterns() -> &'static Patterns {
             minus_counters: re(r"put {N} -1/-1 counters? on (?:up to (?:a|an|one|two|three|x|\d+) )?(?:target )?([^.;]*)"),
             other_counters: re(r"\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|x|\d+|that many) ((?:[a-z]+ )?[a-z]+) counters? on"),
             tuck: re(r"(?:the owner of (?:up to one )?(?:other )?target ([^.;]*?) (?:puts|shuffles) it|target ([^.;]*?)'s owner (?:puts|shuffles) it)"),
-            item_tokens: re(r"creates? {N} (?:tapped )?(?:colorless )?(treasure|food|clue|map|blood|powerstone|junk|gold|incubator|heartwood|lotus|equipment)"),
+            item_tokens: re(r"creates? {N} (?:tapped )?(?:colorless )?(?:artifact token named )?(treasure|food|clue|map|blood|powerstone|junk|gold|incubator|heartwood|lotus|equipment)"),
             counters: re(r"put {N} \+1/\+1 counters?(?: and [^.;]*?)? on (?:up to (?:a|an|one|two|three|four|x|\d+) )?([^.;]*)"),
             pump: re(r"([^.;,]*?) gets? \+(\d+|x)/([+-](?:\d+|x))(?: and (?:gains?|has|have) ([^.;]*?))?( until end of turn)?(?:\.|$|,| for | as long| and )"),
             grant: re(r#"([^.;,]*?) (?:gains?|has|have) ([a-z ,{}0-9]*?(?:flying|indestructible|hexproof|first strike|double strike|trample|menace|lifelink|deathtouch|vigilance|haste|reach|ward|prowess|protection from [a-z]+)[a-z ,{}0-9]*?)( until end of turn)?(?:\.|$| as long| and "| and can't)"#),
@@ -756,7 +756,15 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     // Abilities in quotes ("tokens with \"...\"", "equipped creature has \"...\"", "is a land
     // with \"{T}: Add {C}\"", emblems) belong to whatever gets them, not to this card.
-    if core.contains('"') {
+    // Except what the card gives itself ("~ gains \"{T}: ~ deals damage ...\" until end of
+    // turn", "it becomes a Bear ... and gains \"...\""): that is its own ability.
+    let self_grant = ["~ gains \"", "~ has \"", "it gains \""]
+        .iter()
+        .any(|g| core.contains(g))
+        || (core.contains("~ becomes") || core.contains("it becomes")) && core.contains('"');
+    if self_grant {
+        core = core.replace('"', "");
+    } else if core.contains('"') {
         let mut kept = String::new();
         let mut inside = false;
         for ch in core.chars() {
@@ -770,6 +778,19 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     let s = core.as_str();
     let mut out = Vec::new();
+    // A mana ability given to your own lands (New Horizons, Chromatic Lantern) is ramp.
+    for grantee in [
+        "enchanted land has \"{t}: add ",
+        "lands you control have \"{t}: add ",
+        "target land gains \"{t}: add ",
+    ] {
+        if let Some(i) = full.find(grantee) {
+            let produced = full[i + grantee.len()..].split('"').next().unwrap_or("");
+            if let Some(c) = p.add_mana.captures(&format!("add {}", produced)) {
+                out.push(Effect::AddMana(mana_amount(&c[1])));
+            }
+        }
+    }
     // Mass removal first, so "destroy all creatures" isn't also read as single-target.
     for c in p.destroy_all.captures_iter(s) {
         out.push(Effect::Destroy(read_target(&c[1], true)));
@@ -1001,7 +1022,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     for c in p.edict.captures_iter(s) {
         // "Each player sacrifices three creatures" / "thirteen creatures" (Blasphemous Edict):
         // a board wipe for everyone, not a one-creature edict.
-        let n = c[0].split_whitespace().nth(2).unwrap_or("a");
+        let n = c[0]
+            .split_whitespace()
+            .skip_while(|w| !w.starts_with("sacrifice"))
+            .nth(1)
+            .unwrap_or("a");
         if c[1].starts_with("each player")
             && (number(n).is_some_and(|a| a.n >= 3) || n == "thirteen" || n == "all")
         {
@@ -1105,6 +1130,10 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     // Tokens.
     let before = out.len();
     // "Its controller creates a 3/3 Beast" (Beast Within, Pongify) gives the token away.
+    let mut gave = false;
+    // Tokens are read from the full text (to see who gets them), so skip those made by a
+    // quoted ability that belongs to something else.
+    let quoted = |start: usize| !self_grant && full[..start].matches('"').count() % 2 == 1;
     let given_away = |start: usize| {
         let head = &full[..start];
         head.ends_with("its controller ")
@@ -1118,7 +1147,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             || head.ends_with("defending player ")
     };
     for c in p.tokens.captures_iter(full) {
+        if quoted(c.get(0).unwrap().start()) {
+            continue;
+        }
         if given_away(c.get(0).unwrap().start()) {
+            gave = true;
             continue;
         }
         let n = counted(
@@ -1148,7 +1181,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     if out.len() == before {
         for c in p.tokens_plain.captures_iter(full) {
+            if quoted(c.get(0).unwrap().start()) {
+                continue;
+            }
             if given_away(c.get(0).unwrap().start()) {
+                gave = true;
                 continue;
             }
             let kws = c
@@ -1170,7 +1207,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         }
     }
     for c in p.item_tokens.captures_iter(full) {
+        if quoted(c.get(0).unwrap().start()) {
+            continue;
+        }
         if given_away(c.get(0).unwrap().start()) {
+            gave = true;
             continue;
         }
         // "a Food token or a Treasure token": a choice - the Treasure is the better one.
@@ -1290,19 +1331,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         }
     }
     for c in p.add_mana.captures_iter(s) {
-        let n = if c[1].starts_with('{') {
-            // "{R} or {G}" is one mana; "{R}{R}" two.
-            if c[1].contains(" or ") || c[1].contains(", ") {
-                1
-            } else {
-                crate::card::symbols_in(&c[1]).len().max(1) as i32
-            }
-        } else {
-            number(c[1].split_whitespace().next().unwrap_or("one"))
-                .map(|a| a.n)
-                .unwrap_or(1)
-        };
-        out.push(Effect::AddMana(counted(Amount::fixed(n), s)));
+        out.push(Effect::AddMana(counted(mana_amount(&c[1]), s)));
     }
     // "Target player searches their library for a basic land" (Restorative Technique,
     // Cultivate-style gifts) is still a land search; the player is usually you.
@@ -1330,6 +1359,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         && !s.contains("land card")
     {
         out.push(Effect::Reanimate);
+    } else if s.contains("land card")
+        && (s.contains("from your graveyard to the battlefield")
+            || s.contains("graveyard onto the battlefield"))
+    {
+        // A land back from the graveyard is an extra land drop.
+        out.push(Effect::FetchLand { battlefield: true });
     } else if s.contains("from your graveyard to your hand")
         || s.contains("graveyard into your hand")
         || s.contains("return this card from your graveyard")
@@ -1526,7 +1561,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     // "Enchanted creature, land, or planeswalker is a colorless land ... and loses all other
     // card types and abilities" (Imprisoned in the Moon): the creature is gone for good.
-    if s.starts_with("enchanted creature")
+    if s.starts_with("enchanted ")
         && (s.contains("is a colorless land") || s.contains("loses all other card types"))
     {
         out.push(Effect::Lock {
@@ -1590,7 +1625,9 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     // Only a quoted ability: it's given to something else (an emblem, a token, an equipped
     // creature) - named, but not counted as this card's own effect.
-    if out.is_empty() && full.contains('"') {
+    if out.is_empty() && gave {
+        out.push(Effect::Rule("gives an opponent a token".into()));
+    } else if out.is_empty() && full.contains('"') {
         out.push(Effect::Rule(
             if full.contains("emblem") {
                 "gets an emblem"
@@ -1602,6 +1639,20 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     let _ = p.number_list;
     out
+}
+
+/// How much "add {R}{R}" / "add {R} or {G}" / "add three mana" produces.
+fn mana_amount(what: &str) -> Amount {
+    if what.starts_with('{') {
+        // "{R} or {G}" is one mana; "{R}{R}" two.
+        Amount::fixed(if what.contains(" or ") || what.contains(", ") {
+            1
+        } else {
+            crate::card::symbols_in(what).len().max(1) as i32
+        })
+    } else {
+        number(what.split_whitespace().next().unwrap_or("one")).unwrap_or(Amount::fixed(1))
+    }
 }
 
 /// A tap or restriction that keeps the creature out of the game, not just for a turn.
@@ -1802,9 +1853,29 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
         && has(effects, |e| matches!(e, Effect::Reanimate))
         && !body.contains("graveyard")
     {
-        effects.retain(|e| !matches!(e, Effect::Reanimate | Effect::Exile { .. }));
-        if !effects.contains(&Effect::Blink) {
-            effects.push(Effect::Blink);
+        // "Exile target creature. ... return it to the battlefield under your control"
+        // (Vindictive Triumph): removal that may steal it, not a flicker.
+        let stolen = body.contains("under your control")
+            && !has(
+                effects,
+                |e| matches!(e, Effect::Exile { target, .. } if target.whose == Whose::Yours),
+            );
+        if stolen {
+            effects.retain(|e| !matches!(e, Effect::Reanimate));
+        } else {
+            effects.retain(|e| !matches!(e, Effect::Reanimate | Effect::Exile { .. }));
+            if !effects.contains(&Effect::Blink) {
+                effects.push(Effect::Blink);
+            }
+        }
+    }
+    // "Tap target creature. It doesn't untap / can't become untapped for as long as you
+    // control ~" across sentences: locked down for good.
+    if lasting_lock(body) {
+        for e in effects.iter_mut() {
+            if let Effect::Lock { lasting, .. } = e {
+                *lasting = true;
+            }
         }
     }
     // "Mill three cards. Put a creature card from among them into your hand": selection.
@@ -1856,7 +1927,15 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
 
 /// Who a pump or keyword grant affects.
 fn pump_target(who: &str) -> Target {
-    let who = who.trim();
+    let who = who
+        .trim()
+        .trim_start_matches("then ")
+        .trim_start_matches("and ")
+        .trim_start_matches("until end of turn, ");
+    // "Any number of target creatures you control": all of them, if you like.
+    if who.contains("any number of target") {
+        return read_target(who.split("target ").nth(1).unwrap_or("creature"), true);
+    }
     // A team: "creatures you control", "each other creature you control", "other Merfolk
     // you control", "creatures you control with a +1/+1 counter on them", "lands you
     // control". Narrowed by a type, colour or condition, it's a restricted mass effect.
@@ -1882,7 +1961,10 @@ fn pump_target(who: &str) -> Target {
             "creature tokens",
             "nontoken creatures",
         ];
-        t.restricted |= !tail.is_empty() || t.kind == Kind::Creature && !plain.contains(&noun);
+        let narrowed = ["with ", "of ", "that ", "who "]
+            .iter()
+            .any(|w| tail.starts_with(w));
+        t.restricted |= narrowed || t.kind == Kind::Creature && !plain.contains(&noun);
         t.other = other;
         return t;
     }
@@ -2024,9 +2106,9 @@ fn self_refs(text: &str, card: &Card) -> String {
         "fire", "death", "night", "shadow", "steel", "golden", "silver",
     ];
     let mut shorts: Vec<&str> = Vec::new();
-    if let Some((s, _)) = name.split_once(", ") {
-        shorts.push(s);
-    }
+    // The part before a comma is a real name even when it's a word ("Ghost, Spectral
+    // Saboteur").
+    let comma_name = name.split_once(", ").map(|(s, _)| s);
     if let Some((s, _)) = name.split_once(" of ") {
         shorts.push(s);
     }
@@ -2042,8 +2124,12 @@ fn self_refs(text: &str, card: &Card) -> String {
             }
         }
     }
+    shorts.retain(|s| !NOT_NAMES.contains(s));
+    // Longest first, so "Bilbo Baggins" goes before "Bilbo".
+    shorts.extend(comma_name);
+    shorts.sort_by_key(|s| std::cmp::Reverse(s.len()));
     for short in shorts {
-        if short.len() < 3 || NOT_NAMES.contains(&short) {
+        if short.len() < 3 {
             continue;
         }
         // Whole words only: "Ori" mustn't turn "storied" into "st~ed".
@@ -2372,7 +2458,7 @@ fn split_instead(line: &str) -> (String, Option<String>) {
     let (cond, _) = head.split_once(", ").unwrap_or((head, ""));
     if head.contains(" would ")
         || head.contains("instead")
-        || cond.contains("this way")
+        || head.contains("this way")
         || cond.ends_with(" does")
         || cond.ends_with(" do")
         || cond.ends_with(" did")
@@ -2395,6 +2481,11 @@ fn with_same_start(base: &str, sentence: &str) -> String {
     if let Some((label, rest)) = base.split_once(" — ") {
         if label.split_whitespace().count() <= 4 && !label.contains(':') && !label.contains('{') {
             return format!("{} — {}", label, with_same_start(rest, sentence));
+        }
+    }
+    if base.starts_with('[') {
+        if let Some((cost, _)) = base.split_once("]: ") {
+            return format!("{}]: {}", cost, sentence);
         }
     }
     if base.starts_with("when ") || base.starts_with("whenever ") || base.starts_with("at ") {
@@ -2655,17 +2746,28 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
     // Conditions in the middle of the line: "has flying as long as...", "attacks while you
     // control...", "during your turn", "unless that player..." (the opponent picks the
     // cheaper option, so a punisher counts as conditional).
+    // "For as long as you control ~" is how long it lasts, not a condition, and "during your
+    // turn" in a trigger only says when it triggers.
+    let cond_text = line.replace("for as long as", "");
+    let punisher = [
+        " unless that player",
+        " unless its controller",
+        " unless any player",
+        " unless an opponent",
+        " unless they ",
+    ];
     if [
         " as long as ",
         " while you control",
         " while it's",
         " while ~",
-        "during your turn",
-        " unless ",
         "threshold",
+        "for the first time each turn",
     ]
     .iter()
-    .any(|c| line.contains(c))
+    .chain(punisher.iter())
+    .any(|c| cond_text.contains(c))
+        || body.contains("during your turn")
         || boast
     {
         ability.conditional = true;
@@ -2679,7 +2781,9 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
     for s in sentences(&body) {
         for e in read_effects(&s) {
             // "Gain control of target creature. ... gain control of it" is one steal.
-            if !(matches!(e, Effect::GainControl(_)) && ability.effects.contains(&e)) {
+            if !(matches!(e, Effect::GainControl(_) | Effect::Rule(_))
+                && ability.effects.contains(&e))
+            {
                 ability.effects.push(e);
             }
         }
@@ -2751,8 +2855,27 @@ fn activated_split(line: &str) -> Option<(&str, &str)> {
         .then_some((c, effect.trim()))
 }
 
+/// Splits at ". ", but not inside a quoted ability ("... with \"Sacrifice this. Draw a
+/// card.\"" stays whole), and after a quote that ends a sentence ("if able.\" Put ...").
 fn sentences(text: &str) -> Vec<String> {
-    text.split(". ")
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut inside = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        cur.push(ch);
+        let next_space = chars.peek() == Some(&' ');
+        if ch == '"' {
+            inside = !inside;
+            if !inside && next_space && cur.ends_with(".\"") {
+                out.push(std::mem::take(&mut cur));
+            }
+        } else if ch == '.' && !inside && next_space {
+            out.push(std::mem::take(&mut cur));
+        }
+    }
+    out.push(cur);
+    out.iter()
         .map(|s| s.trim().trim_end_matches('.').to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -3126,6 +3249,7 @@ impl Parsed {
         for a in self.all_abilities() {
             if matches!(a.when.first(), Some(When::Static))
                 && !a.text.starts_with("enchanted creature")
+                && !a.text.starts_with("enchanted permanent")
             {
                 continue;
             }
@@ -3540,6 +3664,211 @@ mod tests {
             "-3 damages each creature except your tokens"
         );
         assert!(removal("Garruk, Veiled Butcher").is_some());
+
+        // --- League-wide misreadings (hand-checked against the printed text)
+        let ability_with = |n: &str, f: &dyn Fn(&Effect) -> bool| {
+            p(&db, n)
+                .all_abilities()
+                .find(|a| a.effects.iter().any(f))
+                .cloned()
+                .unwrap_or_else(|| panic!("{}: no such ability", n))
+        };
+        // Short self-names and "~ or another" triggers.
+        assert!(when("Kiora of Fire and Ashes", &|w| *w == When::Enters));
+        assert!(when("Dáin Ironfoot", &|w| *w == When::Enters));
+        assert!(when("Dáin Ironfoot", &|w| *w == When::Attacks));
+        assert!(when("Arahbo, the First Fang", &|w| *w == When::Enters));
+        assert!(when("Arahbo, the First Fang", &|w| matches!(
+            w,
+            When::Event(Event::OtherEnters(_))
+        )));
+        assert!(p(&db, "Ghost, Spectral Saboteur").evasive());
+        // Tokens an opponent gets aren't yours.
+        assert!(!p(&db, "The Sentry, Golden Guardian").makes_tokens());
+        assert!(!p(&db, "Vraska, the Cutting Glare").makes_tokens());
+        // "Triggers only once each turn" repeats; Exhaust is once.
+        assert!(
+            !ability_with("Loki, God of Mischief", &|e| matches!(
+                e,
+                Effect::Draw { .. }
+            ))
+            .once
+        );
+        assert!(
+            !ability_with("Ant-Man, Colony Commander", &|e| matches!(
+                e,
+                Effect::Tokens { .. }
+            ))
+            .once
+        );
+        assert!(ability_with("Liliana the Repentant", &|e| matches!(e, Effect::Reanimate)).once);
+        // Later "If ..." sentences only gate their own effect.
+        let roil = ability_with("Into the Roil", &|e| matches!(e, Effect::Draw { .. }));
+        assert!(roil.conditional, "Into the Roil draws only if kicked");
+        assert!(!ability_with("Into the Roil", &|e| matches!(e, Effect::Bounce(_))).conditional);
+        assert!(
+            ability_with("Angel of Vitality", &|e| matches!(e, Effect::Pump { .. })).conditional
+        );
+        // Saga chapter lists and [-X].
+        assert!(when("Burn, Burn, Tree and Fern", &|w| *w == When::Chapter(4)));
+        assert!(when("Chandra, Chill of Compliance", &|w| *w == When::Loyalty(-3)));
+        // Emblems and granted abilities aren't the card's own.
+        assert!(!has("Ajani Resolute", &|e| matches!(
+            e,
+            Effect::Pump { .. }
+        )));
+        assert!(!has("Undying Malice", &|e| matches!(e, Effect::Reanimate)));
+        assert!(
+            has("Iron Fist, Living Weapon", &|e| matches!(
+                e,
+                Effect::Damage { .. }
+            )),
+            "Iron Fist grants itself the ability"
+        );
+        assert!(
+            p(&db, "New Horizons").ramps(),
+            "a mana ability on your own land"
+        );
+        assert!(removal("Imprisoned in the Moon").is_some_and(|r| r.1.starts_with("lockdown")));
+        // Partial evasion isn't unblockable.
+        for n in ["Juggernaut", "Stromkirk Noble", "Gate Colossus"] {
+            assert!(
+                !has(
+                    n,
+                    &|e| matches!(e, Effect::Grant { keywords, .. } if keywords.contains(&"unblockable".to_string()))
+                ),
+                "{}",
+                n
+            );
+        }
+        assert!(has(
+            "Tetsuko Umezawa, Fugitive",
+            &|e| matches!(e, Effect::Grant { to, .. } if to.mass && to.restricted)
+        ));
+        // Draw-then-discard nets.
+        assert!(
+            !p(&db, "Seasoned Cryomancer").abilities[0]
+                .effects
+                .iter()
+                .any(|e| matches!(e, Effect::Draw { .. }))
+        );
+        assert!(
+            !p(&db, "Kiora, the Rising Tide")
+                .abilities
+                .iter()
+                .any(|a| a.is(&When::Enters)
+                    && a.effects.iter().any(|e| matches!(e, Effect::Draw { .. })))
+        );
+        assert!(has(
+            "Thranduil, the Elvenking",
+            &|e| matches!(e, Effect::Draw { amount, .. } if amount.n == 1)
+        ));
+        // Counts: "for each", "where X is", several targets.
+        assert!(has(
+            "Brass's Bounty",
+            &|e| matches!(e, Effect::ItemTokens { amount, .. } if amount.x && amount.n >= 3)
+        ));
+        assert!(has(
+            "Krenko, Mob Boss",
+            &|e| matches!(e, Effect::Tokens { amount, .. } if amount.n >= 3)
+        ));
+        assert!(has(
+            "Doc Samson, Super Psychiatrist",
+            &|e| matches!(e, Effect::AddMana(a) if a.n == 3)
+        ));
+        assert!(has("Master's Councillors", &|e| matches!(
+            e,
+            Effect::Pump { power: 6, .. }
+        )));
+        assert!(has(
+            "Gandalf, Spark Starter",
+            &|e| matches!(e, Effect::Damage { to, .. } if to.count == 3)
+        ));
+        assert!(has(
+            "Death to Our Enemies",
+            &|e| matches!(e, Effect::Damage { to, .. } if to.count == 2)
+        ));
+        assert!(has(
+            "Run Away Together",
+            &|e| matches!(e, Effect::Bounce(t) if t.count == 2)
+        ));
+        // Locks, steals, tucks, flickers.
+        assert!(has("Spider-Woman, Secret Agent", &|e| matches!(
+            e,
+            Effect::Lock { lasting: true, .. }
+        )));
+        assert!(
+            !has("Sower of Chaos", &|e| matches!(e, Effect::Lock { .. })),
+            "can't block isn't removal"
+        );
+        assert_eq!(
+            removal("Evil's Thrall").map(|r| r.1),
+            Some("temporary steal")
+        );
+        assert_eq!(
+            removal("Involuntary Employment").map(|r| r.1),
+            Some("temporary steal")
+        );
+        assert_eq!(
+            removal("Plan for All Outcomes").map(|r| r.1),
+            Some("bounce")
+        );
+        assert_eq!(
+            removal("Vindictive Triumph").map(|r| r.1),
+            Some("unconditional exile")
+        );
+        assert!(has("S.H.I.E.L.D. Flying Car", &|e| matches!(
+            e,
+            Effect::Blink
+        )));
+        assert!(!has("S.H.I.E.L.D. Flying Car", &|e| matches!(
+            e,
+            Effect::Reanimate
+        )));
+        assert!(p(&db, "Blasphemous Edict").sweeper());
+        // Replacement effects and damage to yourself.
+        assert!(!has("Gratuitous Violence", &|e| matches!(
+            e,
+            Effect::Damage { .. }
+        )));
+        assert!(!has("Midnight Reaper", &|e| matches!(
+            e,
+            Effect::Damage { .. }
+        )));
+        assert!(has(
+            "Midnight Reaper",
+            &|e| matches!(e, Effect::Rule(r) if r == "damage to you")
+        ));
+        assert!(has(
+            "Demonic Pact",
+            &|e| matches!(e, Effect::Rule(r) if r == "you lose the game")
+        ));
+        // Team effects narrowed by type or condition.
+        assert!(has(
+            "Attuma, Atlantean Warlord",
+            &|e| matches!(e, Effect::Pump { to, .. } if to.mass && to.other && to.restricted)
+        ));
+        assert!(has(
+            "Marwyn, the Preserver",
+            &|e| matches!(e, Effect::Grant { to, .. } if to.kind == Kind::Land)
+        ));
+        assert!(has(
+            "Hire a Crew",
+            &|e| matches!(e, Effect::Pump { to, .. } if to.mass && !to.restricted)
+        ));
+        // Ramp read from new places.
+        assert!(p(&db, "Restorative Technique").ramps());
+        assert!(p(&db, "Primal Witchstalker").ramps());
+        assert!(
+            has("Bard's Company", &|e| matches!(e, Effect::Tokens { .. })),
+            "recruit leaves a token"
+        );
+        // Value model: '*' bodies, symmetric draws.
+        assert!(crate::value::creature_value(db.get("Tarmogoyf").unwrap()).efficiency > 0.8);
+        assert!(
+            crate::value::creature_value(db.get("Dragon Mage").unwrap()).efficiency < 2.0,
+            "everyone draws seven"
+        );
     }
 
     #[test]

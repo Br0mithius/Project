@@ -195,7 +195,8 @@ pub fn ability_value(a: &Ability) -> f32 {
         || a.text.contains("~ from your graveyard");
     // "Each player draws / creates / gains": opponents get the same, so only a small edge
     // is left (Dragon Mage, Arc of Fortune, Howling Mine-style effects).
-    let symmetric = a.text.contains("each player");
+    // ("At the beginning of each player's upkeep, you create ..." is only yours.)
+    let symmetric = a.text.contains("each player ");
     let vals: Vec<f32> = a
         .effects
         .iter()
