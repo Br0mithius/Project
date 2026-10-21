@@ -2205,3 +2205,130 @@ fn characteristic_changes_and_odd_effects() {
     g.take_turn(0, false);
     assert_eq!(perm(&g, drake).p, 3, "gone at our next turn");
 }
+
+#[test]
+fn delayed_returns_and_aura_hosts() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Island",
+            "Helpful Hunter",
+            "S.H.I.E.L.D. Flying Car",
+            "Puppet Crafting",
+            "Gleaming Barrier",
+            "Forest",
+        ],
+    );
+    // S.H.I.E.L.D. Flying Car: the creature comes back at the beginning of the next end
+    // step (and enters again: Helpful Hunter draws again).
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    put(&mut g, 0, 1);
+    let hand = g.players[0].hand.len();
+    put(&mut g, 0, 2);
+    assert!(
+        !g.perms.iter().any(|x| x.card == Some((0, 1))),
+        "exiled until the end step"
+    );
+    assert_eq!(g.delayed_returns.len(), 1);
+    g.take_turn(0, false);
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 1))));
+    assert!(g.players[0].hand.len() >= hand + 1);
+    // Puppet Crafting goes on one of our non-creature artifacts, not a creature.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'G');
+    put(&mut g, 0, 1);
+    let relic = put(&mut g, 0, 4);
+    let i = g.idx(relic).unwrap();
+    g.perms[i].types &= !T_CREATURE;
+    g.players[0].hand = vec![3];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let x = perm(&g, relic);
+    assert!(x.is_creature() && (x.p, x.t) == (5, 5));
+}
+
+#[test]
+fn mechanism_cards_play_whole_games() {
+    let db = db();
+    let names = [
+        "Bruce Banner",
+        "Jennifer Walters",
+        "King T'Challa",
+        "Monica Rambeau",
+        "Tony Stark",
+        "Kang the Conqueror",
+        "Time Stop",
+        "Omniscience",
+        "Omnipresence",
+        "Muldrotha, the Gravetide",
+        "Thor, God of Thunder",
+        "Tinybones, Bauble Burglar",
+        "Mole Man, Moloid Master",
+        "Thalia, the Survivor",
+        "Propaganda",
+        "Tolarian Terror",
+        "The Scarlet Witch",
+        "Radagast of Rhosgobel",
+        "Herald of Eternal Dawn",
+        "Karn, Argent Defender",
+        "Ghalta the Immovable",
+        "Loot, the Anomaly",
+        "Sorcerous Spyglass",
+        "Eaten by Piranhas",
+        "Perfected Theory",
+        "Puppet Crafting",
+        "The Sentry, Golden Guardian",
+        "Wishclaw Talisman",
+        "Undying Malice",
+        "Fblthp, Impossibly Lost",
+        "Gandalf, Wandering Wizard",
+        "Frenzied Goblin",
+        "Sower of Chaos",
+        "Ajani Resolute",
+        "Chandra, Torch of Defiance",
+        "Garruk, Veiled Butcher",
+        "Jessica Jones, Private Eye",
+        "Inside Information",
+        "Soulstone Sanctuary",
+        "S.H.I.E.L.D. Flying Car",
+    ];
+    let mut deck = crate::deck::Deck::new("mechanisms");
+    for n in names {
+        deck.add(n, 1);
+    }
+    for land in ["Plains", "Island", "Swamp", "Mountain", "Forest"] {
+        deck.add(land, 8);
+    }
+    let me = Prepared::new(&deck, &db);
+    assert_eq!(me.library.len(), names.len() + 40);
+    let opp = league_decks(&db);
+    let rules = Rules::default();
+    let mut rng = Rng::new(21);
+    for k in 0..40 {
+        let mut table: Vec<&Prepared> = vec![&opp[0], &opp[1], &opp[2]];
+        table.insert(k % 4, &me);
+        let w = play_game(&table, &rules, &mut rng);
+        assert!(w < 4);
+    }
+}
+
+#[test]
+fn free_spells_from_the_top_of_libraries() {
+    let db = db();
+    let d = prep_db(&db, &["Island", "Etali, Primal Storm", "Helpful Hunter"]);
+    // Etali: the top card of each player's library, cast free: the opponent's creature is
+    // ours to control, still theirs to own; a land just stays exiled.
+    let mut g = game(&[&d, &d]);
+    let etali = put(&mut g, 0, 1);
+    g.players[1].library.push(2);
+    let k = ability(&d, 1, "each player's library");
+    fire_card(&mut g, 1, k, Some(etali));
+    let hunter = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((1, 2)))
+        .expect("cast from Opp's library");
+    assert_eq!((hunter.ctrl, hunter.owner), (0, 1));
+    assert_eq!(g.players[0].exile.len(), 1, "our Island stays exiled");
+}

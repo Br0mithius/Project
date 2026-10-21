@@ -758,7 +758,7 @@ impl<'a> Game<'a> {
             )
         });
         // Opponents may counter it.
-        if !c.cant_be_countered && ai::respond_to_spell(self, p, idx, back) {
+        if !c.cant_be_countered && ai::respond_to_spell(self, p, (list as u8, idx), back) {
             self.note(|| format!("  {} is countered", c.name));
             match src {
                 Src::Prepared(_) => {}
@@ -791,7 +791,7 @@ impl<'a> Game<'a> {
             }
             // Auras attach as they enter.
             if c.is(T_AURA) {
-                if let Some(t) = ai::aura_target(self, p, idx) {
+                if let Some(t) = ai::aura_target(self, p, (list as u8, idx)) {
                     let tid = self.perms[t].id;
                     if let Some(j) = self.idx(id) {
                         self.perms[j].attached = Some(tid);

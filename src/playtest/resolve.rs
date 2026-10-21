@@ -2653,6 +2653,15 @@ impl<'a> Game<'a> {
             {
                 self.dig_onto_battlefield(ctx);
             }
+            // "Exile the top card of each player's library, then you may cast any number of
+            // spells from among those cards without paying their mana costs" (Etali), "look
+            // at the top six cards ... you may cast a spell from among them" (Cosmic Cube),
+            // "target opponent exiles the top five cards ... cast up to two" (Doom Reigns
+            // Supreme): from those libraries, not the hand.
+            Effect::FreeSpell if free_from_top_of(text).is_some() => {
+                let spec = free_from_top_of(text).unwrap_or_default();
+                self.free_from_top(ctx, spec);
+            }
             Effect::FreeSpell => {
                 let limit = text
                     .split("mana value ")
@@ -3957,6 +3966,64 @@ pub fn impulse_of(text: &str) -> Option<Impulse> {
     })
 }
 
+/// Free spells from the top of libraries: whose, how many cards, how many spells.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FreeTop {
+    /// 0: yours, 1: a target opponent's, 2: each player's.
+    pub whose: u8,
+    pub n: usize,
+    pub spells: usize,
+    /// "With mana value less than or equal to the greatest power among attacking creatures
+    /// you control".
+    pub attacking_power: bool,
+    /// The rest go to the bottom of the library (otherwise they stay exiled).
+    pub rest_bottom: bool,
+}
+
+pub fn free_from_top_of(text: &str) -> Option<FreeTop> {
+    if !text.contains("without paying")
+        || !(text.contains("from among them")
+            || text.contains("from among those cards")
+            || text.contains("from among the exiled cards"))
+    {
+        return None;
+    }
+    let w = text.split("the top ").nth(1)?.split_whitespace().next()?;
+    let n = match w {
+        "card" => 1,
+        "two" => 2,
+        "three" => 3,
+        "four" => 4,
+        "five" => 5,
+        "six" => 6,
+        "seven" => 7,
+        d => d.parse().ok()?,
+    };
+    Some(FreeTop {
+        whose: if text.contains("each player's library") {
+            2
+        } else if text.contains("target opponent exiles the top")
+            || text.contains("target opponent's library")
+        {
+            1
+        } else {
+            0
+        },
+        n,
+        spells: if text.contains("any number of spells") {
+            usize::MAX
+        } else if text.contains("up to two spells") {
+            2
+        } else if text.contains("up to three") {
+            3
+        } else {
+            1
+        },
+        attacking_power: text.contains("greatest power among attacking creatures"),
+        rest_bottom: text.contains("rest on the bottom"),
+    })
+}
+
 /// "Has base power and toughness 4/5", "base power and toughness become 6/6".
 fn base_pt_of(text: &str) -> Option<(i16, i16)> {
     let rest = text.split("base power and toughness ").nth(1)?;
@@ -3969,6 +4036,75 @@ fn base_pt_of(text: &str) -> Option<(i16, i16)> {
 }
 
 impl<'a> Game<'a> {
+    /// Casts the best spells from the top of the libraries `spec` names, free; the rest
+    /// stay exiled or go to the bottom.
+    fn free_from_top(&mut self, ctx: &Ctx, spec: FreeTop) {
+        let me = ctx.ctrl;
+        let from: Vec<usize> = match spec.whose {
+            0 => vec![me],
+            1 => ai::choose_opponent(self, me, 0).into_iter().collect(),
+            _ => (0..self.players.len())
+                .filter(|&o| self.players[o].alive)
+                .collect(),
+        };
+        let limit = if spec.attacking_power {
+            self.perms
+                .iter()
+                .filter(|x| x.ctrl as usize == me && x.attacking)
+                .map(|x| x.p.max(0) as u8)
+                .max()
+                .unwrap_or(0)
+        } else {
+            u8::MAX
+        };
+        let mut seen: Vec<CardRef> = Vec::new();
+        for o in from {
+            for _ in 0..spec.n {
+                if let Some(c) = self.players[o].library.pop() {
+                    self.players[o].exile.push(c);
+                    seen.push((o as u8, c));
+                }
+            }
+        }
+        let mut picks: Vec<CardRef> = seen
+            .iter()
+            .copied()
+            .filter(|&r| {
+                let c = self.card(r);
+                !c.is(T_LAND) && c.mv <= limit
+            })
+            .collect();
+        picks.sort_by(|&a, &b| self.card(b).value.partial_cmp(&self.card(a).value).unwrap());
+        picks.truncate(spec.spells);
+        for r in &picks {
+            self.players[me].playable.push(Playable {
+                card: *r,
+                until: (self.round, self.active as u8),
+                own_turn: false,
+                pay_life: false,
+            });
+            let k = self.players[me].playable.len() - 1;
+            self.cast(
+                me,
+                super::Src::Exile(k),
+                super::CastOpts {
+                    free: true,
+                    ..Default::default()
+                },
+            );
+            self.players[me].playable.retain(|x| x.card != *r);
+        }
+        if spec.rest_bottom {
+            for r in seen.into_iter().filter(|r| !picks.contains(r)) {
+                let pl = &mut self.players[r.0 as usize];
+                if let Some(e) = pl.exile.iter().rposition(|&c| c == r.1) {
+                    pl.exile.remove(e);
+                    pl.library.insert(0, r.1);
+                }
+            }
+        }
+    }
+
     /// When a card made playable now stops being playable: the end of this turn, of
     /// `p`'s next turn, or never.
     pub fn play_until(&self, p: usize, next_turn: bool, lasting: bool) -> (u32, u8) {

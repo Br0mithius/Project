@@ -528,12 +528,27 @@ pub fn equip_target(g: &Game, me: usize, equip_id: u32) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-pub fn aura_target(g: &Game, p: usize, idx: u16) -> Option<usize> {
-    let c = &g.players[p].cards[idx as usize];
+pub fn aura_target(g: &Game, p: usize, card: CardRef) -> Option<usize> {
+    let c = g.card(card);
+    // "Enchanted permanent is a Construct creature with base power and toughness 5/5"
+    // (Puppet Crafting): one of our artifacts or enchantments that isn't a creature yet.
+    if c.attached_sets.is_some_and(|s| s.creature && !s.blank) {
+        return (0..g.perms.len())
+            .filter(|&i| {
+                let x = &g.perms[i];
+                x.ctrl as usize == p
+                    && x.is(T_ARTIFACT | T_ENCHANTMENT)
+                    && !x.is(T_AURA)
+                    && !x.is_creature()
+            })
+            .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap());
+    }
     let creatures: Vec<usize> = (0..g.perms.len())
         .filter(|&i| {
-            g.perms[i].is_creature()
-                && !(g.perms[i].ctrl as usize != p && g.perms[i].has(HEXPROOF | SHROUD))
+            let x = &g.perms[i];
+            x.is_creature()
+                && !(x.ctrl as usize != p
+                    && (x.has(HEXPROOF | SHROUD) || x.hexproof_from & c.colors != 0))
         })
         .collect();
     if c.harmful_aura {
@@ -1457,11 +1472,11 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
             v += if has_creature { 1.0 } else { 0.3 };
         }
         if c.is(T_AURA) {
-            if aura_target(g, p, idx).is_none() {
+            if aura_target(g, p, (p as u8, idx)).is_none() {
                 return 0.0;
             }
             if c.harmful_aura {
-                if let Some(t) = aura_target(g, p, idx) {
+                if let Some(t) = aura_target(g, p, (p as u8, idx)) {
                     v += perm_value(g, t) * 0.8;
                 }
             }
@@ -1910,7 +1925,7 @@ fn waits_for_combat(g: &Game, p: usize, act: &Act) -> bool {
     let Some((idx, back)) = g.spell_card(p, *src, *opts) else {
         return false;
     };
-    let c = &g.players[p].cards[idx as usize];
+    let c = &g.players[g.spell_list(p, *src)].cards[idx as usize];
     if back || !c.is(T_CREATURE) || c.kw & HASTE != 0 || matches!(src, Src::Command(_)) {
         return false;
     }
@@ -2090,8 +2105,8 @@ fn hand_find(g: &Game, p: usize, f: impl Fn(&SimCard) -> bool) -> Option<usize> 
 }
 
 /// How bad it would be for `o` if the spell resolves.
-fn spell_threat(g: &Game, o: usize, caster: usize, idx: u16, back: bool) -> f32 {
-    let c = &g.players[caster].cards[idx as usize];
+fn spell_threat(g: &Game, o: usize, caster: usize, card: CardRef, back: bool) -> f32 {
+    let c = g.card(card);
     let w = weight(g, o, caster);
     if !back && c.is_permanent() {
         return c.value * w * 0.8;
@@ -2126,9 +2141,10 @@ fn spell_threat(g: &Game, o: usize, caster: usize, idx: u16, back: bool) -> f32 
 }
 
 /// Opponents may counter a spell `caster` just cast. True if it was countered.
-pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bool {
+/// Opponents may counter the spell `card` (whose card list it's in, index) `caster` cast.
+pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) -> bool {
     let n = g.players.len();
-    let spell = &g.players[caster].cards[idx as usize];
+    let spell = g.card(card);
     let spell_types = if back {
         spell.back.as_ref().map(|b| b.types).unwrap_or(T_SORCERY)
     } else {
@@ -2172,7 +2188,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
             .filter(|&&c| is_counter(&g.players[o].cards[c as usize]))
             .count();
         let threshold = if counters_in_hand > 1 { 3.5 } else { 4.5 };
-        if spell_threat(g, o, caster, idx, back) < threshold {
+        if spell_threat(g, o, caster, card, back) < threshold {
             continue;
         }
         let counter_idx = g.players[o].hand[h];

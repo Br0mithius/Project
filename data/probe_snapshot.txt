@@ -2473,8 +2473,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever you attack, look at the top six cards of your library. you may cast a spell from among them with mana value less than or equal to the greatest power among attacking creatures you control without paying its mana cost. put the rest on the bottom of your library in a random order."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> (nothing changes)
 
 Countersculpt | {U}{U} | Instant
 TEXT: As an additional cost to cast this spell, behold a Jace or pay {1}. (To behold a Jace, choose a Jace you control or reveal a Jace card from your hand.) / Counter target spell. Empower Jace 1. (Put a loyalty counter on a Jace token you control. If you don't control one, first create a blue Jace planeswalker token with "[-1]: Surveil 1" and "[-3]: Draw a card.")
@@ -3291,8 +3290,9 @@ ABILITIES:
       -> Opp B: life -1
       -> Your Doom Reigns Supreme: other counters +1
   Reflexive [may]: "when the fifth plan counter is put on ~, sacrifice it. when you do, target opponent exiles the top five cards of their library. you may cast up to two spells from among the exiled cards without paying their mana costs."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> Opp B: library -5, exile +3
+      -> You gets Ogre 3/3
+      -> You gets Ogre 3/3
 
 Dori, Bearer of Friends | {2}{R} | Legendary Creature — Dwarf Warrior | 3/2
 TEXT: Trample / When Dori enters, create a Treasure token. (It's an artifact with "{T}, Sacrifice this token: Add one mana of any color.")
@@ -4009,6 +4009,10 @@ On entering:
 ABILITIES:
   Attacks [may]: "whenever ~ attacks, exile the top card of each player's library, then you may cast any number of spells from among those cards without paying their mana costs."
       -> You: library -1
+      -> Opp A: library -1
+      -> Opp B: library -1
+      -> You gets Ogre 3/3
+      -> You gets Ogre 3/3
       -> You gets Ogre 3/3
 
 Evil's Thrall | {2}{R} | Sorcery
