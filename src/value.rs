@@ -123,6 +123,16 @@ pub fn effect_value(e: &Effect) -> f32 {
         Effect::Fog => 1.0,
         Effect::Dig => 1.0,
         Effect::OtherCounters(_) => 0.3,
+        // Drawbacks: Demonic Pact's last mode, pain lands, Phyrexian Arena's life.
+        Effect::Rule(r) if r.contains("lose the game") => -12.0,
+        Effect::Rule(r) if r == "damage to you" => -0.3,
+        Effect::Rule(r) if r.starts_with("you lose ") => {
+            -0.15
+                * r.split_whitespace()
+                    .nth(2)
+                    .and_then(|n| n.parse::<f32>().ok())
+                    .unwrap_or(1.0)
+        }
         _ => 0.2,
     }
 }
@@ -183,16 +193,34 @@ pub fn ability_value(a: &Ability) -> f32 {
     // not card advantage.
     let only_itself = a.text.contains("this card from your graveyard")
         || a.text.contains("~ from your graveyard");
+    // "Each player draws / creates / gains": opponents get the same, so only a small edge
+    // is left (Dragon Mage, Arc of Fortune, Howling Mine-style effects).
+    // ("At the beginning of each player's upkeep, you create ..." is only yours.)
+    let symmetric = a.text.contains("each player ");
     let vals: Vec<f32> = a
         .effects
         .iter()
         .map(|e| match e {
             Effect::Regrowth | Effect::Reanimate | Effect::Recast if only_itself => 0.5,
+            Effect::Draw { .. }
+            | Effect::Loot
+            | Effect::Tokens { .. }
+            | Effect::ItemTokens { .. }
+            | Effect::GainLife(_)
+            | Effect::AddMana(_)
+            | Effect::Drain { .. }
+            | Effect::Discard { .. }
+            | Effect::Edict { .. }
+                if symmetric =>
+            {
+                0.35 * effect_value(e)
+            }
             _ => effect_value(e),
         })
         .collect();
+    // A modal ability is worth its best mode, but a forced drawback mode still counts.
     let v = if a.modal {
-        vals.iter().copied().fold(0.0, f32::max)
+        vals.iter().copied().fold(0.0, f32::max) + vals.iter().filter(|v| **v < -1.0).sum::<f32>()
     } else {
         vals.iter().sum()
     };
@@ -248,20 +276,25 @@ pub struct CreatureValue {
     pub parts: Vec<(String, f32)>,
 }
 
+/// "*" and "1+*" power/toughness (Tarmogoyf, Lhurgoyf): grows with the game; estimated
+/// from the mana cost.
+fn stat(v: Option<&str>, mv: u32) -> f32 {
+    let v = v.unwrap_or("0");
+    let star = (mv as f32 + 1.0).clamp(2.0, 5.0);
+    let n = if let Some(base) = v.strip_suffix("+*") {
+        base.parse::<f32>().unwrap_or(0.0) + star
+    } else if v == "*" {
+        star
+    } else {
+        v.parse::<f32>().unwrap_or(0.0)
+    };
+    n.max(0.0)
+}
+
 /// Rates a creature's body, keywords and abilities against its mana cost.
 pub fn creature_value(card: &Card) -> CreatureValue {
-    let p = card
-        .power
-        .as_deref()
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(0.0)
-        .max(0.0);
-    let t = card
-        .toughness
-        .as_deref()
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(0.0)
-        .max(0.0);
+    let p = stat(card.power.as_deref(), card.mana_value());
+    let t = stat(card.toughness.as_deref(), card.mana_value());
     let parsed = card.parsed();
     let body = p + 0.7 * t;
     let mut parts = vec![(format!("{}/{} body", p, t), body)];
@@ -274,8 +307,16 @@ pub fn creature_value(card: &Card) -> CreatureValue {
         }
     }
     let mut abilities = 0.0;
-    for a in parsed.all_abilities() {
-        let v = ability_value(a);
+    // The back face (an Adventure or prepared spell, a transformed side) is extra, but it
+    // competes with the front for the same card, so it counts for half.
+    let back = parsed.back.iter().flat_map(|b| b.abilities.iter());
+    let all = parsed
+        .abilities
+        .iter()
+        .map(|a| (a, 1.0))
+        .chain(back.map(|a| (a, 0.5)));
+    for (a, share) in all {
+        let v = ability_value(a) * share;
         if v.abs() >= 0.05 {
             abilities += v;
             let label = a
