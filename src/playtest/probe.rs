@@ -79,7 +79,7 @@ fn deck(card: &Card) -> Prepared {
 
 /// The standard board: each player has a 2/2, 3/3, 4/4 and a 6/6 flyer (mana values 2, 3,
 /// 4, 6), an artifact, an enchantment, one basic of each colour, 3 cards in hand, 20 in the
-/// library and 2 creature cards in the graveyard. Returns the game and your Bear's id.
+/// library (basics and Ogres alternating) and 2 creature cards in the graveyard. Returns the game and your Bear's id.
 fn board<'a>(decks: &[&'a Prepared]) -> (Game<'a>, u32) {
     let mut g = Game::new(decks, &Rules::default(), Rng::new(11));
     g.round = 3;
@@ -88,7 +88,16 @@ fn board<'a>(decks: &[&'a Prepared]) -> (Game<'a>, u32) {
     for p in 0..g.players.len() {
         let pl = &mut g.players[p];
         pl.hand = vec![BEAR; 3];
-        pl.library = vec![OGRE; 20];
+        // Basics and Ogres alternating, so searches and digs have lands to find.
+        pl.library = (0..20)
+            .map(|k| {
+                if k % 2 == 0 {
+                    LANDS + (k / 2) % 5
+                } else {
+                    OGRE
+                }
+            })
+            .collect();
         pl.graveyard = vec![DRAGON, OGRE];
         pl.command.clear();
         for idx in [BEAR, OGRE, KNIGHT, DRAGON, RELIC, BANNER]
@@ -519,8 +528,9 @@ pub fn probe(card: &Card) -> String {
     out.push(format!("TEXT: {}", card.oracle_text.replace('\n', " / ")));
     out.push(
         "BOARD: each player has Bear 2/2 (MV2), Ogre 3/3 (MV3), Knight 4/4 (MV4), Dragon 6/6 \
-         flying (MV6), Relic (artifact), Banner (enchantment), 5 basics, 3 cards in hand, 2 \
-         creature cards in the graveyard, 30 life. Triggers fire as if their event happened \
+         flying (MV6), Relic (artifact), Banner (enchantment), 5 basics, 3 cards in hand, a \
+         library of 10 basics and 10 Ogres, 2 creature cards (Dragon, Ogre) in the graveyard, \
+         30 life. Triggers fire as if their event happened \
          (\"it\"/\"that creature\" = your Bear). Abilities resolve as in a game; one with a condition is also forced, to show what it does when the condition holds."
             .into(),
     );
