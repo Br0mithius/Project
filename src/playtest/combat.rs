@@ -23,7 +23,64 @@ pub struct Attack {
 impl<'a> Game<'a> {
     pub fn can_attack(&self, i: usize) -> bool {
         let x = &self.perms[i];
-        x.is_creature() && !x.tapped && !(x.sick && !x.has(HASTE)) && !x.has(DEFENDER) && !x.locked
+        // "~ can attack as though it didn't have defender" (while its condition holds).
+        let defender = x.has(DEFENDER)
+            && !self.static_holds(i, |t| {
+                t.contains("~ can attack as though it didn't have defender")
+            });
+        // "~ can't attack unless you control two or more other Wolves".
+        let barred = self.statics_of(i).any(|(a, ok)| {
+            a.text.contains("~ can't attack unless") && !ok
+        });
+        x.is_creature() && !x.tapped && !(x.sick && !x.has(HASTE)) && !defender && !x.locked && !barred
+    }
+
+    /// Permanent `i`'s own static abilities, each with whether its condition holds.
+    pub fn statics_of(&self, i: usize) -> impl Iterator<Item = (&'a SimAbility, bool)> + '_ {
+        let x = &self.perms[i];
+        let p = x.ctrl as usize;
+        self.abilities_of(x)
+            .iter()
+            .filter(|a| a.trig == Trig::Static)
+            .map(move |a| (a, self.cond_holds(&a.cond, p, Some(i))))
+    }
+
+    /// Does permanent `i` have a static ability with this wording, whose condition holds?
+    pub fn static_holds(&self, i: usize, f: impl Fn(&str) -> bool) -> bool {
+        self.statics_of(i).any(|(a, ok)| ok && f(&a.text))
+    }
+
+    /// "Attacks each combat if able" (or goaded).
+    pub fn must_attack(&self, i: usize) -> bool {
+        self.perms[i].goad.is_some() || self.static_holds(i, |t| t.contains("attacks each combat if able"))
+    }
+
+    /// "~ can't be blocked by Walls / Humans / creatures with power 2 or less".
+    fn evades(&self, a: usize, b: usize) -> bool {
+        let bl = &self.perms[b];
+        self.statics_of(a).any(|(ab, ok)| {
+            let Some(what) = ok
+                .then(|| ab.text.split("~ can't be blocked by ").nth(1))
+                .flatten()
+            else {
+                return false;
+            };
+            let what = what.trim_end_matches('.');
+            if let Some(n) = what
+                .strip_prefix("creatures with power ")
+                .and_then(|r| r.split_whitespace().next())
+                .and_then(|d| d.parse::<i16>().ok())
+            {
+                return what.contains("or less") && bl.p <= n
+                    || what.contains("or greater") && bl.p >= n;
+            }
+            what.split_whitespace()
+                .find_map(crate::restrict::subtype_word)
+                .is_some_and(|id| {
+                    let s = crate::restrict::subtype_name(id);
+                    bl.subtypes.iter().any(|x| x == s)
+                })
+        })
     }
 
     /// Can blocker `b` block attacker `a` (evasion, protection, "can't block")?
@@ -50,7 +107,7 @@ impl<'a> Game<'a> {
         if at.protection & bl.colors != 0 {
             return false;
         }
-        true
+        !self.evades(a, b)
     }
 
     pub fn def_player(&self, d: Def) -> Option<usize> {

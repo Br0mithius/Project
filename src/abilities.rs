@@ -757,14 +757,14 @@ fn patterns() -> &'static Patterns {
             item_tokens: re(r"creates? {N} (?:tapped )?(?:colorless )?(?:artifact token named )?(treasure|food|clue|map|blood|powerstone|junk|gold|incubator|heartwood|lotus|equipment)"),
             counters: re(r"put {N} \+1/\+1 counters?(?: and [^.;]*?)? on (?:up to (?:a|an|one|two|three|four|x|\d+) )?([^.;]*)"),
             pump: re(r"([^.;,]*?) gets? \+(\d+|x)/([+-](?:\d+|x))(?: and (?:gains?|has|have) ([^.;]*?))?( until end of turn)?(?:\.|$|,| for | as long| and )"),
-            grant: re(r#"([^.;,]*?) (?:gains?|has|have) ([a-z ,{}0-9]*?(?:flying|indestructible|hexproof|first strike|double strike|trample|menace|lifelink|deathtouch|vigilance|haste|reach|ward|prowess|protection from [a-z]+)[a-z ,{}0-9]*?)( until end of turn)?(?:\.|$| as long| and "| and can't)"#),
-            gain_life: re(r"(?:you |and )gains? (\d+|x|that much) life|you gain life equal to"),
+            grant: re(r#"([^.;,]*?) (?:gains?|has|have) ([a-z ,{}0-9]*?(?:flying|indestructible|hexproof|first strike|double strike|trample|menace|lifelink|deathtouch|vigilance|haste|reach|ward|prowess|protection from [a-z]+)[a-z ,{}0-9]*?)( until end of turn)?(?:\.|$| as long| and "| and can't| and gets? [+-])"#),
+            gain_life: re(r"(?:you |and |target player )gains? (\d+|x|that much) life|you gain life equal to"),
             drain: re(r"(each opponent|target opponent|target player|each player|that player|defending player|its controller) loses? (\d+|x|that much|life equal to)(?: life)?|deals? (\d+|x) damage to (each opponent|target opponent|target player or planeswalker|each player)"),
             add_mana: re(r"add (\{[^}]+\}(?:(?:, | or |)\{[^}]+\})*|[a-z]+ mana|mana)"),
             mill: re(r"mills? {N} cards?"),
             scry: re(r"(scry|surveil) (\d+|x)"),
             empower: re(r"empower (?:jace|~) (\d+|x)"),
-            amass: re(r"amass [a-z]+ (\d+|x)"),
+            amass: re(r"amass(?:es)? [a-z]+ (\d+|x)"),
             number_list: N,
         }
     })
@@ -844,6 +844,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         if c[1].starts_with("other") && c[1].contains("tokens you control") {
             continue;
         }
+        // "Exile all but the bottom card of each opponent's library" (Jace, Reality
+        // Sculptor): libraries, not permanents.
+        if c[1].contains("library") {
+            out.push(Effect::Rule("exiles opponents' libraries".into()));
+            continue;
+        }
         if !c[1].starts_with("cards")
             && !c[1].starts_with("the cards")
             && !c[1].contains("graveyard")
@@ -894,10 +900,23 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             out.push(Effect::Exile { target: t, until });
         }
     }
-    for c in p.damage.captures_iter(s) {
+    // "It deals 4 damage to any target and 3 damage to each of up to two other targets": two
+    // separate hits.
+    let ds = match s.find(" damage to ").and_then(|i| {
+        let rest = &s[i..];
+        let j = rest.find(" and ")?;
+        let after = &rest[j + 5..];
+        let n = after.split_whitespace().next()?;
+        (number(n).is_some() && after[n.len()..].starts_with(" damage to "))
+            .then(|| format!("{}; deals {}", &s[..i + j], after))
+    }) {
+        Some(d) => d,
+        None => s.to_string(),
+    };
+    for c in p.damage.captures_iter(&ds) {
         // "If a source would deal damage to ..." is a replacement effect, not damage.
         let start = c.get(0).unwrap().start();
-        if s[..start].ends_with("would ") {
+        if ds[..start].ends_with("would ") {
             continue;
         }
         let amt = if c[1].contains("number of +1/+1 counters") {
@@ -1295,7 +1314,10 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         if quoted(c.get(0).unwrap().start()) {
             continue;
         }
-        if given_away(c.get(0).unwrap().start()) {
+        // "Destroy target permanent an opponent controls. They create a Treasure token"
+        // (Vraska): read, and handed to that player as it resolves.
+        let start = c.get(0).unwrap().start();
+        if given_away(start) && full[..start].trim() != "they" {
             gave = true;
             continue;
         }
@@ -1349,6 +1371,21 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         };
         out.push(Effect::PlusCounters { amount: n, to: t });
     }
+    // "Put a number of +1/+1 counters on ~ equal to the sacrificed creature's power".
+    if let Some(rest) = s.split("put a number of +1/+1 counters on ").nth(1) {
+        let t = if rest.starts_with('~') {
+            Target::it()
+        } else {
+            read_target(rest.trim_start_matches("target "), false)
+        };
+        out.push(Effect::PlusCounters {
+            amount: Amount {
+                n: TYPICAL_X,
+                x: true,
+            },
+            to: t,
+        });
+    }
     for c in p.pump.captures_iter(s) {
         let who = c[1].trim();
         let to = pump_target(who);
@@ -1386,7 +1423,13 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         }
     }
     if !out.iter().any(|e| matches!(e, Effect::Grant { .. })) {
-        for c in p.grant.captures_iter(s) {
+        // "As long as ~ has a shield counter on him, you and other Heroes you control have
+        // hexproof": the condition's "has" isn't the grant.
+        let gs = match s.strip_prefix("as long as ") {
+            Some(rest) => rest.split_once(", ").map_or(s, |x| x.1),
+            None => s,
+        };
+        for c in p.grant.captures_iter(gs) {
             // "A token that's a copy of it, except it has haste": describes the token.
             if c[1].trim().starts_with("except") || c[1].contains(", except") {
                 continue;
@@ -1398,9 +1441,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
                 .map(|kw| kw.to_string())
                 .collect();
             if !kws.is_empty() {
+                // "Gain trample and get +X/+0 until end of turn": the duration comes later.
                 let eot = c.get(3).is_some()
                     || s.starts_with("until end of turn")
-                    || s.contains("this turn");
+                    || s.contains("this turn")
+                    || (c[0].ends_with('+') || c[0].ends_with('-'))
+                        && s.contains("until end of turn");
                 out.push(Effect::Grant {
                     keywords: kws,
                     to,
@@ -1629,7 +1675,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         }
         // Keyword counters (CR 122.1b) give the keyword.
         if KEYWORDS.contains(&kind.as_str()) {
-            let to = if s.contains("on target") {
+            let to = if s.contains("on target") || s.contains("on up to one target") {
                 read_target("creature you control", false)
             } else {
                 Target::it()
@@ -1786,7 +1832,9 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         && !s.contains("can't be blocked except")
         && !s.contains("can't be blocked by")
         && !s.contains("by more than")
-        && !s.contains("as long as")
+        // (Threshold: "~ can't be blocked as long as there are seven or more cards in your
+        // graveyard" - the ability's condition.)
+        && (!s.contains("as long as") || s.starts_with("~ can't be blocked as long as"))
     {
         let to = if let Some(i) = s.find("target ") {
             read_target(&s[i + 7..], false)
@@ -1927,6 +1975,7 @@ const RULES: &[(&str, &str)] = &[
     ("gets -1/-0", "weakens a creature's attack"),
     ("gets -4/-0", "weakens a creature's attack"),
     ("gets -5/-0", "weakens attackers"),
+    ("gets -x/-0", "weakens a creature's attack"),
     (
         "you control target opponent during their next turn",
         "you control an opponent's next turn",
@@ -2024,6 +2073,11 @@ const RULES: &[(&str, &str)] = &[
     ),
     ("puts those cards into their graveyard", "mills opponents"),
     ("can't be blocked by", "hard to block"),
+    (
+        "whenever you tap a mountain for mana",
+        "mountains make an extra red mana",
+    ),
+    ("exchange control of two target", "exchanges control"),
     ("you lose the game", "you lose the game"),
 ];
 
@@ -2049,6 +2103,21 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
     {
         effects.push(Effect::Scry(Amount { n: 3, x: false }));
     }
+    // "Choose target creature you own. ... Return each chosen creature to your hand" (The
+    // Eagles Are Coming!): before what it does for each one returned.
+    if body.contains("return each chosen creature to your hand")
+        && !has(effects, |e| matches!(e, Effect::Bounce(_)))
+    {
+        effects.insert(0, Effect::Bounce(read_target("creature you own", false)));
+    }
+    // "Choose target nonland permanent. Its owner may put it on the top of their library. If
+    // they do, ~ deals 2 damage to them. If they didn't ..., they put it on the bottom" (Clash
+    // of Elements).
+    if body.contains("its owner may put it on the top of their library")
+        && !has(effects, |e| matches!(e, Effect::Bounce(_)))
+    {
+        effects.insert(0, Effect::Bounce(read_target("nonland permanent", false)));
+    }
     // A dying attacker returning to hand (Ares): recursion of your own creatures.
     if body.contains("return that card to its owner's hand") {
         effects.push(Effect::Regrowth);
@@ -2059,7 +2128,9 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
     {
         effects.push(Effect::Doubler("tokens".into()));
     }
-    if (body.contains("reveals their hand") || body.contains("reveal their hand"))
+    if (body.contains("reveals their hand")
+        || body.contains("reveal their hand")
+        || body.contains("reveals a number of cards from their hand"))
         && (body.contains("discards that card")
             || body.contains("discard that card")
             || body.contains("exile that card")

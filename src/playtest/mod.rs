@@ -161,6 +161,7 @@ impl<'a> Game<'a> {
                 inst_sorc_this_turn: 0,
                 last_ability: None,
                 mulligans: 0,
+                px: Default::default(),
             })
             .collect();
         let mut g = Game {
@@ -199,12 +200,37 @@ impl<'a> Game<'a> {
             last_countered: Vec::new(),
             last_destroyed: 0,
             last_drawn: 0,
+            ext: Default::default(),
         };
+        for p in 0..g.players.len() {
+            g.players[p].px.chosen_type = g.most_common_type(p);
+        }
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
             g.rng.shuffle(&mut lib);
             g.players[p].library = lib;
             ai::mulligan(&mut g, p);
+            // "If ~ is in your opening hand, you may begin the game with it on the
+            // battlefield" (Quicksilver, Brash Blur).
+            let openers: Vec<u16> = g.players[p]
+                .hand
+                .iter()
+                .copied()
+                .filter(|&c| {
+                    g.players[p].cards[c as usize].abilities.iter().any(|a| {
+                        a.text.contains("is in your opening hand, you may begin the game with")
+                    })
+                })
+                .collect();
+            for c in openers {
+                if let Some(h) = g.players[p].hand.iter().position(|&x| x == c) {
+                    g.players[p].hand.remove(h);
+                    if let Some(i) = g.enter_card(p, c, p, false) {
+                        g.perms[i].sick = false;
+                    }
+                }
+            }
+            g.pending.clear();
         }
         g
     }
@@ -299,6 +325,12 @@ impl<'a> Game<'a> {
         if c.is(T_LAND) && !back {
             return None;
         }
+        // "You can't cast this spell unless there are seven or more cards in your graveyard".
+        if let (Some(cond), false) = (&c.cast_cond, back) {
+            if !self.cond_holds(cond, p, None) {
+                return None;
+            }
+        }
         if let Src::Graveyard(_) = src {
             if !self.players[p].recast.contains(&idx) && c.flashback.is_none() {
                 return None;
@@ -379,10 +411,15 @@ impl<'a> Game<'a> {
             }
         }
         if c.affinity {
+            // "Affinity for Elves / Cats / Gates", or for artifacts.
             less += self
                 .perms
                 .iter()
-                .filter(|x| x.ctrl as usize == p && x.is(T_ARTIFACT))
+                .filter(|x| x.ctrl as usize == p)
+                .filter(|x| match &c.affinity_for {
+                    Some(sub) => x.subtypes.iter().any(|s| s == sub),
+                    None => x.is(T_ARTIFACT),
+                })
                 .count() as u32;
         }
         if opts.convoke && (c.convoke || c.improvise) {
@@ -433,8 +470,15 @@ impl<'a> Game<'a> {
     }
 
     pub fn can_cast(&self, p: usize, src: Src, opts: CastOpts) -> bool {
+        let why = match self.spell_card(p, src, opts) {
+            Some((idx, _)) => Purpose::Spell {
+                card: (p as u8, idx),
+                from_hand: matches!(src, Src::Hand(_)),
+            },
+            None => return false,
+        };
         self.cast_cost(p, src, opts)
-            .is_some_and(|m| self.can_pay(p, &m))
+            .is_some_and(|m| self.can_pay_for(p, &m, why))
     }
 
     /// Casts a spell: pays, moves the card, fires cast triggers, lets opponents respond,
@@ -465,6 +509,17 @@ impl<'a> Game<'a> {
             None
         }
         .map(|i| self.perms[i].id);
+        let treasures = |g: &Game| {
+            g.perms
+                .iter()
+                .filter(|x| x.ctrl as usize == p && x.tok == Tok::Treasure)
+                .count()
+        };
+        let treasures_before = treasures(self);
+        let why = Purpose::Spell {
+            card: (p as u8, idx),
+            from_hand: matches!(src, Src::Hand(_)),
+        };
         // Convoke / improvise: tap helpers first (the cost already counts them).
         if opts.convoke && (c.convoke || c.improvise) && !opts.free {
             let tappers = self.convoke_tappers(p, c);
@@ -487,12 +542,14 @@ impl<'a> Game<'a> {
                     base.generic -= 1;
                 }
             }
-            if !self.pay(p, &base) {
+            if !self.pay_for(p, &base, why) {
                 return false;
             }
-        } else if !self.pay(p, &cost) {
+        } else if !self.pay_for(p, &cost, why) {
             return false;
         }
+        // "If mana from a Treasure was spent to cast it" (Smaug).
+        self.ext.treasure_spent = treasures(self) < treasures_before;
         if let Some(i) = goggles.and_then(|id| self.idx(id)) {
             if !self.perms[i].tapped {
                 // Its {R} went into this spell instead of another source's.
@@ -577,6 +634,11 @@ impl<'a> Game<'a> {
         };
         let probe_card = SimCard {
             types: spell_types,
+            spell_targets: if back {
+                c.back.as_ref().map_or(0, |b| b.spell_targets)
+            } else {
+                c.spell_targets
+            },
             ..c.clone()
         };
         let outer = (self.casting, self.cur_x);
@@ -596,7 +658,13 @@ impl<'a> Game<'a> {
             )
         });
         // Opponents may counter it.
-        if !c.cant_be_countered && ai::respond_to_spell(self, p, idx, back) {
+        // "Instant and sorcery spells you control can't be countered" / "have split second".
+        let protected = spell_types & (T_INSTANT | T_SORCERY) != 0
+            && self.controls_static(p, None, |t| {
+                t.contains("instant and sorcery spells you control can't be countered")
+                    || t.contains("instant and sorcery spells you control have split second")
+            });
+        if !c.cant_be_countered && !protected && ai::respond_to_spell(self, p, idx, back) {
             self.note(|| format!("  {} is countered", c.name));
             match src {
                 Src::Prepared(_) => {}
@@ -611,7 +679,10 @@ impl<'a> Game<'a> {
         if permanent {
             self.entering_x = x_paid;
             self.entering_kicked = kicked;
+            self.ext.entering_cast = true;
             let entered = self.enter_card(p, idx, p, commander_slot > 0);
+            self.ext.entering_cast = false;
+            self.ext.last_cast_perm = entered.map(|i| self.perms[i].id);
             let Some(i) = entered else {
                 self.run_pending();
                 self.sba();
@@ -796,10 +867,12 @@ impl<'a> Game<'a> {
             return;
         }
         slots.sort_unstable();
+        self.ext.exiled_for_cost.clear();
         for k in slots.into_iter().rev() {
             if k < self.players[p].graveyard.len() {
                 let c = self.players[p].graveyard.remove(k);
                 self.players[p].exile.push(c);
+                self.ext.exiled_for_cost.push(c);
             }
         }
         self.emit(Ev::LeavesGraveyard, p, None);
@@ -867,13 +940,21 @@ impl<'a> Game<'a> {
                 if extra.from_graveyard || extra.from_hand || ab.graveyard_only() {
                     return None;
                 }
-                if *tap && (x.tapped || (x.is_creature() && x.sick && !x.has(HASTE))) {
+                // "You may activate abilities of creatures you control as though those
+                // creatures had haste" (Shang-Chi).
+                let sick = x.is_creature()
+                    && x.sick
+                    && !x.has(HASTE)
+                    && !self.controls_static(p, None, |t| {
+                        t.contains("activate abilities of creatures you control as though those creatures had haste")
+                    });
+                if *tap && (x.tapped || sick) {
                     return None;
                 }
                 if *sac_other && self.sac_fodder(p, x.id, &ab.text).is_none() {
                     return None;
                 }
-                if *discard && self.players[p].hand.is_empty() {
+                if *discard && self.discard_for_cost(p, &ab.text).is_none() {
                     return None;
                 }
                 if *life as i32 >= self.players[p].life {
@@ -972,7 +1053,7 @@ impl<'a> Game<'a> {
         let Some((cost, x_paid)) = self.activation_plan(p, i, k) else {
             return false;
         };
-        if !self.pay(p, &cost) {
+        if !self.pay_for(p, &cost, Purpose::Ability { src: id }) {
             return false;
         }
         let Some(i) = self.idx(id) else { return false };
@@ -1036,7 +1117,13 @@ impl<'a> Game<'a> {
                     self.lose_life(p, *life as i32);
                 }
                 if *discard {
-                    self.discard(p);
+                    match self.discard_for_cost(p, &ab.text) {
+                        Some(Some(h)) => {
+                            let c = self.players[p].hand.remove(h);
+                            self.put_discarded(p, c);
+                        }
+                        _ => self.discard(p),
+                    }
                 }
                 if *sac_other {
                     if let Some(f) = self.sac_fodder(p, id, &ab.text) {
@@ -1061,6 +1148,7 @@ impl<'a> Game<'a> {
                 self.perms[i].loyalty += *n as i16;
                 self.perms[i].loyalty_used = true;
                 self.players[p].loyalty_turn = true;
+                self.ext.last_loyalty_cost = (-*n).max(0) as u8;
                 self.emit(Ev::LoyaltyActivated, p, Some(id));
             }
             _ => return false,
@@ -1190,19 +1278,78 @@ impl<'a> Game<'a> {
         true
     }
 
+    /// The card a "discard a card" cost would discard: Some(None) = any (the worst), Some(Some
+    /// (slot)) = that one ("discard a legendary card with the same name as a legendary
+    /// permanent you control"), None = it can't be paid.
+    pub fn discard_for_cost(&self, p: usize, text: &str) -> Option<Option<usize>> {
+        let pl = &self.players[p];
+        if pl.hand.is_empty() {
+            return None;
+        }
+        let cost = text.split(": ").next().unwrap_or("");
+        if !cost.contains("discard a legendary card") {
+            return Some(None);
+        }
+        let same_name = cost.contains("with the same name as a legendary permanent you control");
+        (0..pl.hand.len())
+            .filter(|&h| {
+                let c = &pl.cards[pl.hand[h] as usize];
+                c.is(T_LEGENDARY)
+                    && (!same_name
+                        || self.perms.iter().any(|x| {
+                            x.ctrl as usize == p
+                                && x.is(T_LEGENDARY)
+                                && x.card.is_some_and(|r| self.card(r).name == c.name)
+                        }))
+            })
+            .min_by(|&a, &b| {
+                let va = pl.cards[pl.hand[a] as usize].value;
+                let vb = pl.cards[pl.hand[b] as usize].value;
+                va.partial_cmp(&vb).unwrap()
+            })
+            .map(Some)
+    }
+
+    /// What equipping Equipment `e` to creature `t` costs (mana, life): "Equip Wizard {1}"
+    /// for a Wizard, "Equip worthy {1}" only for a legendary non-Villain red or white
+    /// creature, the plain equip cost otherwise (None: it can't go there). Equipment tokens
+    /// (an Axe) equip for {2}.
+    pub fn equip_cost(&self, e: usize, t: usize) -> Option<(Mana, i32)> {
+        let Some(r) = self.perms[e].card else {
+            return matches!(self.perms[e].tok, Tok::Equip(..)).then(|| (Mana::generic(2), 0));
+        };
+        let c = self.card(r);
+        if let Some((m, what)) = &c.equip_for {
+            let x = &self.perms[t];
+            let fits = match what.as_str() {
+                "worthy" => {
+                    x.is(T_LEGENDARY)
+                        && !x.subtypes.iter().any(|s| s == "villain")
+                        && x.colors & 0b1001 != 0
+                }
+                w => x.subtypes.iter().any(|s| s == w),
+            };
+            if fits {
+                return Some((*m, 0));
+            }
+            return c.equip.map(|m| (m, c.equip_life as i32));
+        }
+        Some((c.equip.unwrap_or(Mana::generic(2)), c.equip_life as i32))
+    }
+
     pub fn equip(&mut self, p: usize, equip_id: u32, target_id: u32) -> bool {
         let Some(e) = self.idx(equip_id) else {
             return false;
         };
-        let Some(r) = self.perms[e].card else {
+        let Some(t) = self.idx(target_id) else {
             return false;
         };
-        let c = self.card(r);
-        let cost = c.equip.unwrap_or(Mana::generic(2));
-        let life = c.equip_life as i32;
+        let Some((cost, life)) = self.equip_cost(e, t) else {
+            return false;
+        };
         if self.perms[e].attached == Some(target_id)
             || life > 0 && self.players[p].life <= life
-            || !self.pay(p, &cost)
+            || !self.pay_for(p, &cost, Purpose::Ability { src: equip_id })
         {
             return false;
         }
@@ -1250,8 +1397,7 @@ impl<'a> Game<'a> {
             return false;
         }
         let card = self.players[p].hand.remove(h);
-        self.players[p].graveyard.push(card);
-        self.emit(Ev::Discard, p, None);
+        self.put_discarded(p, card);
         if find.is_empty() {
             self.draw(p, 1);
         } else {
@@ -1284,6 +1430,7 @@ impl<'a> Game<'a> {
 
     /// Triggers of "at the beginning of" a phase for the active player `a`.
     fn phase_triggers(&mut self, a: usize, phase: Phase) {
+        self.run_delayed(phase);
         let mut add = Vec::new();
         for x in &self.perms {
             for (k, ab) in self.abilities_of(x).iter().enumerate() {
@@ -1364,6 +1511,7 @@ impl<'a> Game<'a> {
     /// One full turn for player `a`.
     pub fn take_turn(&mut self, a: usize, first_turn: bool) {
         self.active = a;
+        self.begin_turn_extra();
         self.died_this_turn = 0;
         self.dead.clear();
         for pl in self.players.iter_mut() {
@@ -1560,6 +1708,7 @@ impl<'a> Game<'a> {
             }
         }
         // Cleanup.
+        self.end_turn_extra();
         while self.players[a].hand.len() > 7 {
             self.discard(a);
         }

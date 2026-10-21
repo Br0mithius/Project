@@ -1703,3 +1703,258 @@ fn trigger_timing_and_filters() {
         }
     ));
 }
+
+#[test]
+fn cast_targets_discards_and_punishers() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Plains",
+            "Colleen Wing, Street Samurai",
+            "Smaug's Fury",
+            "Lightning Strike",
+            "Titanbones, Towering Heart",
+            "Painful Quandary",
+        ],
+    );
+    // Colleen Wing: "whenever you cast a spell that targets a creature you control" - a pump
+    // on her counts, Lightning Strike at the opponent doesn't.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'R');
+    let colleen = put(&mut g, 0, 2);
+    g.players[0].hand.push(3);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.run_pending();
+    assert_eq!(perm(&g, colleen).counters, 1, "Smaug's Fury targets her");
+    g.players[0].hand.push(4);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.run_pending();
+    assert_eq!(perm(&g, colleen).counters, 1, "Lightning Strike doesn't");
+    // Titanbones: "when you discard this card, you gain 3 life".
+    g.players[0].hand = vec![5];
+    let life = g.players[0].life;
+    g.discard(0);
+    g.run_pending();
+    assert_eq!(g.players[0].life, life + 3);
+    assert_eq!(g.players[0].graveyard.last(), Some(&5));
+    // Painful Quandary: an opponent with no card to discard loses 5 life.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 6);
+    lands(&mut g, 1, 2, 'R');
+    g.players[1].hand = vec![4];
+    let life = g.players[1].life;
+    assert!(g.cast(1, Src::Hand(0), CastOpts::default()));
+    g.run_pending();
+    assert_eq!(g.players[1].life, life - 5);
+}
+
+#[test]
+fn resolution_counts_and_delayed_triggers() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Plains",
+            "Belladonna Took",
+            "Nine-Lives Familiar",
+            "The Eagles Are Coming!",
+        ],
+    );
+    // Belladonna Took: life the first time, a card the second, counters the third.
+    let mut g = game(&[&d, &d]);
+    let bella = put(&mut g, 0, 2);
+    let k = ability(&d, 2, "first time");
+    let (life, hand) = (g.players[0].life, g.players[0].hand.len());
+    fire_card(&mut g, 2, k, Some(bella));
+    assert_eq!((g.players[0].life, g.players[0].hand.len()), (life + 1, hand));
+    fire_card(&mut g, 2, k, Some(bella));
+    assert_eq!(
+        (g.players[0].life, g.players[0].hand.len()),
+        (life + 1, hand + 1)
+    );
+    assert_eq!(perm(&g, bella).counters, 0);
+    fire_card(&mut g, 2, k, Some(bella));
+    assert_eq!(perm(&g, bella).counters, 1);
+    assert_eq!(g.players[0].life, life + 1);
+    // Nine-Lives Familiar: cast, it has eight revival counters; when it dies it comes back
+    // at the next end step with seven.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'B');
+    g.players[0].hand.push(3);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let cat = g.perms.iter().position(|x| x.card == Some((0, 3))).unwrap();
+    assert_eq!(g.perms[cat].other_counters, 8);
+    g.destroy(cat);
+    g.run_pending();
+    g.sba();
+    assert!(!g.perms.iter().any(|x| x.card == Some((0, 3))), "not yet");
+    g.run_delayed(Phase::End);
+    g.run_pending();
+    let back = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, 3)))
+        .expect("back at the end step");
+    assert_eq!(back.other_counters, 7);
+    // The Eagles Are Coming!: the creature goes back to the hand now, a 4/4 flier arrives at
+    // the next upkeep.
+    let mut g = game(&[&d, &d]);
+    let bella = put(&mut g, 0, 2);
+    fire_card(&mut g, 4, 0, None);
+    assert!(g.idx(bella).is_none());
+    assert!(g.players[0].hand.contains(&2));
+    assert!(!g.perms.iter().any(|x| x.tok != Tok::None));
+    g.run_delayed(Phase::Upkeep);
+    g.run_pending();
+    assert!(g
+        .perms
+        .iter()
+        .any(|x| x.tok != Tok::None && x.ctrl == 0 && x.p == 4 && x.has(FLYING)));
+}
+
+#[test]
+fn life_thresholds_sacrifices_and_amass() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Swamp",
+            "Hidetsugu's Second Rite",
+            "Liliana, Dreadhorde General",
+            "Chief Warg's Company",
+            "Azog, Moria's Ruin",
+            "Tribute to Hunger",
+            "Maelstrom Pulse",
+        ],
+    );
+    // Hidetsugu's Second Rite: only at exactly 10 life.
+    let mut g = game(&[&d, &d]);
+    g.players[1].life = 11;
+    fire_card(&mut g, 2, 0, None);
+    assert_eq!(g.players[1].life, 11);
+    g.players[1].life = 10;
+    fire_card(&mut g, 2, 0, None);
+    assert!(g.players[1].life <= 0);
+    // Liliana -9: the opponent keeps one permanent of each type.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 3, 'B');
+    put(&mut g, 1, 4);
+    put(&mut g, 1, 4);
+    let lili = put(&mut g, 0, 3);
+    let k = ability(&d, 3, "each permanent type");
+    fire_card(&mut g, 3, k, Some(lili));
+    let theirs = |g: &Game, t: u16| {
+        g.perms
+            .iter()
+            .filter(|x| x.ctrl == 1 && x.is(t))
+            .count()
+    };
+    assert_eq!((theirs(&g, T_CREATURE), theirs(&g, T_LAND)), (1, 1));
+    // Azog: the destroyed creature's controller amasses Goblins equal to its power; no card
+    // for us (we didn't control it).
+    let mut g = game(&[&d, &d]);
+    let chief = put(&mut g, 1, 4);
+    let hand = g.players[0].hand.len();
+    put(&mut g, 0, 5);
+    assert!(g.idx(chief).is_none());
+    let army = g
+        .perms
+        .iter()
+        .find(|x| x.ctrl == 1 && x.subtypes.iter().any(|s| s == "army"))
+        .expect("their Army");
+    assert_eq!(army.p, 5);
+    assert_eq!(g.players[0].hand.len(), hand);
+    // Tribute to Hunger: life equal to the sacrificed creature's toughness.
+    let mut g = game(&[&d, &d]);
+    let chief = put(&mut g, 1, 4);
+    let life = g.players[0].life;
+    fire_card(&mut g, 6, 0, None);
+    assert!(g.idx(chief).is_none());
+    assert_eq!(g.players[0].life, life + 3);
+    // Maelstrom Pulse: everything with the same name goes too; the land stays.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 1, 'B');
+    put(&mut g, 1, 4);
+    put(&mut g, 1, 4);
+    fire_card(&mut g, 7, 0, None);
+    assert_eq!((theirs(&g, T_CREATURE), theirs(&g, T_LAND)), (0, 1));
+}
+
+#[test]
+fn spending_restrictions_cast_conditions_and_odd_costs() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Forest",
+            "Shang-Chi, Master of Kung Fu",
+            "Swamp",
+            "Proft, Sinister Mastermind",
+            "Mjölnir, Hammer of Thor",
+            "Colleen Wing, Street Samurai",
+            "Key to the Side-Door",
+            "Chief Warg's Company",
+        ],
+    );
+    // Shang-Chi's mana: only for abilities of creature sources.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    let chief = put(&mut g, 0, 7);
+    let spell = Purpose::Spell {
+        card: (0, 3),
+        from_hand: true,
+    };
+    assert!(!g.can_pay_for(0, &Mana::generic(2), spell));
+    assert!(g.can_pay_for(0, &Mana::generic(2), Purpose::Ability { src: chief }));
+    // Proft, Sinister Mastermind: can't be cast without seven cards in the graveyard.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'B');
+    g.players[0].hand = vec![3];
+    assert!(!g.can_cast(0, Src::Hand(0), CastOpts::default()));
+    g.players[0].graveyard = vec![0; 7];
+    assert!(g.can_cast(0, Src::Hand(0), CastOpts::default()));
+    // Mjölnir: "equip worthy {1}" - a legendary non-Villain red or white creature only.
+    let mut g = game(&[&d, &d]);
+    let mj = put(&mut g, 0, 4);
+    let colleen = put(&mut g, 0, 5);
+    let chief = put(&mut g, 0, 7);
+    let (mj, colleen, chief) = (
+        g.idx(mj).unwrap(),
+        g.idx(colleen).unwrap(),
+        g.idx(chief).unwrap(),
+    );
+    assert_eq!(g.equip_cost(mj, colleen), Some((Mana::generic(1), 0)));
+    assert_eq!(g.equip_cost(mj, chief), None);
+    // Key to the Side-Door: discard a legendary card with the same name as a legendary
+    // permanent you control.
+    let k = ability(&d, 6, "discard a legendary card");
+    let text = &d.cards[6].abilities[k].text;
+    g.players[0].hand = vec![5];
+    assert_eq!(g.discard_for_cost(0, text), Some(Some(0)));
+    g.players[0].hand = vec![3];
+    assert_eq!(g.discard_for_cost(0, text), None, "no Proft on the battlefield");
+}
+
+#[test]
+fn attack_restrictions_and_granted_ward() {
+    let db = db();
+    let d = prep_db(&db, &["Forest", "Chief Warg's Company", "Super Strength"]);
+    // Chief Warg's Company can't attack until there are two other Wolves (its upkeep tokens).
+    let mut g = game(&[&d, &d]);
+    let chief = put(&mut g, 0, 1);
+    assert!(!g.can_attack(g.idx(chief).unwrap()));
+    g.phase_triggers(0, Phase::Upkeep);
+    assert!(!g.can_attack(g.idx(chief).unwrap()), "one Wolf");
+    g.phase_triggers(0, Phase::Upkeep);
+    assert!(g.can_attack(g.idx(chief).unwrap()), "two Wolves");
+    // Super Strength: enchanted creature gets +4/+4 and has ward {1}.
+    let ss = g.enter_card(0, 2, 0, false).unwrap();
+    g.perms[ss].attached = Some(chief);
+    g.sba();
+    assert_eq!(perm(&g, chief).p, 9);
+    assert_eq!(perm(&g, chief).ward, 1);
+}

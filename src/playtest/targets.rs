@@ -155,6 +155,20 @@ impl<'a> Game<'a> {
                 return Some(vec![s]);
             }
         }
+        // "Draw a card for each creature you control with a +1/+1 counter on it. Those
+        // creatures gain indestructible": the ones counted.
+        if ctx
+            .text
+            .contains("for each creature you control with a +1/+1 counter on it")
+        {
+            return Some(
+                self.perms
+                    .iter()
+                    .filter(|x| x.ctrl as usize == ctx.ctrl && x.is_creature() && x.counters > 0)
+                    .map(|x| x.id)
+                    .collect(),
+            );
+        }
         None
     }
 

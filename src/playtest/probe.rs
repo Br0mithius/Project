@@ -113,6 +113,8 @@ fn board<'a>(decks: &[&'a Prepared]) -> (Game<'a>, u32) {
     }
     g.pending.clear();
     g.recalc();
+    // The graveyards' cards were there before this turn.
+    g.begin_turn_extra();
     (g, bear)
 }
 
@@ -153,7 +155,10 @@ fn perm_name(g: &Game, x: &Perm) -> String {
             let sub = x.subtypes.join(" ");
             format!("{}/{} {} token", x.base_p, x.base_t, sub).replace("  ", " ")
         }
-        None => format!("{:?} token", x.tok),
+        None => match x.tok {
+            Tok::Equip(p, t) => format!("Equipment token ({:+}/{:+})", p, t),
+            _ => format!("{:?} token", x.tok),
+        },
     }
 }
 
@@ -383,7 +388,12 @@ fn trig_label(t: &Trig) -> String {
             if extra.x > 0 {
                 parts.push(format!("{{X}} x{}", extra.x));
             }
-            if extra.remove > 0 {
+            if extra.remove_all {
+                parts.push(format!(
+                    "remove any number of {} counters (X)",
+                    if extra.remove_plus { "+1/+1" } else { "other" }
+                ));
+            } else if extra.remove > 0 {
                 parts.push(format!(
                     "remove {} {} counter(s)",
                     extra.remove,
@@ -524,6 +534,9 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     let before = snap(&g);
     let snapshot = died.or_else(|| src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone()));
     let groups = ab.mode_groups();
+    // What a triggered ability's event was about ("it"/"that creature"): your Bear. Other
+    // abilities have no such creature ("its power" is the card's own).
+    let subject = matches!(ab.trig, Trig::Event(..)).then_some(bear);
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
         Some(k) if k < groups.len() || ab.cond != Cond::Always || ab.pay.is_some() => {
@@ -538,13 +551,15 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 snap: snapshot,
                 card: Some(&prep.cards[PROBED as usize]),
                 card_ref: Some((0, PROBED)),
-                subject: Some(bear),
+                subject,
                 text,
                 until_eot: ab.until_eot,
                 overload: false,
                 card_restr,
                 x: None,
                 paid: None,
+                teamwork: false,
+                about: None,
             };
             if let Some(r) = groups.get(k) {
                 for e in &ab.effects[r.clone()] {
@@ -573,7 +588,7 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 back,
                 ability: ab_index as u16,
                 snapshot,
-                subject: Some(bear),
+                subject,
                 teamwork: false,
                 gift: false,
                 from_graveyard: false,
@@ -747,6 +762,62 @@ pub fn probe(card: &Card) -> String {
             c.produces, c.mana_amount
         ));
     }
+    if c.prowess > 1 {
+        sim.push(format!("prowess x{}", c.prowess));
+    }
+    if c.changeling {
+        sim.push("changeling".into());
+    }
+    if c.cant_be_countered {
+        sim.push("can't be countered".into());
+    }
+    if let Some(cond) = &c.cast_cond {
+        sim.push(format!("can be cast only if {:?}", cond));
+    }
+    if let Some(so) = &c.spend_only {
+        let what = |types: u16, sub: &Option<String>| {
+            let mut w = Vec::new();
+            if let Some(s) = sub {
+                w.push(s.clone());
+            }
+            if types != ANY_TYPE {
+                for (n, b) in [
+                    ("creature", T_CREATURE),
+                    ("artifact", T_ARTIFACT),
+                    ("planeswalker", T_PLANESWALKER),
+                    ("equipment", T_EQUIPMENT),
+                ] {
+                    if types & b != 0 {
+                        w.push(n.to_string());
+                    }
+                }
+            }
+            w.join(" ")
+        };
+        let mut parts = Vec::new();
+        if so.spell_types != 0 {
+            parts.push(format!(
+                "{} spells{}",
+                what(so.spell_types, &so.spell_sub),
+                if so.not_from_hand {
+                    " not cast from hand"
+                } else {
+                    ""
+                }
+            ));
+        }
+        if so.ability_types != 0 {
+            parts.push(format!(
+                "abilities of {} sources",
+                what(so.ability_types, &so.ability_sub)
+            ));
+        }
+        sim.push(format!(
+            "that mana only for {}{}",
+            parts.join(" or ").replace("  ", " ").trim().replace("of  ", "of "),
+            if c.free_mask != 0 { " (its {C} for anything)" } else { "" }
+        ));
+    }
     if c.enters_tapped {
         sim.push("enters tapped".into());
     }
@@ -761,10 +832,14 @@ pub fn probe(card: &Card) -> String {
             sim.push(format!("{} {}", label, mana_text(m)));
         }
     }
+    let affinity = format!(
+        "affinity for {}",
+        c.affinity_for.as_deref().unwrap_or("artifacts")
+    );
     for (label, on) in [
         ("convoke", c.convoke),
         ("improvise", c.improvise),
-        ("affinity for artifacts", c.affinity),
+        (affinity.as_str(), c.affinity),
         ("extort", c.extort),
     ] {
         if on {
@@ -781,6 +856,9 @@ pub fn probe(card: &Card) -> String {
                 String::new()
             }
         ));
+    }
+    if let Some((m, what)) = &c.equip_for {
+        sim.push(format!("equip {} {}", what, mana_text(m)));
     }
     for (label, v) in [
         ("crew", c.crew),

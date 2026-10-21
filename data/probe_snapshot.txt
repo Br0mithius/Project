@@ -131,15 +131,15 @@ TEXT: Flying / When Aerid Konstrari enters or dies, create a Heartwood token. (I
 SIM: keywords flying
 On entering:
       itself: 5/4 flying
-      -> You gets Other token
+      -> You gets Heartwood token
 ABILITIES:
   Enters: "when ~ enters or dies, create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
   Dies: "when ~ enters or dies, create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
   Activated (6 mana): "{6}: create a heartwood token. then ~ gets +x/+0 until end of turn, where x is the number of artifacts you control."
       -> Your Aerid Konstrari: 5/4 -> 7/4
-      -> You gets Other token
+      -> You gets Heartwood token
 
 Aetherize | {3}{U} | Instant
 TEXT: Return all attacking creatures to their owner's hand.
@@ -362,7 +362,7 @@ On entering:
 ABILITIES:
   Phase { phase: Combat, any_player: true, opponents_only: false }: "at the beginning of combat on your turn, create a 1/1 red alien creature token with haste and "~ attacks each combat if able." put a +1/+1 counter on it for each invasion counter on ~, then put an invasion counter on ~."
       -> Your Alien Invasion: other counters +1
-      -> You gets 1/1 alien token 4/4 with haste
+      -> You gets 1/1 alien token 1/1 with haste
 
 Along the Crooked Way | {2}{B} | Enchantment
 TEXT: When this enchantment enters, return target creature card from your graveyard to your hand. / Whenever a creature card leaves your graveyard, amass Goblins 1. / {1}{B}: Goblins and Orcs you control gain menace until end of turn.
@@ -662,13 +662,17 @@ Armor Wars | {2}{U}{R} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.) / I — You may draw a card for each artifact you control. If you do, each opponent draws a card. / II — Artifact spells you cast this turn cost {1} less to cast. / III — This Saga deals X damage to target opponent, where X is the greatest mana value among artifacts you control.
 On entering:
       itself: 
-      -> (nothing changes)
+      -> You: hand +1, library -1
+      -> Opp A: hand +1, library -1
+      -> Opp B: hand +1, library -1
 ABILITIES:
-  Chapter(1) [only if Chance(0.5); may; may pays Free for effects 0..]: "i — you may draw a card for each artifact you control. if you do, each opponent draws a card."
-      -> (nothing changes)
-      if the condition holds -> You: hand +1, library -1
-      if the condition holds -> Opp A: hand +1, library -1
-      if the condition holds -> Opp B: hand +1, library -1
+  Chapter(1) [may; may pays Free for effects 0..]: "i — you may draw a card for each artifact you control. if you do, each opponent draws a card."
+      -> You: hand +1, library -1
+      -> Opp A: hand +1, library -1
+      -> Opp B: hand +1, library -1
+      if the cost is paid -> You: hand +1, library -1
+      if the cost is paid -> Opp A: hand +1, library -1
+      if the cost is paid -> Opp B: hand +1, library -1
   Chapter(2): "ii — artifact spells you cast this turn cost {1} less to cast."
       (no effects read)
   Chapter(3): "iii — ~ deals x damage to target opponent, where x is the greatest mana value among artifacts you control."
@@ -738,7 +742,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Attacks: "whenever ~ attacks, another target creature you control gains trample and gets +x/+x until end of turn, where x is ~'s power."
-      -> Your Dragon: 6/6 -> 10/10
+      -> Your Dragon: 6/6 -> 10/10, gains trample
 
 Atlantean Cavalry | {2}{U} | Creature — Merfolk Soldier | 3/2
 TEXT: Vigilance / Whenever you draw your second card each turn, put a +1/+1 counter on this creature.
@@ -754,7 +758,7 @@ Atlantis Attacks | {5}{U}{U} | Sorcery
 TEXT: Teamwork 4 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.) / Choose one. If this spell was cast using teamwork, choose both instead. / • Target player creates a 6/5 blue Leviathan creature token with hexproof. / • Return one or two target nonland permanents to their owners' hands.
 SIM: teamwork 4
 ABILITIES:
-  Spell [only if Teamwork]: "choose one. if ~ was cast using teamwork, choose both instead."
+  Spell: "choose one. if ~ was cast using teamwork, choose both instead."
       mode 1: You gets 6/5 leviathan token 6/5 with hexproof
       mode 2: Opp A: hand +1
       mode 2: Opp B: hand +1
@@ -876,8 +880,9 @@ ABILITIES:
       mode 1: Opp A's Ogre left the battlefield
       mode 1: Opp B's Bear left the battlefield
       mode 1: Opp B's Ogre left the battlefield
-      mode 2: Opp A: graveyard +1
+      mode 2: Opp A: library -1, graveyard +1
       mode 2: Opp A's Plains left the battlefield
+      mode 2: Opp A gets Forest
 
 Avengers Hangar |  | Land
 TEXT: This land enters tapped. / When this land enters, you gain 1 life. / {T}: Add {W} or {U}.
@@ -895,7 +900,7 @@ ABILITIES:
 
 Avengers Tower |  | Land
 TEXT: {T}: Add {C}. / {T}: Add one mana of any color. Spend this mana only to cast a Hero spell or to activate an ability of a Hero source. / {4}, {T}: Look at the top three cards of your library. You may reveal a Hero card from among them and put it into your hand. Put the rest on the bottom of your library in any order.
-SIM: makes mana (colour mask 0b111111, 1 at a time)
+SIM: makes mana (colour mask 0b111111, 1 at a time); that mana only for hero spells or abilities of hero sources (its {C} for anything)
 On entering:
       itself: 
       -> (nothing changes)
@@ -905,7 +910,7 @@ ABILITIES:
   Activated (tap): "{t}: add one mana of any color. spend this mana only to cast a hero spell or to activate an ability of a hero source."
       -> (nothing changes)
   Activated (4 mana, tap) [may]: "{4}, {t}: look at the top three cards of your library. you may reveal a hero card from among them and put it into your hand. put the rest on the bottom of your library in any order."
-      -> You: hand +1, library -1
+      -> (nothing changes)
 
 Avengers: Under Siege | {2}{B}{R} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.) / I — Create two 2/1 black Villain creature tokens with menace. / II — This Saga deals 2 damage to each non-Villain creature and each opponent. / III — Create a Treasure token for each Villain you control.
@@ -919,8 +924,8 @@ ABILITIES:
       -> You gets 2/1 villain token 2/1 with menace
   Chapter(2): "ii — ~ deals 2 damage to each non-villain creature and each opponent."
       -> You: graveyard +1
-      -> Opp A: life -4, graveyard +1
-      -> Opp B: life -4, graveyard +1
+      -> Opp A: life -2, graveyard +1
+      -> Opp B: life -2, graveyard +1
       -> Your Bear left the battlefield
       -> Opp A's Bear left the battlefield
       -> Opp B's Bear left the battlefield
@@ -965,11 +970,13 @@ On entering:
       itself: 1/3 
       -> Opp A: graveyard +1
       -> Opp A's Dragon left the battlefield
+      -> Opp A gets Army token 6/6
 ABILITIES:
   Enters: "when ~ enters, destroy up to one other target creature. its controller amasses goblins x, where x is that creature's power."
       -> Opp A: graveyard +1
       -> Opp A's Dragon left the battlefield
-  Enters [only if Chance(0.05)]: "when ~ enters, if you controlled that creature, draw a card"
+      -> Opp A gets Army token 6/6
+  Enters [only if LastLeftWasYours]: "when ~ enters, if you controlled that creature, draw a card"
       -> (nothing changes)
       if the condition holds -> You: hand +1, library -1
 
@@ -1062,7 +1069,7 @@ Banner of Kinship | {5} | Artifact
 TEXT: As this artifact enters, choose a creature type. This artifact enters with a fellowship counter on it for each creature you control of the chosen type. / Creatures you control of the chosen type get +1/+1 for each fellowship counter on this artifact.
 On entering:
       itself: 
-      -> Your Dragon: 6/6 -> 9/9
+      -> Your Dragon: 6/6 -> 7/7
 ABILITIES:
   Static: "as ~ enters, choose a creature type. ~ enters with a fellowship counter on it for each creature you control of the chosen type."
       (static: shown under "On entering")
@@ -1124,8 +1131,7 @@ ABILITIES:
       -> Your Baron Helmut Zemo: 3/3 -> 4/4, +1/+1 counters +1
   Activated (exile black cards with 15+ black pips from the graveyard, boast) [only if AttackedThisTurn; may; once each turn]: "exile any number of black cards from your graveyard with fifteen or more black mana symbols among their mana costs: copy those exiled cards. you may cast up to three of the copies without paying their mana costs. activate only if ~ attacked this turn and only once each turn."
       -> (nothing changes)
-      if the condition holds -> You: hand -1
-      if the condition holds -> You gets Bear 2/2
+      if the condition holds -> (nothing changes)
 
 Baron Strucker, HYDRA Overlord | {2}{B} | Legendary Creature — Human Villain | 2/2
 TEXT: Villain spells you cast cost {1} less to cast. / Whenever another Villain you control enters, you may have it connive. Do this only once each turn. (Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1 counter on that creature.)
@@ -1204,7 +1210,7 @@ On entering:
       itself: 3/3 
       -> (nothing changes)
 ABILITIES:
-  Static [only if CountersAtLeast(1)]: "as long as you've put one or more +1/+1 counters on ~ this turn, he has flying."
+  Static [only if CounteredThisTurn]: "as long as you've put one or more +1/+1 counters on ~ this turn, he has flying."
       (static: shown under "On entering")
   CombatDamage: "whenever ~ deals combat damage to a player, draw a card."
       -> You: hand +1, library -1
@@ -1237,12 +1243,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(OtherEnters, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: true, restr: Restr(token) }): "whenever a token you control enters, you gain 1 life if this is the first time this ability has resolved this turn. if it's the second time, draw a card. if it's the third time, put a +1/+1 counter on each creature you control."
-      -> You: life +1, hand +1, library -1
-      -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
-      -> Your Ogre: 3/3 -> 4/4, +1/+1 counters +1
-      -> Your Knight: 4/4 -> 5/5, +1/+1 counters +1
-      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
-      -> Your Belladonna Took: 2/2 -> 3/3, +1/+1 counters +1
+      -> You: life +1
 
 Beorn the Fierce | {3}{G}{G} | Legendary Creature — Bear Shapeshifter Warrior | 6/6
 TEXT: Trample / Other Bears you control get +2/+2. / At the beginning of combat on your turn, put a trample counter on up to one target creature you control. It becomes a Bear in addition to its other types. Then if you control three or more Bears, draw two cards.
@@ -1254,7 +1255,7 @@ ABILITIES:
   Static: "other bears you control get +2/+2."
       (static: shown under "On entering")
   Phase { phase: Combat, any_player: false, opponents_only: false }: "at the beginning of combat on your turn, put a trample counter on up to one target creature you control. it becomes a bear in addition to its other types."
-      -> (nothing changes)
+      -> Your Dragon: 6/6 -> 8/8, gains trample
   Phase { phase: Combat, any_player: false, opponents_only: false } [only if ControlCount(3, "bear")]: "at the beginning of combat on your turn, if you control three or more bears, draw two cards"
       -> (nothing changes)
       if the condition holds -> You: hand +2, library -2
@@ -1347,6 +1348,9 @@ ABILITIES:
       (static: shown under "On entering")
   CombatDamage: "whenever ~ deals combat damage to a player, draw a card, then discard a card."
       -> You: library -1, graveyard +1
+  Back: Spell: "exchange control of two target nonland permanents that share a card type."
+      -> Your Bear: now controlled by Opp B
+      -> Opp B's Dragon: now controlled by You
 
 Bilbo, Thief in the Night | {1}{U} | Legendary Creature — Halfling Rogue | 2/2
 TEXT: Spells you cast from anywhere other than your hand cost {1} less to cast. / Whenever Bilbo attacks, you may cast an artifact, instant, or sorcery spell from your graveyard. If an instant or sorcery spell cast this way would be put into your graveyard, exile it instead.
@@ -1405,7 +1409,7 @@ TEXT: Target creature you control deals damage equal to its power to target crea
 ABILITIES:
   Spell: "target creature you control deals damage equal to its power to target creature or planeswalker you don't control."
       -> Opp B: graveyard +1
-      -> Opp B's Bear left the battlefield
+      -> Opp B's Dragon left the battlefield
 
 Black Panther, Vanguard | {2}{G}{W} | Legendary Creature — Human Warrior Hero | 4/4
 TEXT: Whenever another nontoken Hero you control enters, choose one — / • Create a 1/1 white Soldier creature token. / • Creatures you control get +1/+1 until end of turn.
@@ -1440,7 +1444,11 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   CombatDamage [may]: "whenever ~ deals combat damage to a player, that player exiles cards from the top of their library until they exile a nonland card. you may put a +1/+1 counter on ~. if you don't, you may cast the exiled nonland card until end of turn and mana of any type can be spent to cast that spell."
-      -> Your Black Widow, Super Spy: 2/1 -> 3/2, +1/+1 counters +1
+      -> Opp B: library -1
+      -> Your Plains: tapped
+      -> Your Island: tapped
+      -> Your Swamp: tapped
+      -> You gets Ogre 3/3
 
 Blanchwood Armor | {2}{G} | Enchantment — Aura
 TEXT: Enchant creature / Enchanted creature gets +1/+1 for each Forest you control.
@@ -1642,7 +1650,8 @@ ABILITIES:
   Enters [may; may pays Sacrifice { types: 1, other: true } for effects 0..]: "when ~ enters, you may sacrifice another creature. when you do, ~ deals damage equal to that creature's power to another target creature. if excess damage was dealt this way, amass goblins x, where x is that excess damage."
       -> (nothing changes)
       if the cost is paid -> Opp B: graveyard +1
-      if the cost is paid -> Opp B's Bear left the battlefield
+      if the cost is paid -> Opp B's Knight left the battlefield
+      if the cost is paid -> You gets Army token 1/1
 
 Bolg's Company | {B}{R} | Creature — Goblin Soldier | 2/2
 TEXT: This creature has haste as long as you control another Goblin. / {T}, Sacrifice another Goblin: Add {B}{R}.
@@ -1781,8 +1790,9 @@ On entering:
       itself: 2/1 flash
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell during an opponent's turn, put a +1/+1 counter on ~."
-      -> Your Brineborn Cutthroat: 2/1 -> 3/2, +1/+1 counters +1
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if NotMyTurn]: "whenever you cast a spell during an opponent's turn, put a +1/+1 counter on ~."
+      -> (nothing changes)
+      if the condition holds -> Your Brineborn Cutthroat: 2/1 -> 3/2, +1/+1 counters +1
 
 Broken Wings | {2}{G} | Instant
 TEXT: Destroy target artifact, enchantment, or creature with flying.
@@ -1946,10 +1956,10 @@ Campus Guide | {2} | Artifact Creature — Golem | 2/1
 TEXT: When Campus Guide enters, you may search your library for a basic land card, reveal it, then shuffle and put that card on top.
 On entering:
       itself: 2/1 
-      -> You: hand +1, library -1
+      -> (nothing changes)
 ABILITIES:
   Enters [may]: "when ~ enters, you may search your library for a basic land card, reveal it, then shuffle and put that card on top."
-      -> You: hand +1, library -1
+      -> (nothing changes)
 
 Cancel | {1}{U}{U} | Instant
 TEXT: Counter target spell.
@@ -1959,7 +1969,7 @@ ABILITIES:
 
 Cantankerous Keepers | {5}{G} | Creature — Elf Soldier | 4/3
 TEXT: Affinity for Elves (This spell costs {1} less to cast for each Elf you control.) / When this creature enters, mill four cards, then put all Elf cards from among them into your hand.
-SIM: affinity for artifacts
+SIM: affinity for elf
 On entering:
       itself: 4/3 
       -> You: library -4, graveyard +4
@@ -1977,7 +1987,7 @@ ABILITIES:
   Static: "equipped creature gets +0/+8 and has vigilance."
       (static: shown under "On entering")
   Event(EachAttacker, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever equipped creature attacks, tap target creature defending player controls."
-      -> (nothing changes)
+      -> Opp A's Dragon: tapped
 
 Captain America, Living Legend | {1}{W}{U} | Legendary Creature — Human Soldier Hero | 3/4
 TEXT: Vigilance / Whenever a creature you control becomes tapped during your turn, if it's the first time that creature has become tapped this turn, untap it.
@@ -1994,7 +2004,7 @@ Captain America, Super-Soldier | {1}{W}{W} | Legendary Creature — Human Soldie
 TEXT: First strike / Captain America enters with a shield counter on him. (If he would be dealt damage or destroyed, remove a shield counter from him instead.) / As long as Captain America has a shield counter on him, you and other Heroes you control have hexproof.
 SIM: keywords first strike
 On entering:
-      itself: 3/2 first strike, hexproof
+      itself: 3/2 first strike
       -> (nothing changes)
 ABILITIES:
   Static: "~ enters with a shield counter on him."
@@ -2054,7 +2064,7 @@ ABILITIES:
   CombatDamage: "whenever ~ deals combat damage to a player, return target land card from your graveyard to your hand."
       -> (nothing changes)
   Back: Spell: "search your library for a land card, put it into your graveyard, then shuffle."
-      -> You: hand +1, library -1
+      -> You: library -1, graveyard +1
 
 Cast Away Doubt | {2}{B} | Sorcery
 TEXT: Draw two cards. Cast Away Doubt deals 2 damage to each player.
@@ -2066,7 +2076,7 @@ ABILITIES:
 
 Castle Doom |  | Land
 TEXT: {T}: Add {C}. / {T}: Add one mana of any color. Spend this mana only to cast an artifact spell. / {3}, {T}, Sacrifice an artifact: Create a 3/3 colorless Robot Villain artifact creature token named Doombot. Activate only as a sorcery.
-SIM: makes mana (colour mask 0b111111, 1 at a time)
+SIM: makes mana (colour mask 0b111111, 1 at a time); that mana only for artifact spells (its {C} for anything)
 On entering:
       itself: 
       -> (nothing changes)
@@ -2076,7 +2086,7 @@ ABILITIES:
   Activated (tap): "{t}: add one mana of any color. spend this mana only to cast an artifact spell."
       -> (nothing changes)
   Activated (3 mana, tap, sacrifice another, sorcery speed): "{3}, {t}, sacrifice an artifact: create a 3/3 colorless robot villain artifact creature token named doombot. activate only as a sorcery."
-      -> You gets 3/3 token 3/3
+      -> You gets 3/3 villain robot token 3/3
 
 Cat Collector | {2}{W} | Creature — Human Citizen | 3/2
 TEXT: When this creature enters, create a Food token. (It's an artifact with "{2}, {T}, Sacrifice this token: You gain 3 life.") / Whenever you gain life for the first time during each of your turns, create a 1/1 white Cat creature token.
@@ -2149,7 +2159,7 @@ ABILITIES:
   Enters: "when ~ enters, surveil 3."
       -> (nothing changes)
   Static [only if Graveyard(7, false)]: "~ can't be blocked as long as there are seven or more cards in your graveyard."
-      (no effects read)
+      (static: shown under "On entering")
 
 Chandra's Emberling | {2}{R} | Creature — Gremlin Elemental | 2/2
 TEXT: Haste / Whenever you cast a noncreature spell, put a +1/+1 counter on this creature.
@@ -2163,6 +2173,7 @@ ABILITIES:
 
 Chandra, Chill of Compliance | {1}{U}{U} | Legendary Planeswalker — Chandra
 TEXT: [+1]: Surveil 1. If you put a noncreature, nonland card into your graveyard this way, put that card into your hand. / [+1]: Add {U}. Spend this mana only to cast a noncreature spell. / [-X]: Tap target artifact or creature. Put X stun counters on it. / [-6]: You get an emblem with "Whenever you cast a spell, draw a card."
+SIM: that mana only for creature spells
 On entering:
       itself: 
       -> (nothing changes)
@@ -2183,7 +2194,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Loyalty(2) [may]: "[+2]: add {r}{r}{r}. exile the top three cards of your library. choose one. you may play that card this turn."
-      -> You: hand +1, library -1
+      -> You: hand +1, library -3, exile +2
   Loyalty(1): "[+1]: create a token that's a copy of target creature you control, except it has haste and "at the beginning of the end step, sacrifice ~.""
       -> You gets Dragon (token copy) 6/6 with flying, haste
   Loyalty(-4): "[-4]: ~ deals 8 damage divided as you choose among any number of target creatures and/or planeswalkers."
@@ -2197,9 +2208,11 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Loyalty(1) [may]: "[+1]: exile the top card of your library. you may cast that card. if you don't, ~ deals 2 damage to each opponent."
-      -> You: hand +1, library -1
-      -> Opp A: life -2
-      -> Opp B: life -2
+      -> You: library -1
+      -> Your Plains: tapped
+      -> Your Island: tapped
+      -> Your Mountain: tapped
+      -> You gets Ogre 3/3
   Loyalty(1): "[+1]: add {r}{r}."
       -> (nothing changes)
   Loyalty(-3): "[-3]: ~ deals 4 damage to target creature."
@@ -2212,8 +2225,8 @@ Chaos Warp | {2}{R} | Instant
 TEXT: The owner of target permanent shuffles it into their library, then reveals the top card of their library. If it's a permanent card, they put it onto the battlefield.
 ABILITIES:
   Spell: "the owner of target permanent shuffles it into their library, then reveals the top card of their library. if it's a permanent card, they put it onto the battlefield."
-      -> Opp A: library +1
       -> Opp A's Dragon left the battlefield
+      -> Opp A gets Ogre 3/3
 
 Charge the Sanctum | {2}{R/W} | Instant
 TEXT: Choose one — / • Creatures you control get +2/+0 until end of turn. / • Target creature gets +2/+0 and gains first strike until end of turn. Put a +1/+1 counter on it.
@@ -2290,12 +2303,12 @@ Clash of Elements | {1}{U}{R} | Instant
 TEXT: Choose target nonland permanent. Its owner may put it on the top of their library. If they do, Clash of Elements deals 2 damage to them. If they didn't put the card on top of their library, they put it on the bottom.
 ABILITIES:
   Spell: "choose target nonland permanent. its owner may put it on the top of their library. if they do, ~ deals 2 damage to them. if they didn't put the card on top of their library, they put it on the bottom."
-      -> Opp B: graveyard +1
-      -> Opp B's Bear left the battlefield
+      -> Opp A: life -2, library +1
+      -> Opp A's Dragon left the battlefield
 
 Claws Out | {3}{W}{W} | Instant
 TEXT: Affinity for Cats (This spell costs {1} less to cast for each Cat you control.) / Creatures you control get +2/+2 until end of turn.
-SIM: affinity for artifacts
+SIM: affinity for cat
 ABILITIES:
   Spell: "creatures you control get +2/+2 until end of turn."
       -> Your Bear: 2/2 -> 4/4
@@ -2318,10 +2331,12 @@ TEXT: Deathtouch, lifelink / When Cloak and Dagger enter, choose target opponent
 SIM: keywords deathtouch, lifelink
 On entering:
       itself: 2/2 deathtouch, lifelink
-      -> Opp B: hand -1, graveyard +1
+      -> Opp B: exile +1
+      -> Opp B's Dragon left the battlefield
 ABILITIES:
   Enters [may]: "when ~ enter, choose target opponent and up to one target creature they control. they reveal their hand. you may exile a nonland card from their hand or the chosen creature until ~ leave the battlefield."
-      -> Opp B: hand -1, graveyard +1
+      -> Opp B: exile +1
+      -> Opp B's Dragon left the battlefield
 
 Cloudblazer | {3}{W}{U} | Creature — Human Scout | 2/2
 TEXT: Flying / When Cloudblazer enters, you gain 2 life and draw two cards.
@@ -2350,7 +2365,7 @@ On entering:
       itself: 2/2 
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets a creature you control, put a +1/+1 counter on ~. scry 1."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets a creature you control, put a +1/+1 counter on ~. scry 1."
       -> Your Colleen Wing, Street Samurai: 2/2 -> 3/3, +1/+1 counters +1
 
 Command Beacon |  | Land
@@ -2401,9 +2416,8 @@ TEXT: Choose one — / • Target creature you control deals damage equal to its
 ABILITIES:
   Spell: "choose one —"
       mode 1: Opp B: graveyard +1
-      mode 1: Opp B's Bear left the battlefield
-      mode 2: Opp B: graveyard +1
-      mode 2: Opp B's Ogre left the battlefield
+      mode 1: Opp B's Dragon left the battlefield
+      mode 2: (nothing changes)
 
 Confiscate | {4}{U}{U} | Enchantment — Aura
 TEXT: Enchant permanent / You control enchanted permanent.
@@ -2465,8 +2479,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever you attack, look at the top six cards of your library. you may cast a spell from among them with mana value less than or equal to the greatest power among attacking creatures you control without paying its mana cost. put the rest on the bottom of your library in a random order."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> (nothing changes)
 
 Countersculpt | {U}{U} | Instant
 TEXT: As an additional cost to cast this spell, behold a Jace or pay {1}. (To behold a Jace, choose a Jace you control or reveal a Jace card from your hand.) / Counter target spell. Empower Jace 1. (Put a loyalty counter on a Jace token you control. If you don't control one, first create a blue Jace planeswalker token with "[-1]: Surveil 1" and "[-3]: Draw a card.")
@@ -2532,18 +2545,18 @@ Craterclaw Colossus | {4}{R}{R}{R} | Artifact Creature — Beast Construct | 5/5
 TEXT: Haste / When this creature enters, creatures you control gain trample and get +X/+0 until end of turn, where X is the number of artifacts you control.
 SIM: keywords haste
 On entering:
-      itself: 7/5 haste
-      -> Your Bear: 2/2 -> 4/2
-      -> Your Ogre: 3/3 -> 5/3
-      -> Your Knight: 4/4 -> 6/4
-      -> Your Dragon: 6/6 -> 8/6
+      itself: 7/5 trample, haste
+      -> Your Bear: 2/2 -> 4/2, gains trample
+      -> Your Ogre: 3/3 -> 5/3, gains trample
+      -> Your Knight: 4/4 -> 6/4, gains trample
+      -> Your Dragon: 6/6 -> 8/6, gains trample
 ABILITIES:
   Enters: "when ~ enters, creatures you control gain trample and get +x/+0 until end of turn, where x is the number of artifacts you control."
-      -> Your Bear: 2/2 -> 4/2
-      -> Your Ogre: 3/3 -> 5/3
-      -> Your Knight: 4/4 -> 6/4
-      -> Your Dragon: 6/6 -> 8/6
-      -> Your Craterclaw Colossus: 5/5 -> 7/5
+      -> Your Bear: 2/2 -> 4/2, gains trample
+      -> Your Ogre: 3/3 -> 5/3, gains trample
+      -> Your Knight: 4/4 -> 6/4, gains trample
+      -> Your Dragon: 6/6 -> 8/6, gains trample
+      -> Your Craterclaw Colossus: 5/5 -> 7/5, gains trample
 
 Crawling Barrens |  | Land
 TEXT: {T}: Add {C}. / {4}: Put two +1/+1 counters on Crawling Barrens. Then you may have it become a 0/0 Elemental creature until end of turn. It's still a land.
@@ -2646,7 +2659,7 @@ Cruel Calculations | {2}{U} | Sorcery
 TEXT: Draw X cards, where X is the number of cards that were put into target player's graveyard from their library this turn.
 ABILITIES:
   Spell: "draw x cards, where x is the number of cards that were put into target player's graveyard from their library this turn."
-      -> You: hand +3, library -3
+      -> (nothing changes)
 
 Crusader of Odric | {2}{W} | Creature — Human Soldier | */*
 TEXT: Crusader of Odric's power and toughness are each equal to the number of creatures you control.
@@ -2745,7 +2758,7 @@ ABILITIES:
 
 Curator of Destinies | {4}{U}{U} | Creature — Sphinx | 5/5
 TEXT: This spell can't be countered. / Flying / When this creature enters, look at the top five cards of your library and separate them into a face-down pile and a face-up pile. An opponent chooses one of those piles. Put that pile into your hand and the other into your graveyard.
-SIM: keywords flying
+SIM: keywords flying; can't be countered
 On entering:
       itself: 5/5 flying
       -> You: hand +2, library -5, graveyard +3
@@ -2760,10 +2773,10 @@ TEXT: Flying, trample / When this creature enters, search your library for a car
 SIM: keywords flying, trample
 On entering:
       itself: 4/4 flying, trample
-      -> You: hand +1, library -1
+      -> You: library -1, graveyard +1
 ABILITIES:
   Enters: "when ~ enters, search your library for a card, put it into your hand, shuffle, then discard a card at random."
-      -> You: hand +1, library -1
+      -> You: library -1, graveyard +1
 
 Dancing from Dark to Dawn | {3}{G}{G} | Enchantment
 TEXT: Whenever you cast a creature spell, put X +1/+1 counters on target creature you control, where X is that spell's mana value. / Landfall — Whenever a land you control enters, create a 2/2 green Bear creature token.
@@ -2783,7 +2796,7 @@ On entering:
       itself: 2/2 first strike
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets an opponent or a creature an opponent controls, put a +1/+1 counter on ~."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00110 }): "whenever you cast a spell that targets an opponent or a creature an opponent controls, put a +1/+1 counter on ~."
       -> Your Danitha, Spear of Agony: 2/2 -> 3/3, +1/+1 counters +1
 
 Danitha, Sword of Hope | {2}{W} | Legendary Creature — Human Knight | 2/2
@@ -2793,7 +2806,7 @@ On entering:
       itself: 2/2 first strike
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }) [once each turn]: "whenever you cast an equipment spell or a spell that targets a creature you control, draw a card. this ability triggers only once each turn."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b10001 }) [once each turn]: "whenever you cast an equipment spell or a spell that targets a creature you control, draw a card. this ability triggers only once each turn."
       -> You: hand +1, library -1
 
 Daredevil, Man Without Fear | {2}{R}{W} | Legendary Creature — Human Hero | 3/4
@@ -3000,8 +3013,7 @@ ABILITIES:
   Activated (tap): "{t}: add {c}."
       -> (nothing changes)
   Activated (2 mana, tap, sacrifice it) [may]: "{2}, {t}, sacrifice ~: destroy target nonbasic land an opponent controls. that land's controller may search their library for a basic land card, put it onto the battlefield, then shuffle. you may search your library for a basic land card, put it onto the battlefield, then shuffle."
-      -> You: library -1
-      -> You gets Forest
+      -> (nothing changes)
 
 Demonic Pact | {2}{B}{B} | Enchantment
 TEXT: At the beginning of your upkeep, choose one that hasn't been chosen — / • Demonic Pact deals 4 damage to any target and you gain 4 life. / • Target opponent discards two cards. / • Draw two cards. / • You lose the game.
@@ -3107,6 +3119,7 @@ ABILITIES:
 
 Desolation of Smaug | {2}{R}{R} | Sorcery
 TEXT: Desolation of Smaug deals 3 damage to each non-Dragon creature. / Add four mana in any combination of colors. Spend this mana only to cast Dragon spells.
+SIM: that mana only for dragon spells
 ABILITIES:
   Spell: "~ deals 3 damage to each non-dragon creature."
       -> You: graveyard +2
@@ -3270,13 +3283,14 @@ Doctor Doom | {4}{B}{B} | Legendary Creature — Human Scientist Villain | 3/3
 TEXT: When Doctor Doom enters, create two 3/3 colorless Robot Villain artifact creature tokens named Doombot. / As long as you control an artifact creature or a Plan, Doctor Doom has indestructible. / At the beginning of your end step, you draw a card and lose 1 life.
 On entering:
       itself: 3/3 indestructible
-      -> You gets 3/3 token 3/3
-      -> You gets 3/3 token 3/3
+      -> You gets 3/3 villain robot token 3/3
+      -> You gets 3/3 villain robot token 3/3
 ABILITIES:
   Enters: "when ~ enters, create two 3/3 colorless robot villain artifact creature tokens named doombot."
-      -> You gets 3/3 token 3/3
-      -> You gets 3/3 token 3/3
-  Static [only if Control("artifact", false)]: "as long as you control an artifact creature or a plan, ~ has indestructible."
+      -> Your Doctor Doom: gains indestructible
+      -> You gets 3/3 villain robot token 3/3
+      -> You gets 3/3 villain robot token 3/3
+  Static [only if Control("artifact creature or a plan", false)]: "as long as you control an artifact creature or a plan, ~ has indestructible."
       (static: shown under "On entering")
   Phase { phase: End, any_player: false, opponents_only: false }: "at the beginning of your end step, you draw a card and lose 1 life."
       -> You: life -1, hand +1, library -1
@@ -3293,8 +3307,9 @@ ABILITIES:
       -> Opp B: life -1
       -> Your Doom Reigns Supreme: other counters +1
   Reflexive [may]: "when the fifth plan counter is put on ~, sacrifice it. when you do, target opponent exiles the top five cards of their library. you may cast up to two spells from among the exiled cards without paying their mana costs."
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> Opp B: library -5, exile +3
+      -> You gets Ogre 3/3
+      -> You gets Ogre 3/3
 
 Dori, Bearer of Friends | {2}{R} | Legendary Creature — Dwarf Warrior | 3/2
 TEXT: Trample / When Dori enters, create a Treasure token. (It's an artifact with "{T}, Sacrifice this token: Add one mana of any color.")
@@ -3326,11 +3341,14 @@ ABILITIES:
   Chapter(1): "i — search your library for a basic land card, reveal it, put it into your hand, then shuffle."
       -> You: hand +1, library -1
   Chapter(2): "ii — ~ gains "landfall — whenever a land you control enters, create a 1/1 green elf creature token.""
-      -> You gets 1/1 elf token 1/1
+      -> (nothing changes)
   Chapter(3): "iii, iv — elves you control get +1/+0 and gain vigilance until end of turn."
       -> (nothing changes)
   Chapter(4): "iii, iv — elves you control get +1/+0 and gain vigilance until end of turn."
       -> (nothing changes)
+  Event(Landfall, Filter { yours: Some(true), types: 16, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if OtherCountersAtLeast(2)]: "whenever a land you control enters, create a 1/1 green elf creature token."
+      -> (nothing changes)
+      if the condition holds -> You gets 1/1 elf token 1/1
 
 Down, Down to Goblin-town | {2}{B} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after IV.) / I — Target opponent reveals their hand. You choose a nonland card from it. That player discards that card. / II — Amass Goblins 1. (Put a +1/+1 counter on an Army you control. It's also a Goblin. If you don't control an Army, create a 0/0 black Goblin Army creature token first.) /  III, IV — Target opponent loses 1 life and you gain 1 life.
@@ -3617,10 +3635,12 @@ Dáin Ironfoot | {2}{R} | Legendary Creature — Dwarf Warrior | 1/4
 TEXT: When Dáin enters, create a colorless Equipment artifact token named Axe with "Equipped creature gets +1/+0" and equip {2}. When you do, attach it to target creature you control. / Whenever Dáin attacks, each equipped attacking creature gains double strike until end of turn.
 On entering:
       itself: 1/4 
-      -> You gets Other token
+      -> Your Dragon: 6/6 -> 7/6
+      -> You gets Equipment token (+1/+0)
 ABILITIES:
   Enters: "when ~ enters, create a colorless equipment artifact token named axe with "equipped creature gets +1/+0" and equip {2}. when you do, attach it to target creature you control."
-      -> You gets Other token
+      -> Your Dragon: 6/6 -> 7/6
+      -> You gets Equipment token (+1/+0)
   Attacks: "whenever ~ attacks, each equipped attacking creature gains double strike until end of turn."
       -> (nothing changes)
 
@@ -3628,12 +3648,12 @@ Dáin's Company | {R}{W} | Creature — Dwarf Warrior | 2/2
 TEXT: This creature has lifelink as long as you control another Dwarf. / When this creature enters, look at the top four cards of your library. You may reveal a Dwarf or Equipment card from among them and put it into your hand. Put the rest on the bottom of your library in a random order.
 On entering:
       itself: 2/2 
-      -> You: hand +1, library -1
+      -> (nothing changes)
 ABILITIES:
   Static [only if Control("dwarf", true)]: "~ has lifelink as long as you control another dwarf."
       (static: shown under "On entering")
   Enters [may]: "when ~ enters, look at the top four cards of your library. you may reveal a dwarf or equipment card from among them and put it into your hand. put the rest on the bottom of your library in a random order."
-      -> You: hand +1, library -1
+      -> (nothing changes)
 
 Dáin, Lord of the Iron Hills | {1}{W} | Legendary Creature — Dwarf Noble | 2/2
 TEXT: Vigilance / Storied (If you control three or more artifacts, legendaries, and/or Sagas, you have an enduring story for the rest of the game.) / As long as you have an enduring story, creatures can't attack you unless their controller pays {1} for each of those creatures.
@@ -3689,13 +3709,9 @@ Earth's Mightiest Heroes | {4}{G}{G} | Sorcery
 TEXT: Teamwork 5 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 5 or more.) / Reveal the top eight cards of your library. You may put a creature card from among them onto the battlefield. If this spell was cast using teamwork, put any number of creature cards from among them onto the battlefield instead. Put the rest into your graveyard.
 SIM: teamwork 5
 ABILITIES:
-  Spell [only if Teamwork; may]: "reveal the top eight cards of your library. you may put a creature card from among them onto the battlefield. if ~ was cast using teamwork, put any number of creature cards from among them onto the battlefield instead. put the rest into your graveyard."
-      -> (nothing changes)
-      if the condition holds -> You: library -8, graveyard +4
-      if the condition holds -> You gets Ogre 3/3
-      if the condition holds -> You gets Ogre 3/3
-      if the condition holds -> You gets Ogre 3/3
-      if the condition holds -> You gets Ogre 3/3
+  Spell [may]: "reveal the top eight cards of your library. you may put a creature card from among them onto the battlefield. if ~ was cast using teamwork, put any number of creature cards from among them onto the battlefield instead. put the rest into your graveyard."
+      -> You: library -8, graveyard +7
+      -> You gets Ogre 3/3
 
 Eaten Alive | {B} | Sorcery
 TEXT: As an additional cost to cast this spell, sacrifice a creature or pay {3}{B}. / Exile target creature or planeswalker.
@@ -4010,6 +4026,10 @@ On entering:
 ABILITIES:
   Attacks [may]: "whenever ~ attacks, exile the top card of each player's library, then you may cast any number of spells from among those cards without paying their mana costs."
       -> You: library -1
+      -> Opp A: library -1
+      -> Opp B: library -1
+      -> You gets Ogre 3/3
+      -> You gets Ogre 3/3
       -> You gets Ogre 3/3
 
 Evil's Thrall | {2}{R} | Sorcery
@@ -4237,8 +4257,9 @@ On entering:
       itself: 1/1 
       -> (nothing changes)
 ABILITIES:
-  Event(CombatDamageAny, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "when one or more of your opponents are dealt combat damage during your turn, draw two cards. if your library has no cards in it, you win the game. ~'s owner shuffles him into their library."
+  Event(CombatDamageAny, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if MyTurn]: "when one or more of your opponents are dealt combat damage during your turn, draw two cards. if your library has no cards in it, you win the game. ~'s owner shuffles him into their library."
       -> You: hand +2, library -2
+      if the condition holds -> You: hand +2, library -2
 
 Fblthp, Knows the Way | {X}{G}{G} | Legendary Creature — Homunculus Scout | */2
 TEXT: Domain — Fblthp's power is equal to the number of basic land types among lands you control. / When Fblthp enters, search your library for up to X basic land cards with different names, reveal them, put them into your hand, then shuffle.
@@ -4319,7 +4340,7 @@ ABILITIES:
   Spell: "put a +1/+1 counter on target creature you control. then that creature deals damage equal to its power to target creature an opponent controls."
       -> Opp B: graveyard +1
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
-      -> Opp B's Bear left the battlefield
+      -> Opp B's Dragon left the battlefield
 
 Fellwar Stone | {2} | Artifact
 TEXT: {T}: Add one mana of any color that a land an opponent controls could produce.
@@ -4379,7 +4400,7 @@ On entering:
       itself: 3/5 flying
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 96, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever you cast an instant or sorcery spell that targets an artifact or land, copy that spell. you may choose new targets for the copy. put two +1/+1 counters on ~."
+  Event(Cast, Filter { yours: Some(true), types: 96, not_types: 0, subtype: None, other: false, nontoken: false, token: false, targets: 0b01000 }) [may]: "whenever you cast an instant or sorcery spell that targets an artifact or land, copy that spell. you may choose new targets for the copy. put two +1/+1 counters on ~."
       -> Your Fin Fang Foom: 3/5 -> 5/7, +1/+1 counters +2
 
 Finale of Revelation | {X}{U}{U} | Sorcery
@@ -4509,7 +4530,8 @@ Flourishing Grapple | {G} | Instant
 TEXT: Target creature or planeswalker an opponent controls that's red or white loses all abilities until end of turn. Target creature you control deals damage equal to its power to that permanent.
 ABILITIES:
   Spell: "target creature or planeswalker an opponent controls that's red or white loses all abilities until end of turn. target creature you control deals damage equal to its power to that permanent."
-      -> Opp A's Dragon: can't attack or block
+      -> Opp A: graveyard +1
+      -> Opp A's Dragon left the battlefield
 
 Fog Bank | {1}{U} | Creature — Wall | 0/2
 TEXT: Defender, flying / Prevent all combat damage that would be dealt to and dealt by Fog Bank.
@@ -4688,7 +4710,7 @@ ABILITIES:
       -> Opp B: life -1
       -> Your Gandalf, Goblins' Bane: 2/3 -> 3/4
   Back: Spell [may]: "look at the top two cards of your library and exile them face down. for as long as they remain exiled, you may play them if you control a wizard."
-      -> You: hand +1, library -1
+      -> You: hand +2, library -2
 
 Gandalf, Spark Starter | {4}{R}{R} | Legendary Creature — Avatar Wizard | 4/3
 TEXT: Reach / When Gandalf enters, he deals 3 damage divided as you choose among one, two, or three targets.
@@ -4780,11 +4802,11 @@ ABILITIES:
   Static: "if a creature an opponent controls would die, exile it instead."
       (no effects read)
   Loyalty(2): "[+2]: up to one target creature gets -4/-1 until your next turn."
-      -> Opp A's Dragon: 6/6 -> 5/5, +1/+1 counters -1
+      -> Opp A's Dragon: 6/6 -> 2/5
   Loyalty(-2): "[-2]: each player sacrifices a creature of their choice. if you sacrificed a creature this way, create a 4/4 green beast creature token with trample."
       -> You: graveyard +1
-      -> Opp A: graveyard +1
-      -> Opp B: graveyard +1
+      -> Opp A: exile +1
+      -> Opp B: exile +1
       -> Your Bear left the battlefield
       -> Opp A's Bear left the battlefield
       -> Opp B's Bear left the battlefield
@@ -4796,7 +4818,7 @@ ABILITIES:
 
 Gate Colossus | {8} | Artifact Creature — Construct | 8/8
 TEXT: Affinity for Gates (This spell costs {1} less to cast for each Gate you control.) / Gate Colossus can't be blocked by creatures with power 2 or less. / Whenever a Gate you control enters, you may put Gate Colossus from your graveyard on top of your library.
-SIM: affinity for artifacts
+SIM: affinity for gate
 On entering:
       itself: 8/8 
       -> (nothing changes)
@@ -4936,10 +4958,10 @@ ABILITIES:
 Ghitu Lavarunner | {R} | Creature — Human Wizard | 1/2
 TEXT: As long as there are two or more instant and/or sorcery cards in your graveyard, Ghitu Lavarunner gets +1/+0 and has haste.
 On entering:
-      itself: 2/2 haste
+      itself: 1/2 
       -> (nothing changes)
 ABILITIES:
-  Static [only if Graveyard(2, false)]: "as long as there are two or more instant and/or sorcery cards in your graveyard, ~ gets +1/+0 and has haste."
+  Static [only if GraveyardTypes(2, 96)]: "as long as there are two or more instant and/or sorcery cards in your graveyard, ~ gets +1/+0 and has haste."
       (static: shown under "On entering")
 
 Ghost, Spectral Saboteur | {2}{U/B} | Legendary Creature — Human Rogue Villain | 2/2
@@ -4954,7 +4976,7 @@ ABILITIES:
 
 Giada, Font of Hope | {1}{W} | Legendary Creature — Angel | 2/2
 TEXT: Flying, vigilance / Each other Angel you control enters with an additional +1/+1 counter on it for each Angel you already control. / {T}: Add {W}. Spend this mana only to cast an Angel spell.
-SIM: keywords flying, vigilance; makes mana (colour mask 0b000001, 1 at a time)
+SIM: keywords flying, vigilance; makes mana (colour mask 0b000001, 1 at a time); that mana only for angel spells
 On entering:
       itself: 2/2 flying, vigilance
       -> (nothing changes)
@@ -5019,7 +5041,7 @@ ABILITIES:
 
 Gideon's Memorial | {1}{W} | Legendary Artifact
 TEXT: Creature tokens you control get +1/+0 and have vigilance. / {T}: Add one mana of any color. Spend this mana only to cast a planeswalker spell. / {1}{W}, Discard this card: It deals 4 damage to target attacking or blocking creature.
-SIM: makes mana (colour mask 0b011111, 1 at a time)
+SIM: makes mana (colour mask 0b011111, 1 at a time); that mana only for planeswalker spells
 On entering:
       itself: 
       -> (nothing changes)
@@ -5033,7 +5055,7 @@ ABILITIES:
 
 Gigantic Big Bear | {5}{G}{G} | Creature — Bear | 10/7
 TEXT: This spell can't be countered. / Hexproof, haste
-SIM: keywords haste, hexproof
+SIM: keywords haste, hexproof; can't be countered
 On entering:
       itself: 10/7 haste, hexproof
       -> (nothing changes)
@@ -5091,6 +5113,7 @@ ABILITIES:
       -> You gets Treasure token
   Activated (3 mana): "{2}{w}: two target players each draw a card."
       -> You: hand +1, library -1
+      -> Opp A: hand +1, library -1
 
 Gnarlback Rhino | {2}{G}{G} | Creature — Rhino | 4/4
 TEXT: Trample (This creature can deal excess combat damage to the player or planeswalker it's attacking.) / Whenever you cast a spell that targets Gnarlback Rhino, draw a card.
@@ -5099,7 +5122,7 @@ On entering:
       itself: 4/4 trample
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets ~, draw a card."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets ~, draw a card."
       -> You: hand +1, library -1
 
 Gnarlid Colony | {1}{G} | Creature — Beast | 2/2
@@ -5128,7 +5151,7 @@ Go Nuts! | {G} | Sorcery
 TEXT: Teamwork 3 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 3 or more.) / Choose one. If this spell was cast using teamwork, choose both instead. / • Put a +1/+1 counter on target creature. / • Target creature you control fights target creature an opponent controls.
 SIM: teamwork 3
 ABILITIES:
-  Spell [only if Teamwork]: "choose one. if ~ was cast using teamwork, choose both instead."
+  Spell: "choose one. if ~ was cast using teamwork, choose both instead."
       mode 1: Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
       mode 2: You: graveyard +1
       mode 2: Opp A: graveyard +1
@@ -5162,9 +5185,6 @@ ABILITIES:
   Spell: "~ deals x damage to target creature. create a number of 1/1 red goblin creature tokens equal to the amount of excess damage dealt to that creature this way."
       -> Opp B: graveyard +1
       -> Opp B's Ogre left the battlefield
-      -> You gets 1/1 goblin token 1/1
-      -> You gets 1/1 goblin token 1/1
-      -> You gets 1/1 goblin token 1/1
 
 Goblin Oriflamme | {1}{R} | Enchantment
 TEXT: Attacking creatures you control get +1/+0.
@@ -5296,6 +5316,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Back: Spell: "put a +1/+1 counter on up to one target creature. target player gains 2 life."
+      -> You: life +2
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
 
 Good-Fortune Unicorn | {1}{G}{W} | Creature — Unicorn | 2/2
@@ -5414,7 +5435,7 @@ On entering:
       itself: 2/2 prowess
       -> (nothing changes)
 ABILITIES:
-  Activated (2 mana) [only if OpponentLostLife]: "{b}{r}: return ~ from your graveyard to the battlefield with a finality counter on it. activate only if an opponent has been dealt noncombat damage this turn."
+  Activated (2 mana) [only if OpponentNoncombatDamaged]: "{b}{r}: return ~ from your graveyard to the battlefield with a finality counter on it. activate only if an opponent has been dealt noncombat damage this turn."
       -> (nothing changes)
       if the condition holds -> You: graveyard -1
       if the condition holds -> You gets Grim Repriser 2/2 with prowess
@@ -5517,7 +5538,7 @@ On entering:
 ABILITIES:
   Enters [only if AttackedThisTurn; may]: "when ~ enters, if you attacked this turn, look at the top three cards of your library. you may put one of those cards back on top of your library. put the rest into your graveyard."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
+      if the condition holds -> You: library -2, graveyard +2
 
 Guttersnipe | {2}{R} | Creature — Goblin Shaman | 2/2
 TEXT: Whenever you cast an instant or sorcery spell, Guttersnipe deals 2 damage to each opponent.
@@ -5543,11 +5564,11 @@ HULK SMASH! | {1}{R} | Instant
 TEXT: Teamwork 4 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.) / Choose one. If this spell was cast using teamwork, choose both instead. / • Destroy target noncreature artifact. / • Target creature you control deals damage equal to its power to target creature an opponent controls.
 SIM: teamwork 4
 ABILITIES:
-  Spell [only if Teamwork]: "choose one. if ~ was cast using teamwork, choose both instead."
+  Spell: "choose one. if ~ was cast using teamwork, choose both instead."
       mode 1: Opp A: graveyard +1
       mode 1: Opp A's Relic left the battlefield
       mode 2: Opp B: graveyard +1
-      mode 2: Opp B's Bear left the battlefield
+      mode 2: Opp B's Dragon left the battlefield
 
 HYDRA Assault Robot | {1}{R} | Artifact Creature — Robot Villain | 1/3
 TEXT: Whenever another Villain and/or artifact you control enters, this creature deals 1 damage to target opponent.
@@ -5763,7 +5784,7 @@ ABILITIES:
 
 Heartwood Crafter | {G} | Creature — Elf Artificer | 1/1
 TEXT: This creature enters prepared. (While it's prepared, you may cast a copy of its spell. Doing so unprepares it.) / {T}: Add {C}. This mana can't be spent to cast spells from your hand. /  / // Back face: Soul Tether {2}{R/G} / Sorcery / Create a Heartwood token. (It's a red and green artifact with "{T}: Add {R} or {G}.")
-SIM: makes mana (colour mask 0b111000, 1 at a time)
+SIM: makes mana (colour mask 0b100000, 1 at a time); that mana only for spells not cast from hand or abilities of sources
 On entering:
       itself: 1/1 
       -> (nothing changes)
@@ -5773,7 +5794,7 @@ ABILITIES:
   Activated (tap): "{t}: add {c}. this mana can't be spent to cast spells from your hand."
       -> (nothing changes)
   Back: Spell: "create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
 
 Hedron Archive | {4} | Artifact
 TEXT: {T}: Add {C}{C}. / {2}, {T}, Sacrifice Hedron Archive: Draw two cards.
@@ -5905,7 +5926,7 @@ ABILITIES:
   Static: "~ enters with four +1/+1 counters on it."
       (static: shown under "On entering")
   Activated (4 mana): "{2}{g}{g}: put x +1/+1 counters on ~, where x is its power."
-      -> Your Heroes' Bane: 4/4 -> 6/6, +1/+1 counters +2
+      -> Your Heroes' Bane: 4/4 -> 8/8, +1/+1 counters +4
 
 Heroic Feast | {2}{G} | Enchantment
 TEXT: When this enchantment enters, create a Food token. (It's an artifact with "{2}, {T}, Sacrifice this token: You gain 3 life.") / Whenever you gain life, choose up to that many target creatures you control. Put a +1/+1 counter on each of them.
@@ -6120,10 +6141,10 @@ Hungering Puppetbeast | {3}{G}{G} | Artifact Creature — Beast Construct | 5/5
 TEXT: When this creature enters, create a Heartwood token. (It's a red and green artifact with "{T}: Add {R} or {G}.") / {1}, Sacrifice another artifact: Put a +1/+1 counter on this creature. It gains your choice of trample, hexproof, or haste until end of turn.
 On entering:
       itself: 5/5 
-      -> You gets Other token
+      -> You gets Heartwood token
 ABILITIES:
   Enters: "when ~ enters, create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
   Activated (1 mana, sacrifice another): "{1}, sacrifice another artifact: put a +1/+1 counter on ~. it gains your choice of trample, hexproof, or haste until end of turn."
       -> Your Hungering Puppetbeast: 5/5 -> 6/6, +1/+1 counters +1, gains trample
 
@@ -6320,7 +6341,10 @@ TEXT: Exile the top X cards of target opponent's library. You may play those car
 SIM: X = 3
 ABILITIES:
   Spell [may]: "exile the top x cards of target opponent's library. you may play those cards this turn. if you cast a spell this way, pay life equal to its mana value rather than pay its mana cost."
-      -> You: hand +1, library -1
+      -> You: life -6
+      -> Opp B: library -3, exile +1
+      -> You gets Ogre 3/3
+      -> You gets Ogre 3/3
 
 Inspiration from Beyond | {2}{U} | Sorcery
 TEXT: Mill three cards, then return an instant or sorcery card from your graveyard to your hand. / Flashback {5}{U}{U} (You may cast this card from your graveyard for its flashback cost. Then exile it.)
@@ -6344,7 +6368,7 @@ Inspiring Call | {2}{G} | Instant
 TEXT: Draw a card for each creature you control with a +1/+1 counter on it. Those creatures gain indestructible until end of turn.
 ABILITIES:
   Spell: "draw a card for each creature you control with a +1/+1 counter on it. those creatures gain indestructible until end of turn."
-      -> Your Dragon: gains indestructible
+      -> (nothing changes)
 
 Inspiring Overseer | {2}{W} | Creature — Angel Cleric | 2/1
 TEXT: Flying / When Inspiring Overseer enters, you gain 1 life and draw a card.
@@ -6401,9 +6425,10 @@ On entering:
       itself: 2/3 
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets a creature you control, ~ gains "{t}: ~ deals damage equal to his power to any other target" until end of turn."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets a creature you control, ~ gains "{t}: ~ deals damage equal to his power to any other target" until end of turn."
       -> Opp B: graveyard +1
       -> Opp B's Bear left the battlefield
+      -> Your Iron Fist, Living Weapon: tapped
 
 Iron Hills |  | Land
 TEXT: This land enters tapped. / {T}: Add {R} or {W}. / {2}{R}{W}, {T}, Sacrifice this land: Put two +1/+1 counters on target Dwarf you control. Activate only as a sorcery.
@@ -6424,10 +6449,10 @@ TEXT: Double strike / When this creature enters, create a colorless Equipment ar
 SIM: keywords double strike
 On entering:
       itself: 1/1 double strike
-      -> You gets Other token
+      -> You gets Equipment token (+1/+0)
 ABILITIES:
   Enters: "when ~ enters, create a colorless equipment artifact token named axe with "equipped creature gets +1/+0" and equip {2}."
-      -> You gets Other token
+      -> You gets Equipment token (+1/+0)
 
 Iron Hills Stalwart | {4}{R} | Creature — Dwarf Warrior | 4/5
 TEXT: Reach, trample / When this creature enters, attach target Equipment you control to up to one target creature you control.
@@ -6537,21 +6562,8 @@ ABILITIES:
       -> Opp B's Dragon: 6/6 -> 1/6
   Loyalty(0) [only if JaceLoyalty(25)]: "[0]: exile all but the bottom card of each opponent's library. activate only if there are twenty-five or more loyalty counters among jaces you control."
       -> (nothing changes)
-      if the condition holds -> You: exile +4
-      if the condition holds -> Opp A: exile +4
-      if the condition holds -> Opp B: exile +4
-      if the condition holds -> Your Bear left the battlefield
-      if the condition holds -> Your Ogre left the battlefield
-      if the condition holds -> Your Knight left the battlefield
-      if the condition holds -> Your Dragon left the battlefield
-      if the condition holds -> Opp A's Bear left the battlefield
-      if the condition holds -> Opp A's Ogre left the battlefield
-      if the condition holds -> Opp A's Knight left the battlefield
-      if the condition holds -> Opp A's Dragon left the battlefield
-      if the condition holds -> Opp B's Bear left the battlefield
-      if the condition holds -> Opp B's Ogre left the battlefield
-      if the condition holds -> Opp B's Knight left the battlefield
-      if the condition holds -> Opp B's Dragon left the battlefield
+      if the condition holds -> Opp A: library -19, exile +19
+      if the condition holds -> Opp B: library -19, exile +19
 
 Jazal Goldmane | {2}{W}{W} | Legendary Creature — Cat Warrior | 4/4
 TEXT: First strike / {3}{W}{W}: Attacking creatures you control get +X/+X until end of turn, where X is the number of attacking creatures.
@@ -6586,7 +6598,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Activated (stun counter on it, tap) [may]: "{t}, put a stun counter on ~: exile the top x cards of your library, where x is ~'s power. you may play those cards this turn."
-      -> You: hand +1, library -1
+      -> You: hand +2, library -2
 
 Jiang Yanggu, Alone | {4}{R} | Legendary Creature — Human Berserker | 4/4
 TEXT: Menace (This creature can't be blocked except by two or more creatures.) / Whenever a creature you control attacks a player alone, discard a card, then draw a card. Then put a +1/+1 counter on that creature for each card you've discarded this turn.
@@ -6793,11 +6805,14 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Activated (2 mana) [only if SourceSubtype("scout"); may]: "{1}{r}: if ~ is a scout, it becomes a human faerie detective and gains "whenever ~ deals combat damage to a player, exile the top card of your library. you may play that card this turn.""
-      -> You: hand +1, library -1
-      if the condition holds -> You: hand +1, library -1
+      -> (nothing changes)
+      if the condition holds -> (nothing changes)
   Activated (3 mana) [only if SourceSubtype("detective")]: "{2}{r}: if ~ is a detective, it becomes a 3/2 human faerie rogue and gains double strike."
       -> (nothing changes)
       if the condition holds -> Your Kellan, Planar Trailblazer: gains double strike
+  CombatDamage [only if SourceSubtype("detective"); may]: "whenever ~ deals combat damage to a player, exile the top card of your library. you may play that card this turn."
+      -> (nothing changes)
+      if the condition holds -> You: hand +1, library -1
 
 Key to the Side-Door | {1} | Artifact
 TEXT: {2}, {T}: Target creature can't be blocked this turn. / {1}, {T}, Discard a legendary card with the same name as a legendary permanent you control: Draw two cards.
@@ -6929,10 +6944,10 @@ Klaw, Sonic Subjugator | {2}{B} | Legendary Creature — Human Rogue Villain | 2
 TEXT: Sonic Attack — When Klaw enters, target player reveals a number of cards from their hand equal to one plus the number of creature cards in your graveyard. You choose one of them. That player discards that card.
 On entering:
       itself: 2/2 
-      -> (nothing changes)
+      -> Opp B: hand -1, graveyard +1
 ABILITIES:
   Enters: "when ~ enters, target player reveals a number of cards from their hand equal to one plus the number of creature cards in your graveyard. you choose one of them. that player discards that card."
-      (no effects read)
+      -> Opp B: hand -1, graveyard +1
 
 Knight of Grace | {1}{W} | Creature — Human Knight | 2/2
 TEXT: First strike / Hexproof from black (This creature can't be the target of black spells or abilities your opponents control.) / Knight of Grace gets +1/+0 as long as any player controls a black permanent.
@@ -6966,7 +6981,7 @@ ABILITIES:
 
 Koma, World-Eater | {3}{G}{G}{U}{U} | Legendary Creature — Serpent | 8/12
 TEXT: This spell can't be countered. / Trample, ward {4} / Whenever Koma deals combat damage to a player, create four 3/3 blue Serpent creature tokens named Koma's Coil.
-SIM: keywords trample; ward {4}
+SIM: keywords trample; ward {4}; can't be countered
 On entering:
       itself: 8/12 trample
       -> (nothing changes)
@@ -7009,7 +7024,7 @@ ABILITIES:
   Static: "~ enters prepared."
       (static: shown under "On entering")
   Back: Spell: "create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
 
 Koth of the Homestead | {2}{W} | Legendary Creature — Human Citizen | 2/3
 TEXT: Landfall — Whenever a land you control enters, you gain 1 life. / Whenever a Plains you control enters, put a +1/+1 counter on target creature.
@@ -7066,7 +7081,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(GainLife, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [once each turn]: "whenever you gain life, create a colorless artifact token named lotus with "{t}, sacrifice ~: add three mana of any one color." this ability triggers only once each turn."
-      -> You gets Other token
+      -> You gets Lotus token
 
 Kykar, Zephyr Awakener | {2}{W}{U} | Legendary Creature — Bird Wizard | 3/4
 TEXT: Flying / Whenever you cast a noncreature spell, choose one — / • Exile another target creature you control. Return that card to the battlefield under its owner's control at the beginning of the next end step. / • Create a 1/1 white Spirit creature token with flying.
@@ -7207,7 +7222,7 @@ ABILITIES:
   Static: "if a creature you control would connive, instead you draw a card, then that creature connives."
       (static: shown under "On entering")
   Phase { phase: Combat, any_player: false, opponents_only: false }: "at the beginning of combat on your turn, target creature you control connives."
-      -> You: library -1, graveyard +1
+      -> You: hand +1, library -2, graveyard +1
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
 
 Leonin Skyhunter | {W}{W} | Creature — Cat Knight | 2/2
@@ -7331,10 +7346,22 @@ ABILITIES:
       -> Opp B's Bear left the battlefield
       -> Opp B's Ogre left the battlefield
   Loyalty(-9): "[-9]: each opponent chooses a permanent they control of each permanent type and sacrifices the rest."
-      -> Opp A: graveyard +1
-      -> Opp B: graveyard +1
-      -> Opp A's Relic left the battlefield
-      -> Opp B's Relic left the battlefield
+      -> Opp A: graveyard +7
+      -> Opp B: graveyard +7
+      -> Opp A's Bear left the battlefield
+      -> Opp A's Ogre left the battlefield
+      -> Opp A's Knight left the battlefield
+      -> Opp A's Plains left the battlefield
+      -> Opp A's Island left the battlefield
+      -> Opp A's Swamp left the battlefield
+      -> Opp A's Mountain left the battlefield
+      -> Opp B's Bear left the battlefield
+      -> Opp B's Ogre left the battlefield
+      -> Opp B's Knight left the battlefield
+      -> Opp B's Plains left the battlefield
+      -> Opp B's Island left the battlefield
+      -> Opp B's Swamp left the battlefield
+      -> Opp B's Mountain left the battlefield
 
 Linden, the Steadfast Queen | {W}{W}{W} | Legendary Creature — Human Noble | 3/3
 TEXT: Vigilance / Whenever a white creature you control attacks, you gain 1 life.
@@ -7351,10 +7378,10 @@ TEXT: Flash / When this creature enters, untap another target creature you contr
 SIM: keywords flash
 On entering:
       itself: 3/2 flash
-      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
+      -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
 ABILITIES:
   Enters: "when ~ enters, untap another target creature you control. if that creature is a bear, put a +1/+1 counter on it."
-      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
+      -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
 
 Living Library | {2} | Artifact Creature — Book Illusion | 0/4
 TEXT: {6}, Sacrifice this creature: Choose target creature or planeswalker an opponent controls. Its owner shuffles it into their library.
@@ -7443,7 +7470,7 @@ ABILITIES:
 
 Loot, the Nexus | {2}{G} | Legendary Creature — Beast Noble | 2/1
 TEXT: {T}: Choose a color. Add one mana of that color for each different power among creatures you control.
-SIM: makes mana (colour mask 0b100000, 3 at a time)
+SIM: makes mana (colour mask 0b011111, 3 at a time)
 On entering:
       itself: 2/1 
       -> (nothing changes)
@@ -7594,7 +7621,7 @@ Macabre Waltz | {1}{B} | Sorcery
 TEXT: Return up to two target creature cards from your graveyard to your hand, then discard a card.
 ABILITIES:
   Spell: "return up to two target creature cards from your graveyard to your hand, then discard a card."
-      -> You: hand +2, graveyard -2
+      -> You: hand +1, graveyard -1
 
 Machinesmith Automaton | {2}{R} | Artifact Creature — Robot Villain | 2/2
 TEXT: Trample / Whenever another artifact you control enters, put a +1/+1 counter on this creature.
@@ -7631,8 +7658,12 @@ Maelstrom Pulse | {1}{B}{G} | Sorcery
 TEXT: Destroy target nonland permanent and all other permanents with the same name as that permanent.
 ABILITIES:
   Spell: "destroy target nonland permanent and all other permanents with the same name as that permanent."
+      -> You: graveyard +1
       -> Opp A: graveyard +1
+      -> Opp B: graveyard +1
+      -> Your Dragon left the battlefield
       -> Opp A's Dragon left the battlefield
+      -> Opp B's Dragon left the battlefield
 
 Magnificent End | {4}{W} | Instant
 TEXT: This spell costs {3} less to cast if it targets a tapped creature. / Magnificent End deals 5 damage to target creature.
@@ -8019,7 +8050,7 @@ On entering:
       itself: 2/2 
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: Upkeep, any_player: false, opponents_only: false } [only if Chance(0.5)]: "at the beginning of your upkeep, choose one —"
+  Phase { phase: Upkeep, any_player: false, opponents_only: false }: "at the beginning of your upkeep, choose one —"
       mode 1: Your Mister Hyde, Monster Within: 2/2 -> 3/3, +1/+1 counters +1
       mode 2: You: hand +1, library -1
 
@@ -8043,7 +8074,7 @@ ABILITIES:
 
 Mjölnir, Hammer of Thor | {3}{R} | Legendary Artifact — Equipment
 TEXT: When Mjölnir enters, it deals 4 damage to up to one target creature. / Double all damage equipped creature would deal. / Equip worthy {1} (A creature is worthy if it's a legendary non-Villain that's red and/or white.) / {2}{R}, Discard this card: It deals 2 damage to each creature.
-SIM: equip {1}
+SIM: equip worthy {1}
 On entering (attached to your Bear):
       itself: 
       -> Opp B: graveyard +1
@@ -8079,7 +8110,7 @@ On entering:
       itself: 2/2 double strike
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets a creature you control, put a +1/+1 counter on ~."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets a creature you control, put a +1/+1 counter on ~."
       -> Your Mockingbird, Ace Agent: 2/2 -> 3/3, +1/+1 counters +1
 
 Mold Adder | {G} | Creature — Fungus Snake | 1/1
@@ -8172,8 +8203,8 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(Discard, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may; may pays Free for effects 0..]: "whenever you discard a card, you may exile that card from your graveyard. if you do, until the end of your next turn, you may play that card."
-      -> You: hand +1, library -1
-      if the cost is paid -> You: hand +1, library -1
+      -> You: hand +1, graveyard -1
+      if the cost is paid -> You: hand +1, graveyard -1
 
 Mortify | {1}{W}{B} | Instant
 TEXT: Destroy target creature or enchantment.
@@ -8223,7 +8254,7 @@ On entering:
 ABILITIES:
   Static: "you have no maximum hand size."
       (no effects read)
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets a creature you control, draw a card. until end of turn, ~ gains "~'s base power is equal to the number of cards in your hand.""
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets a creature you control, draw a card. until end of turn, ~ gains "~'s base power is equal to the number of cards in your hand.""
       -> You: hand +1, library -1
 
 Muldrotha, the Gravetide | {3}{B}{G}{U} | Legendary Creature — Elemental Avatar | 6/6
@@ -8255,7 +8286,7 @@ Murdock's Crusade | {1}{W} | Sorcery
 TEXT: Teamwork 4 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 4 or more.) / Choose one. If this spell was cast using teamwork, choose both instead. / • Street Justice — Exile target creature with toughness 4 or greater. / • Legal Justice — Exile target enchantment with mana value 4 or greater.
 SIM: teamwork 4
 ABILITIES:
-  Spell [only if Teamwork]: "choose one. if ~ was cast using teamwork, choose both instead."
+  Spell: "choose one. if ~ was cast using teamwork, choose both instead."
       mode 1: Opp A: exile +1
       mode 1: Opp A's Dragon left the battlefield
       mode 2: (nothing changes)
@@ -8289,10 +8320,10 @@ ABILITIES:
 Myojin of Night's Reach | {5}{B}{B}{B} | Legendary Creature — Spirit | 5/2
 TEXT: Myojin of Night's Reach enters with a divinity counter on it if you cast it from your hand. / Myojin of Night's Reach has indestructible as long as it has a divinity counter on it. / Remove a divinity counter from Myojin of Night's Reach: Each opponent discards their hand.
 On entering:
-      itself: 5/2 indestructible
+      itself: 5/2 
       -> (nothing changes)
 ABILITIES:
-  Static: "~ enters with a divinity counter on it if you cast it from your hand."
+  Static [only if WasCast]: "~ enters with a divinity counter on it if you cast it from your hand."
       (static: shown under "On entering")
   Static [only if OtherCountersAtLeast(1)]: "~ has indestructible as long as it has a divinity counter on it."
       (static: shown under "On entering")
@@ -8363,7 +8394,7 @@ On entering:
       itself: 2/2 
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: Combat, any_player: false, opponents_only: false } [only if ControlPower(4)]: "at the beginning of combat on your turn, if you control another creature with power 4 or greater, put a +1/+1 counter on ~."
+  Phase { phase: Combat, any_player: false, opponents_only: false } [only if ControlOtherPower(4)]: "at the beginning of combat on your turn, if you control another creature with power 4 or greater, put a +1/+1 counter on ~."
       -> Your Nessian Hornbeetle: 2/2 -> 3/3, +1/+1 counters +1
       if the condition holds -> Your Nessian Hornbeetle: 2/2 -> 3/3, +1/+1 counters +1
 
@@ -8394,10 +8425,10 @@ TEXT: Flash / Lifelink / When Night Nurse enters, choose target permanent card i
 SIM: keywords lifelink, flash
 On entering:
       itself: 2/1 lifelink, flash
-      -> You: hand +1, graveyard -1
+      -> (nothing changes)
 ABILITIES:
   Enters: "when ~ enters, choose target permanent card in your graveyard that was put there from anywhere this turn. return it to your hand."
-      -> You: hand +1, graveyard -1
+      -> (nothing changes)
 
 Nighthowl Pursuer | {B} | Creature — Wolf | 1/1
 TEXT: Menace (This creature can't be blocked except by two or more creatures.) / Ferocious — Whenever this creature attacks while you control a creature with power 4 or greater, this creature gets +2/+2 until end of turn.
@@ -8416,11 +8447,11 @@ On entering:
       itself: 1/1 
       -> (nothing changes)
 ABILITIES:
-  Static: "~ enters with eight revival counters on it if you cast it."
+  Static [only if WasCast]: "~ enters with eight revival counters on it if you cast it."
       (static: shown under "On entering")
-  Dies: "when ~ dies, if it had a revival counter on it, return it to the battlefield with one fewer revival counter on it at the beginning of the next end step."
-      -> You: graveyard -1
-      -> You gets Nine-Lives Familiar 1/1
+  Dies [only if HadOtherCounters]: "when ~ dies, if it had a revival counter on it, return it to the battlefield with one fewer revival counter on it at the beginning of the next end step."
+      -> (nothing changes)
+      if the condition holds -> (nothing changes)
 
 Ninja of the Hand | {2}{B} | Creature — Human Ninja Villain | 2/2
 TEXT: Deathtouch / Power-up — {4}{B}: Each opponent discards a card. Put a +1/+1 counter on this creature. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)
@@ -8468,10 +8499,11 @@ Null Summoner | {2}{U}{B} | Creature — Human Warlock | 4/2
 TEXT: When this creature enters, if you cast it, target opponent reveals their hand. You choose a nonland card from it. Exile that card. / Threshold — As long as there are seven or more cards in your graveyard, you may cast the exiled card, and mana of any type can be spent to cast that spell.
 On entering:
       itself: 4/2 
-      -> Opp B: hand -1, graveyard +1
+      -> (nothing changes)
 ABILITIES:
-  Enters: "when ~ enters, if you cast it, target opponent reveals their hand. you choose a nonland card from it. exile that card."
-      -> Opp B: hand -1, graveyard +1
+  Enters [only if WasCast]: "when ~ enters, if you cast it, target opponent reveals their hand. you choose a nonland card from it. exile that card."
+      -> (nothing changes)
+      if the condition holds -> Opp B: hand -1, exile +1
   Static [only if Graveyard(7, false); may]: "as long as there are seven or more cards in your graveyard, you may cast the exiled card, and mana of any type can be spent to cast that spell."
       (no effects read)
 
@@ -8545,10 +8577,10 @@ TEXT: Flying / When this creature enters, you gain 2 life. You may search your l
 SIM: keywords flying
 On entering:
       itself: 1/2 flying
-      -> You: life +2, hand +1, library -1
+      -> You: life +2
 ABILITIES:
   Enters [may]: "when ~ enters, you gain 2 life. you may search your library for a basic land card, reveal it, then shuffle and put that card on top."
-      -> You: life +2, hand +1, library -1
+      -> You: life +2
 
 Omnipresence | {5}{G}{G}{G} | Enchantment
 TEXT: You may cast spells with mana value less than or equal to the number of creatures you control from your hand without paying their mana costs.
@@ -8625,9 +8657,8 @@ On entering:
 ABILITIES:
   Chapter(1): "i — scry 2."
       -> (nothing changes)
-  Chapter(2) [only if Chance(0.5); may]: "ii — you may put a hero creature card with mana value 3 or less from your hand onto the battlefield. if you don't, draw a card."
-      -> (nothing changes)
-      if the condition holds -> You: hand +1, library -1
+  Chapter(2) [may]: "ii — you may put a hero creature card with mana value 3 or less from your hand onto the battlefield. if you don't, draw a card."
+      -> You: hand +1, library -1
   Chapter(3): "iii — put a +1/+1 counter on each creature you control."
       -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
       -> Your Ogre: 3/3 -> 4/4, +1/+1 counters +1
@@ -8714,9 +8745,8 @@ On entering:
       itself: 
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(false), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if Chance(0.5)]: "whenever an opponent casts a spell, that player loses 5 life unless they discard a card."
-      -> (nothing changes)
-      if the condition holds -> Opp B: life -5
+  Event(Cast, Filter { yours: Some(false), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever an opponent casts a spell, that player loses 5 life unless they discard a card."
+      -> Opp B: hand -1, graveyard +1
 
 Panther Pounce | {W} | Instant
 TEXT: Target player investigates. Target creature gets +1/+0 and gains flying until end of turn. Untap it. (To investigate, create a Clue token. It's an artifact with "{2}, Sacrifice this token: Draw a card.")
@@ -8746,7 +8776,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(Death, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: false, nontoken: true, token: false, restr: Restr(nontoken) }) [once each turn]: "whenever a nontoken creature you control dies, reveal cards from the top of your library until you reveal a creature card. if its mana value is less than or equal to the number of lands you control, put it onto the battlefield. otherwise, put it into your hand. put the rest on the bottom of your library in a random order. this ability triggers only once each turn."
-      -> You: hand +1, library -2
+      -> You: library -1
       -> You gets Ogre 3/3
 
 Path of Ancestry |  | Land
@@ -8858,10 +8888,10 @@ Pia, Determined Rebuilder | {2}{R} | Legendary Creature — Human Artificer | 2/
 TEXT: When Pia enters, create a 1/1 colorless Thopter artifact creature token with flying. / {5}{R}: Target creature gets +X/+0 until end of turn, where X is the number of artifacts you control.
 On entering:
       itself: 2/2 
-      -> You gets 1/1 token 1/1 with flying
+      -> You gets 1/1 thopter token 1/1 with flying
 ABILITIES:
   Enters: "when ~ enters, create a 1/1 colorless thopter artifact creature token with flying."
-      -> You gets 1/1 token 1/1 with flying
+      -> You gets 1/1 thopter token 1/1 with flying
   Activated (6 mana): "{5}{r}: target creature gets +x/+0 until end of turn, where x is the number of artifacts you control."
       -> Your Dragon: 6/6 -> 7/6
 
@@ -9042,12 +9072,12 @@ TEXT: Menace (This creature can’t be blocked except by two or more creatures.)
 SIM: keywords menace
 On entering:
       itself: 2/1 menace
-      -> You: library -5, graveyard +4
-      -> You gets Swamp
+      -> You: library -4, graveyard +3
+      -> You gets Mountain
 ABILITIES:
   Enters: "when ~ enters, mill four cards. when you do, return target land card from your graveyard to the battlefield tapped."
-      -> You: library -5, graveyard +4
-      -> You gets Swamp
+      -> You: library -4, graveyard +3
+      -> You gets Mountain
 
 Prime Speaker Zegana | {2}{G}{G}{U}{U} | Legendary Creature — Merfolk Wizard | 1/1
 TEXT: Prime Speaker Zegana enters with X +1/+1 counters on it, where X is the greatest power among other creatures you control. / When Prime Speaker Zegana enters, draw cards equal to its power.
@@ -9058,7 +9088,7 @@ ABILITIES:
   Static: "~ enters with x +1/+1 counters on it, where x is the greatest power among other creatures you control."
       (static: shown under "On entering")
   Enters: "when ~ enters, draw cards equal to its power."
-      -> You: hand +2, library -2
+      -> You: hand +7, library -7
 
 Primeval Bounty | {5}{G} | Enchantment
 TEXT: Whenever you cast a creature spell, create a 3/3 green Beast creature token. / Whenever you cast a noncreature spell, put three +1/+1 counters on target creature you control. / Landfall — Whenever a land you control enters, you gain 3 life.
@@ -9104,7 +9134,7 @@ ABILITIES:
 
 Proft, Sinister Mastermind | {2}{B} | Legendary Creature — Human Rogue | 5/5
 TEXT: Threshold — You can't cast this spell unless there are seven or more cards in your graveyard. / Menace / {B}, Discard this card: Target creature gets -3/-1 until end of turn.
-SIM: keywords menace
+SIM: keywords menace; can be cast only if Graveyard(7, false)
 On entering:
       itself: 5/5 menace
       -> (nothing changes)
@@ -9191,7 +9221,7 @@ ABILITIES:
       (no effects read)
   Spell: "target creature you control deals damage equal to twice its power to target creature an opponent controls."
       -> Opp B: graveyard +1
-      -> Opp B's Bear left the battlefield
+      -> Opp B's Dragon left the battlefield
 
 Puppet Crafting | {1}{G} | Enchantment — Aura
 TEXT: Enchant artifact or non-Aura enchantment / Enchanted permanent is a Construct creature with base power and toughness 5/5 in addition to its other types. / {4}{G}: Return this card from your graveyard to your hand.
@@ -9235,6 +9265,8 @@ On entering:
 ABILITIES:
   Static: "~ enters prepared."
       (static: shown under "On entering")
+  Back: Spell: "until end of turn, whenever you tap a mountain for mana, add an additonal {r}."
+      -> (nothing changes)
 
 Pyromancer's Goggles | {5} | Legendary Artifact
 TEXT: {T}: Add {R}. When that mana is spent to cast a red instant or sorcery spell, copy that spell and you may choose new targets for the copy.
@@ -9267,7 +9299,7 @@ TEXT: Target creature you control deals damage equal to its power to target crea
 ABILITIES:
   Spell: "target creature you control deals damage equal to its power to target creature an opponent controls."
       -> Opp B: graveyard +1
-      -> Opp B's Bear left the battlefield
+      -> Opp B's Dragon left the battlefield
 
 Quick Study | {2}{U} | Instant
 TEXT: Draw two cards.
@@ -9304,8 +9336,9 @@ On entering:
       itself: 7/7 trample
       -> (nothing changes)
 ABILITIES:
-  Event(CombatDamageAny, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever a creature you control deals combat damage during your turn, put that many +1/+1 counters on it."
+  Event(CombatDamageAny, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if MyTurn]: "whenever a creature you control deals combat damage during your turn, put that many +1/+1 counters on it."
       -> Your Bear: 2/2 -> 5/5, +1/+1 counters +3
+      if the condition holds -> Your Bear: 2/2 -> 5/5, +1/+1 counters +3
   Static [may]: "you may cast ~ from your graveyard by removing six counters from among creatures you control in addition to paying its other costs."
       (static: shown under "On entering")
 
@@ -9650,7 +9683,7 @@ Restorative Technique | {2}{G} | Sorcery
 TEXT: Target player gains 2 life, then searches their library for a basic land card, puts it onto the battlefield tapped, then shuffles. Put a +1/+1 counter on up to one target creature.
 ABILITIES:
   Spell: "target player gains 2 life, then searches their library for a basic land card, puts it onto the battlefield tapped, then shuffles. put a +1/+1 counter on up to one target creature."
-      -> You: library -1
+      -> You: life +2, library -1
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
       -> You gets Forest
 
@@ -9711,7 +9744,8 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Attacks [may; may pays Sacrifice { types: 1, other: true } for effects 0..]: "whenever ~ attacks, you may sacrifice another creature. if you do, put a number of +1/+1 counters on ~ equal to the sacrificed creature's power."
-      (no effects read)
+      -> (nothing changes)
+      if the cost is paid -> (nothing changes)
   Dies: "when ~ dies, amass goblins x, where x is ~'s power."
       -> You gets Army token 3/3
 
@@ -9748,7 +9782,7 @@ Rise of the Deathbringer | {4}{B} | Instant
 TEXT: Choose one — / • Draw cards equal to the greatest power among creatures you control. You lose life equal to the number of cards drawn this way. / • All creatures get -3/-3 until end of turn.
 ABILITIES:
   Spell: "choose one —"
-      mode 1: You: hand +6, library -6
+      mode 1: You: life -6, hand +6, library -6
       mode 2: You: graveyard +2
       mode 2: Opp A: graveyard +2
       mode 2: Opp B: graveyard +2
@@ -9772,13 +9806,13 @@ ABILITIES:
   Spell [only if Not(Kicked)]: "create a token that's a copy of target creature."
       -> You gets Dragon (token copy) 6/6 with flying
       if the condition holds -> You gets Dragon (token copy) 6/6 with flying
-  Spell [only if Kicked]: "if ~ was kicked, create five of those tokens instead"
+  Spell [only if Kicked]: "create a token that's a copy of target creature. if ~ was kicked, create five of those tokens instead"
       -> (nothing changes)
-      if the condition holds -> You gets Rite of Replication (token copy)
-      if the condition holds -> You gets Rite of Replication (token copy)
-      if the condition holds -> You gets Rite of Replication (token copy)
-      if the condition holds -> You gets Rite of Replication (token copy)
-      if the condition holds -> You gets Rite of Replication (token copy)
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
 
 Rite of the Dragoncaller | {4}{R}{R} | Enchantment
 TEXT: Whenever you cast an instant or sorcery spell, create a 5/5 red Dragon creature token with flying.
@@ -9805,10 +9839,10 @@ Roads Go Ever, Ever On | {1}{W} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after IV.) / I — Search your library for up to two basic Plains cards, exile them, then shuffle. You gain 2 life. / II, III — Put a card exiled with this Saga into its owner's hand. / IV — Whenever you attack this turn, target creature you control gets +1/+1 until end of turn for each Plains you control.
 On entering:
       itself: 
-      -> You: life +2, hand +2, library -2
+      -> You: life +2, library -2, exile +2
 ABILITIES:
   Chapter(1): "i — search your library for up to two basic plains cards, exile them, then shuffle. you gain 2 life."
-      -> You: life +2, hand +2, library -2
+      -> You: life +2, library -2, exile +2
   Chapter(2): "ii, iii — put a card exiled with ~ into its owner's hand."
       -> (nothing changes)
   Chapter(3): "ii, iii — put a card exiled with ~ into its owner's hand."
@@ -9826,9 +9860,9 @@ ABILITIES:
       -> You: hand +1, library -1
       -> Your Robot Domination: other counters +1
   Reflexive: "when the third plan counter is put on ~, sacrifice it and create three 2/2 colorless robot villain artifact creature tokens."
-      -> You gets 2/2 token 2/2
-      -> You gets 2/2 token 2/2
-      -> You gets 2/2 token 2/2
+      -> You gets 2/2 villain robot token 2/2
+      -> You gets 2/2 villain robot token 2/2
+      -> You gets 2/2 villain robot token 2/2
 
 Rockfall Vale |  | Land
 TEXT: Rockfall Vale enters tapped unless you control two or more other lands. / {T}: Add {R} or {G}.
@@ -9863,7 +9897,7 @@ On entering:
 ABILITIES:
   Static: "~ enters tapped."
       (no effects read)
-  Event(OtherEnters, Filter { yours: Some(true), types: 0, not_types: 0, subtype: Some("forest"), other: false, nontoken: false, token: false, restr: Restr(subtype forest) }) [only if Chance(0.5)]: "whenever a forest you control enters, if you control at least five other forests, target creature you control gets +3/+3 until end of turn."
+  Event(OtherEnters, Filter { yours: Some(true), types: 0, not_types: 0, subtype: Some("forest"), other: false, nontoken: false, token: false, restr: Restr(subtype forest) }) [only if ControlCount(6, "forest")]: "whenever a forest you control enters, if you control at least five other forests, target creature you control gets +3/+3 until end of turn."
       -> (nothing changes)
       if the condition holds -> Your Dragon: 6/6 -> 9/9
   Activated (tap): "{t}: add {g}."
@@ -9875,21 +9909,18 @@ On entering:
       itself: 
       -> (nothing changes)
 ABILITIES:
-  Chapter(1) [only if Chance(0.5)]: "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
+  Chapter(1): "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
-  Chapter(2) [only if Chance(0.5)]: "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
+  Chapter(2): "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
-  Chapter(3) [only if Chance(0.5)]: "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
+  Chapter(3): "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
-  Chapter(4) [only if Chance(0.5)]: "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
+  Chapter(4): "i, ii, iii, iv — exile up to one target creature or land you control. if you do, return it to the battlefield under its owner's control at the beginning of the next end step."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
 
 Ronin, Shadow Stalker | {2}{B} | Legendary Creature — Human Rogue Hero | 3/3
 TEXT: Pay 2 life: Add two mana of any one color. Spend this mana only to cast Equipment spells or activate equip abilities. Activate only once each turn. / {T}, Sacrifice an Equipment attached to Ronin: Target creature gets -4/-4 until end of turn. Activate only as a sorcery.
+SIM: that mana only for equipment spells or abilities of equipment sources
 On entering:
       itself: 3/3 
       -> (nothing changes)
@@ -9981,7 +10012,7 @@ ABILITIES:
 
 Ruric Thar, Biomagus | {4}{U}{U} | Legendary Creature — Ogre Crab Wizard | 4/6
 TEXT: Flying / Prowess, prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn twice.) / Whenever Ruric Thar becomes the target of a spell or ability an opponent controls, draw a card.
-SIM: keywords flying, prowess
+SIM: keywords flying, prowess; prowess x2
 On entering:
       itself: 4/6 flying, prowess
       -> (nothing changes)
@@ -9991,7 +10022,7 @@ ABILITIES:
 
 Ruric Thar, Magecrusher | {5}{G}{G} | Legendary Creature — Ogre Warrior | 7/7
 TEXT: This spell can't be countered. / Reach, vigilance, trample / Ruric Thar has hexproof as long as they haven't dealt combat damage yet. (They can't be the target of spells or abilities your opponents control.)
-SIM: keywords reach, trample, vigilance
+SIM: keywords reach, trample, vigilance; can't be countered
 On entering:
       itself: 7/7 reach, trample, vigilance, hexproof
       -> (nothing changes)
@@ -10054,7 +10085,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(Scry, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [once each turn]: "whenever you scry or surveil, create a 1/1 colorless thopter artifact creature token with flying. this ability triggers only once each turn."
-      -> You gets 1/1 token 1/1 with flying
+      -> You gets 1/1 thopter token 1/1 with flying
 
 Samut, Hazoret's Champion | {1}{R} | Legendary Creature — Human Warrior Cleric | 2/2
 TEXT: Creatures you control have haste.
@@ -10226,7 +10257,7 @@ ABILITIES:
 
 Secluded Courtyard |  | Land
 TEXT: As Secluded Courtyard enters, choose a creature type. / {T}: Add {C}. / {T}: Add one mana of any color. Spend this mana only to cast a creature spell of the chosen type or activate an ability of a creature or creature card of the chosen type.
-SIM: makes mana (colour mask 0b111111, 1 at a time)
+SIM: makes mana (colour mask 0b111111, 1 at a time); that mana only for chosen creature spells or abilities of chosen creature sources (its {C} for anything)
 On entering:
       itself: 
       -> (nothing changes)
@@ -10242,9 +10273,12 @@ Secret Invasion | {1}{U}{U} | Enchantment — Aura
 TEXT: Enchant creature you control / When this Aura enters, exile up to one target creature other than enchanted creature until this Aura leaves the battlefield. Enchanted creature becomes a copy of that creature until this Aura leaves the battlefield. / Enchanted creature has ward {2}.
 On entering (attached to your Bear):
       itself: 6/6 flying
-      -> (nothing changes)
+      -> Opp A: exile +1
+      -> Opp A's Dragon left the battlefield
 ABILITIES:
   Enters: "when ~ enters, exile up to one target creature other than enchanted creature until ~ leaves the battlefield. enchanted creature becomes a copy of that creature until ~ leaves the battlefield."
+      -> Opp A: exile +1
+      -> Opp A's Dragon left the battlefield
       -> Your Secret Invasion: 0/0 -> 6/6, gains flying
   Static: "enchanted creature has ward {2}."
       (static: shown under "On entering")
@@ -10342,7 +10376,7 @@ ABILITIES:
 
 Shang-Chi, Master of Kung Fu | {1}{G} | Legendary Creature — Human Warrior Hero | 2/2
 TEXT: You may activate abilities of creatures you control as though those creatures had haste. / {T}: Add two mana of any one color. Spend this mana only to activate abilities of creature sources.
-SIM: makes mana (colour mask 0b011111, 2 at a time)
+SIM: makes mana (colour mask 0b011111, 2 at a time); that mana only for abilities of creature sources
 On entering:
       itself: 2/2 
       -> (nothing changes)
@@ -10436,12 +10470,10 @@ Silvan Reveler | {2}{G}{U} | Creature — Elf Citizen | 3/2
 TEXT: When this creature enters, draw a card, then discard a card. If you discard a land card this way, put it from your graveyard onto the battlefield tapped. / Landfall — Whenever a land you control enters, you may pay {1}{G}{U}. If you do, return this card from your graveyard to your hand.
 On entering:
       itself: 3/2 
-      -> You: library -2, graveyard +1
-      -> You gets Forest
+      -> You: library -1, graveyard +1
 ABILITIES:
   Enters: "when ~ enters, draw a card, then discard a card. if you discard a land card this way, put it from your graveyard onto the battlefield tapped."
-      -> You: library -2, graveyard +1
-      -> You gets Forest
+      -> You: library -1, graveyard +1
   Event(Landfall, Filter { yours: Some(true), types: 16, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may; may pays Mana(Mana { generic: 1, pips: [0, 1, 0, 0, 1], x: false, colorless: 0, hybrid: [0, 0, 0] }) for effects 0..]: "whenever a land you control enters, you may pay {1}{g}{u}. if you do, return ~ from your graveyard to your hand."
       -> You: hand +1, graveyard -1
       -> Your Plains: tapped
@@ -10590,7 +10622,7 @@ ABILITIES:
   Enters: "when ~ enters, create x tapped treasure tokens, where x is the number of artifacts your opponents control."
       -> You gets Treasure token
       -> You gets Treasure token
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if Chance(0.5)]: "whenever you cast a spell, if mana from a treasure was spent to cast it, you draw a card and lose 1 life."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if TreasureSpent]: "whenever you cast a spell, if mana from a treasure was spent to cast it, you draw a card and lose 1 life."
       -> (nothing changes)
       if the condition holds -> You: life -1, hand +1, library -1
 
@@ -10733,8 +10765,7 @@ Sound the Trumpets | {1}{U}{U} | Instant
 TEXT: Counter target spell. If that spell's mana value was 2 or less, recruit. (Draw a card, then discard a card. If you discarded a nonland card, create a 1/1 white Human Soldier creature token.)
 ABILITIES:
   Spell: "counter target spell. if that spell's mana value was 2 or less, recruit."
-      -> You: library -1, graveyard +1
-      -> You gets 1/1 human soldier token 1/1
+      -> (nothing changes)
 
 Sower of Chaos | {3}{R} | Creature — Devil | 4/3
 TEXT: {2}{R}: Target creature can't block this turn.
@@ -10800,7 +10831,7 @@ ABILITIES:
 
 Sphinx of the Final Word | {5}{U}{U} | Creature — Sphinx | 5/5
 TEXT: This spell can't be countered. / Flying, hexproof / Instant and sorcery spells you control can't be countered.
-SIM: keywords flying, hexproof
+SIM: keywords flying, hexproof; can't be countered
 On entering:
       itself: 5/5 flying, hexproof
       -> (nothing changes)
@@ -10815,8 +10846,7 @@ TEXT: Draw two cards. Then you may exile this spell and four cards named Sphinx'
 ABILITIES:
   Spell [may; may pays ExileNamed(4) for effects 1..]: "draw two cards. then you may exile ~ and four cards named ~ from your graveyard. if you do, search your library for a sphinx creature card, put it onto the battlefield, then shuffle."
       -> You: hand +2, library -2
-      if the cost is paid -> You: hand +2, library -3
-      if the cost is paid -> You gets Ogre 3/3
+      if the cost is paid -> You: hand +2, library -2
   Spell: "a deck can have any number of cards named ~."
       (no effects read)
 
@@ -10886,7 +10916,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Activated (3 mana) [may]: "{2}{w}: look at the top four cards of your library. you may reveal a creature card with power 2 or less from among them and put it into your hand. put the rest on the bottom of your library in a random order."
-      -> You: hand +1, library -1
+      -> (nothing changes)
 
 Stab | {B} | Instant
 TEXT: Target creature gets -2/-2 until end of turn.
@@ -10972,10 +11002,11 @@ TEXT: Flash / When Sting enters, put a hone counter on Sting for each creature t
 SIM: keywords flash; equip {3}
 On entering (attached to your Bear):
       itself: flash
-      -> (nothing changes)
+      -> Your Dragon: 6/6 -> 10/6
 ABILITIES:
   Enters: "when ~ enters, put a hone counter on ~ for each creature target opponent controls. attach ~ to up to one target creature you control."
-      -> Your Sting, Bilbo's Sword: other counters +1
+      -> Your Dragon: 6/6 -> 10/6
+      -> Your Sting, Bilbo's Sword: other counters +4
 
 Stingcaster Mage | {1}{R} | Creature — Human Wizard | 2/1
 TEXT: Haste / When this creature enters, target instant or sorcery card in your graveyard gains flashback until end of turn. The flashback cost is equal to its mana cost. (You may cast that card from your graveyard for its flashback cost. Then exile it.)
@@ -11061,12 +11092,12 @@ Stone-Giant of High Pass | {5}{R}{R} | Creature — Giant | 7/7
 TEXT: Whenever this creature enters or attacks, create a 3/1 colorless Wall artifact creature token with defender named Stone Boulder. / {2}{R}, Sacrifice an artifact: This creature deals 4 damage to any target.
 On entering:
       itself: 7/7 
-      -> You gets 3/1 token 3/1 with defender
+      -> You gets 3/1 wall token 3/1 with defender
 ABILITIES:
   Enters: "whenever ~ enters or attacks, create a 3/1 colorless wall artifact creature token with defender named stone boulder."
-      -> You gets 3/1 token 3/1 with defender
+      -> You gets 3/1 wall token 3/1 with defender
   Attacks: "whenever ~ enters or attacks, create a 3/1 colorless wall artifact creature token with defender named stone boulder."
-      -> You gets 3/1 token 3/1 with defender
+      -> You gets 3/1 wall token 3/1 with defender
   Activated (3 mana, sacrifice another): "{2}{r}, sacrifice an artifact: ~ deals 4 damage to any target."
       -> Opp B: graveyard +1
       -> Opp B's Knight left the battlefield
@@ -11151,7 +11182,7 @@ On entering:
 ABILITIES:
   Enters [only if AttackedThisTurn; may]: "when ~ enters, if you attacked this turn, exile the top two cards of your library. choose one of them. until the end of your next turn, you may play that card."
       -> (nothing changes)
-      if the condition holds -> You: hand +1, library -1
+      if the condition holds -> You: hand +1, library -2, exile +1
 
 Subterranean Cavern |  | Land
 TEXT: This land enters tapped. / When this land enters, you gain 1 life. / {T}: Add {B} or {G}.
@@ -11234,15 +11265,15 @@ ABILITIES:
 Super-Adaptoid | {2} | Legendary Artifact Creature — Robot Villain | */2
 TEXT: Super-Adaptoid's power is equal to the number of legendary creatures you control. / Whenever Super-Adaptoid enters or attacks, choose another target creature. If that creature has haste and Super-Adaptoid doesn't, put a haste counter on Super-Adaptoid. Do the same for flying, first strike, double strike, deathtouch, indestructible, lifelink, menace, reach, trample, and vigilance.
 On entering:
-      itself: 1/2 haste
+      itself: 1/2 flying
       -> (nothing changes)
 ABILITIES:
   Static: "~'s power is equal to the number of legendary creatures you control."
       (no effects read)
   Enters: "whenever ~ enters or attacks, choose another target creature. if that creature has haste and ~ doesn't, put a haste counter on ~. do the same for flying, first strike, double strike, deathtouch, indestructible, lifelink, menace, reach, trample, and vigilance."
-      -> Your Super-Adaptoid: gains haste
+      -> Your Super-Adaptoid: gains flying
   Attacks: "whenever ~ enters or attacks, choose another target creature. if that creature has haste and ~ doesn't, put a haste counter on ~. do the same for flying, first strike, double strike, deathtouch, indestructible, lifelink, menace, reach, trample, and vigilance."
-      -> Your Super-Adaptoid: gains haste
+      -> Your Super-Adaptoid: gains flying
 
 Super-Skrull | {1}{B}{B}{B} | Legendary Creature — Skrull Shapeshifter Villain | 4/5
 TEXT: Flying / {2}{W}: Create a 0/4 colorless Wall creature token with defender. / {3}{G}: Super-Skrull gets +4/+4 until end of turn. / {4}{R}: Super-Skrull deals 4 damage to target creature. / {5}{U}: Target player draws four cards.
@@ -11270,15 +11301,13 @@ ABILITIES:
   Static: "enchanted creature gets +2/+2, has first strike and vigilance, and is a legendary soldier in addition to its other types."
       (static: shown under "On entering")
   Event(EachAttacker, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever enchanted creature attacks or blocks, attach any number of target equipment you control to it."
-      -> Your Bear: 4/4 -> 2/2, loses first strike, vigilance
-      -> Your Dragon: 6/6 -> 8/8, gains first strike, vigilance
+      -> (nothing changes)
 
 Supper for Spiders | {1}{B} | Instant
 TEXT: Put onto the battlefield under your control all creature cards in your opponents' graveyards that were put there from the battlefield this turn. They are Food artifacts with "{2}, {T}, Sacrifice this artifact: You gain 3 life." (They lose all other types and subtypes.)
 ABILITIES:
   Spell: "put onto the battlefield under your control all creature cards in your opponents' graveyards that were put there from the battlefield this turn. they are food artifacts with "{2}, {t}, sacrifice ~: you gain 3 life.""
-      -> You: graveyard -1
-      -> You gets Dragon 6/6 with flying
+      -> (nothing changes)
 
 Sure Strike | {1}{R} | Instant
 TEXT: Target creature gets +3/+0 and gains first strike until end of turn. (It deals combat damage before creatures without first strike.)
@@ -11504,6 +11533,7 @@ ABILITIES:
 
 Taurean Mauler | {2}{R} | Creature — Shapeshifter | 2/2
 TEXT: Changeling (This card is every creature type.) / Whenever an opponent casts a spell, you may put a +1/+1 counter on Taurean Mauler.
+SIM: changeling
 On entering:
       itself: 2/2 
       -> (nothing changes)
@@ -11683,16 +11713,16 @@ On entering:
       itself: 1/1 
       -> You: graveyard +1
       -> Your Plains left the battlefield
-      -> You gets Other token
-      -> You gets Other token
+      -> You gets Heartwood token
+      -> You gets Heartwood token
 ABILITIES:
   Enters [may; may pays Sacrifice { types: 16, other: false } for effects 0..]: "when ~ enters, you may sacrifice a land. if you do, create two tapped heartwood tokens."
       -> You: graveyard +1
       -> Your Plains left the battlefield
-      -> You gets Other token
-      -> You gets Other token
-      if the cost is paid -> You gets Other token
-      if the cost is paid -> You gets Other token
+      -> You gets Heartwood token
+      -> You gets Heartwood token
+      if the cost is paid -> You gets Heartwood token
+      if the cost is paid -> You gets Heartwood token
   Activated (tap 2 untapped artifacts): "tap two untapped artifacts you control: put two +1/+1 counters on ~."
       -> Your Tenured Tethermage: 1/1 -> 3/3, +1/+1 counters +2
 
@@ -11837,7 +11867,7 @@ On entering:
 ABILITIES:
   Event(Draw, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever you draw a card, put a +1/+1 counter on ~."
       -> Your The Astonishing Ant-Man: 1/1 -> 2/2, +1/+1 counters +1
-  Activated (3 mana, remove 1 +1/+1 counter(s), tap): "{2}{g}, {t}, remove any number of +1/+1 counters from ~: create that many 1/1 green insect creature tokens."
+  Activated (3 mana, remove any number of +1/+1 counters (X), tap): "{2}{g}, {t}, remove any number of +1/+1 counters from ~: create that many 1/1 green insect creature tokens."
       -> (nothing changes)
 
 The Black Arrow | {3} | Legendary Artifact — Equipment
@@ -11888,9 +11918,8 @@ TEXT: Kicker {2}{W}{W} (You may pay an additional {2}{W}{W} as you cast this spe
 SIM: kicker {2}{W}{W}
 ABILITIES:
   Spell: "choose target creature you own. return each chosen creature to your hand. at the beginning of the next upkeep, create a 4/4 white bird soldier creature token with flying for each creature returned to your hand this way."
-      -> You gets 4/4 soldier bird token 4/4 with flying
-      -> You gets 4/4 soldier bird token 4/4 with flying
-      -> You gets 4/4 soldier bird token 4/4 with flying
+      -> You: hand +1
+      -> Your Bear left the battlefield
 
 The Echoverse Fulcrum | {2} | Legendary Artifact
 TEXT: When The Echoverse Fulcrum enters, draw a card, then discard a card. / {5}, {T}, Exile The Echoverse Fulcrum: Destroy all creatures. Activate only as a sorcery.
@@ -12006,32 +12035,31 @@ ABILITIES:
       -> (nothing changes)
   Activated (6 mana, tap): "{5}{w}, {t}: harness ~."
       -> (nothing changes)
-  Phase { phase: End, any_player: false, opponents_only: false } [only if Chance(0.5)]: "at the beginning of your end step, exile up to one other target nonland permanent you control, then return that card to the battlefield under its owner's control."
+  Phase { phase: End, any_player: false, opponents_only: false }: "at the beginning of your end step, exile up to one other target nonland permanent you control, then return that card to the battlefield under its owner's control."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
 
 The Misty Mountains Cold | {2}{R} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after IV.) / I, II, III, IV — Create a Treasure token. Then if you control four or more Treasures, sacrifice this Saga. If you do, create a 6/6 red Dragon creature token with flying. (A Treasure token is an artifact with "{T}, Sacrifice this token: Add one mana of any color.)
 On entering:
       itself: 
-      -> (nothing changes)
+      -> You gets Treasure token
 ABILITIES:
-  Chapter(1) [only if Treasures(4); pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
-      -> (nothing changes)
-      if the condition holds -> You gets Treasure token
-      if the condition holds -> You gets 6/6 dragon token 6/6 with flying
-  Chapter(2) [only if Treasures(4); pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
-      -> (nothing changes)
-      if the condition holds -> You gets Treasure token
-      if the condition holds -> You gets 6/6 dragon token 6/6 with flying
-  Chapter(3) [only if Treasures(4); pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
-      -> (nothing changes)
-      if the condition holds -> You gets Treasure token
-      if the condition holds -> You gets 6/6 dragon token 6/6 with flying
-  Chapter(4) [only if Treasures(4); pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
-      -> (nothing changes)
-      if the condition holds -> You gets Treasure token
-      if the condition holds -> You gets 6/6 dragon token 6/6 with flying
+  Chapter(1) [pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
+      -> You gets Treasure token
+      if the cost is paid -> You gets Treasure token
+      if the cost is paid -> You gets 6/6 dragon token 6/6 with flying
+  Chapter(2) [pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
+      -> You gets Treasure token
+      if the cost is paid -> You gets Treasure token
+      if the cost is paid -> You gets 6/6 dragon token 6/6 with flying
+  Chapter(3) [pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
+      -> You gets Treasure token
+      if the cost is paid -> You gets Treasure token
+      if the cost is paid -> You gets 6/6 dragon token 6/6 with flying
+  Chapter(4) [pays SacrificeSelf for effects 1..]: "i, ii, iii, iv — create a treasure token. then if you control four or more treasures, sacrifice ~. if you do, create a 6/6 red dragon creature token with flying."
+      -> You gets Treasure token
+      if the cost is paid -> You gets Treasure token
+      if the cost is paid -> You gets 6/6 dragon token 6/6 with flying
 
 The Mountain-king's Return | {2}{W} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.) / I — Recruit. (Draw a card, then discard a card. If you discarded a nonland card, create a 1/1 white Human Soldier creature token.) / II — Return target creature card with mana value 3 or less from your graveyard to the battlefield. / III — Put a +1/+1 counter on up to one target creature.
@@ -12264,7 +12292,7 @@ ABILITIES:
 
 Theorist's Proxy | {1}{U} | Creature — Illusion | 0/3
 TEXT: Flash / When this creature enters, empower Jace 3. (Put three loyalty counters on a Jace token you control. If you don't control one, first create a blue Jace planeswalker token with "[-1]: Surveil 1" and "[-3]: Draw a card.") / {U}, Sacrifice this creature: The next spell you cast this turn can't be countered.
-SIM: keywords flash
+SIM: keywords flash; can't be countered
 On entering:
       itself: 0/3 flash
       -> You gets Jace token
@@ -12334,7 +12362,7 @@ ABILITIES:
 
 Thor Odinson | {3}{R}{W} | Legendary Creature — God Warrior Hero | 4/4
 TEXT: Flying, vigilance, prowess, prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of turn twice.)
-SIM: keywords flying, vigilance, prowess
+SIM: keywords flying, vigilance, prowess; prowess x2
 On entering:
       itself: 4/4 flying, vigilance, prowess
       -> (nothing changes)
@@ -12385,7 +12413,7 @@ ABILITIES:
   Enters [only if Control("equipment", false)]: "when ~ enters, attach any number of target equipment you control to target creature you control. when one or more equipment become attached to that creature this way, that creature deals damage equal to its power to up to one target creature."
       -> (nothing changes)
       if the condition holds -> Opp B: graveyard +1
-      if the condition holds -> Opp B's Bear left the battlefield
+      if the condition holds -> Opp B's Dragon left the battlefield
 
 Thornweald Archer | {1}{G} | Creature — Elf Archer | 2/1
 TEXT: Reach, deathtouch
@@ -12471,6 +12499,7 @@ ABILITIES:
 
 Three Tree Mascot | {2} | Artifact Creature — Shapeshifter | 2/1
 TEXT: Changeling (This card is every creature type.) / {1}: Add one mana of any color. Activate only once each turn.
+SIM: changeling
 On entering:
       itself: 2/1 
       -> (nothing changes)
@@ -12654,7 +12683,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Activated (1 mana, tap) [may]: "{1}, {t}: look at the top four cards of your library. you may reveal an artifact card from among them and put it into your hand. put the rest on the bottom of your library in a random order."
-      -> You: hand +1, library -1
+      -> (nothing changes)
   Activated (6 mana, sorcery speed): "{4}{u}{r}: transform ~. activate only as a sorcery."
       (no effects read)
   Back: Phase { phase: Combat, any_player: false, opponents_only: false } [may]: "at the beginning of combat on your turn, you may put an artifact card from your hand onto the battlefield. if it's an equipment, attach it to ~."
@@ -12666,7 +12695,7 @@ SIM: teamwork 4
 ABILITIES:
   Spell: "choose target creature card in your graveyard with mana value 4 or less. return the chosen card to the battlefield."
       -> You: graveyard -1
-      -> You gets Dragon 6/6 with flying
+      -> You gets Ogre 3/3
 
 Tragic Banshee | {4}{B} | Creature — Spirit | 5/3
 TEXT: Morbid — When this creature enters, target creature an opponent controls gets -1/-1 until end of turn. If a creature died this turn, that creature gets -13/-13 instead.
@@ -12874,23 +12903,24 @@ ABILITIES:
 U.S.Agent, John Walker | {3}{W/B} | Legendary Creature — Human Soldier Hero | 3/2
 TEXT: When U.S.Agent enters, create a colorless Equipment artifact token named Sturdy Shield with "Equipped creature gets +1/+2" and equip {2}. Attach it to U.S.Agent.
 On entering:
-      itself: 3/2 
-      -> You gets Other token
+      itself: 4/4 
+      -> You gets Equipment token (+1/+2)
 ABILITIES:
   Enters: "when ~ enters, create a colorless equipment artifact token named sturdy shield with "equipped creature gets +1/+2" and equip {2}. attach it to ~."
-      -> You gets Other token
+      -> Your U.S.Agent, John Walker: 3/2 -> 4/4
+      -> You gets Equipment token (+1/+2)
 
 Uldaros Theorix | {3}{U}{B}{B} | Legendary Creature — Elder Sphinx | 5/5
 TEXT: Flying / When Uldaros Theorix enters, if you cast him, exile up to one target nonland card of each card type from your graveyard. Copy those cards. You may cast any number of spells with total mana value 6 or less from among the copies without paying their mana costs. (Permanent spells cast this way become tokens.)
 SIM: keywords flying
 On entering:
       itself: 5/5 flying
-      -> You: hand -1
-      -> You gets Bear 2/2
+      -> (nothing changes)
 ABILITIES:
-  Enters [may]: "when ~ enters, if you cast him, exile up to one target nonland card of each card type from your graveyard. copy those cards. you may cast any number of spells with total mana value 6 or less from among the copies without paying their mana costs."
-      -> You: hand -1
-      -> You gets Bear 2/2
+  Enters [only if WasCast; may]: "when ~ enters, if you cast him, exile up to one target nonland card of each card type from your graveyard. copy those cards. you may cast any number of spells with total mana value 6 or less from among the copies without paying their mana costs."
+      -> (nothing changes)
+      if the condition holds -> You: graveyard -1, exile +1
+      if the condition holds -> You gets Dragon (token copy) 6/6 with flying
 
 Ultron Drone | {3} | Artifact Creature — Robot Villain | 2/3
 TEXT: Power-up — {6}: Put two +1/+1 counters on this creature and create a 2/2 colorless Robot Villain artifact creature token. (Activate each power-up ability only once. Reduce the cost by its mana cost if it entered this turn.)
@@ -12900,7 +12930,7 @@ On entering:
 ABILITIES:
   PowerUp(Mana { generic: 6, pips: [0, 0, 0, 0, 0], x: false, colorless: 0, hybrid: [0, 0, 0] }) [once]: "{6}: put two +1/+1 counters on ~ and create a 2/2 colorless robot villain artifact creature token."
       -> Your Ultron Drone: 2/3 -> 4/5, +1/+1 counters +2
-      -> You gets 2/2 token 2/2
+      -> You gets 2/2 villain robot token 2/2
 
 Ultron, Artificial Malevolence | {3} | Legendary Artifact Creature — Robot Villain | 2/4
 TEXT: Whenever another nontoken artifact you control enters, you may pay {2}. If you do, create a token that's a copy of it. If the token isn't a creature, it becomes a 2/2 Robot Villain creature in addition to its other types.
@@ -13183,7 +13213,7 @@ On entering:
 ABILITIES:
   Event(OtherEnters, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: true, nontoken: false, token: false }): "whenever another creature you control enters, ~ gains deathtouch until end of turn."
       -> Your Venom Connoisseur: gains deathtouch
-  Event(OtherEnters, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: true, nontoken: false, token: false }) [only if Chance(0.5)]: "whenever another creature you control enters, if this is the second time this ability has resolved this turn, all creatures you control gain deathtouch until end of turn"
+  Event(OtherEnters, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: true, nontoken: false, token: false }) [only if NthResolution(2)]: "whenever another creature you control enters, if this is the second time this ability has resolved this turn, all creatures you control gain deathtouch until end of turn"
       -> (nothing changes)
       if the condition holds -> Your Bear: gains deathtouch
       if the condition holds -> Your Ogre: gains deathtouch
@@ -13267,7 +13297,7 @@ ABILITIES:
 
 Villainous Hideout |  | Land
 TEXT: {T}: Add {C}. / {T}: Add one mana of any color. Spend this mana only to cast a Villain spell or to activate an ability of a Villain source. / {3}, {T}: Target Villain you control connives. Activate only as a sorcery. (Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1 counter on that creature.)
-SIM: makes mana (colour mask 0b111111, 1 at a time)
+SIM: makes mana (colour mask 0b111111, 1 at a time); that mana only for villain spells or abilities of villain sources (its {C} for anything)
 On entering:
       itself: 
       -> (nothing changes)
@@ -13434,7 +13464,7 @@ ABILITIES:
   Static: "artifact creatures you control have vigilance."
       (static: shown under "On entering")
   Event(Cast, Filter { yours: Some(true), types: 0, not_types: 1, subtype: None, other: false, nontoken: false, token: false, restr: Restr(not creature) }): "whenever you cast a noncreature spell, create a 1/1 colorless sculpture treasure artifact creature token with "{t}, sacrifice ~: add one mana of any color.""
-      -> You gets 1/1 token 1/1
+      -> You gets 1/1 treasure sculpture token 1/1 with vigilance
 
 Vraska, the Cutting Glare | {B}{B}{G} | Legendary Creature — Gorgon Assassin | 4/4
 TEXT: Deathtouch / When Vraska enters, if you control six or more lands, destroy target permanent an opponent controls. They create a Treasure token. (It's an artifact with "{T}, Sacrifice this token: Add one mana of any color.")
@@ -13447,6 +13477,7 @@ ABILITIES:
       -> (nothing changes)
       if the condition holds -> Opp A: graveyard +1
       if the condition holds -> Opp A's Dragon left the battlefield
+      if the condition holds -> Opp A gets Treasure token
 
 Wakandan Drone Flock | {3}{W} | Artifact Creature — Robot | 3/3
 TEXT: Flying / When this creature enters, scry 2. (Look at the top two cards of your library, then put any number of them on the bottom and the rest on top in any order.)
@@ -13465,12 +13496,8 @@ On entering:
       itself: 4/4 vigilance
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
 ABILITIES:
-  Enters [only if Not(Chance(0.5))]: "when ~ enters, put a +1/+1 counter on target creature."
+  Enters: "when ~ enters, put a +1/+1 counter on target creature."
       -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
-      if the condition holds -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
-  Enters [only if Chance(0.5)]: "when ~ enters, if that creature is another hero, put two +1/+1 counters on it instead"
-      -> (nothing changes)
-      if the condition holds -> Your Wakandan Royal Guard: 4/4 -> 6/6, +1/+1 counters +2
 
 War Machine, Legacy of Iron | {2}{R/W} | Legendary Artifact Creature — Human Hero | 1/3
 TEXT: Flying / At the beginning of combat on your turn, another target creature you control gets +X/+0 until end of turn, where X is War Machine's power.
@@ -13567,7 +13594,7 @@ On entering:
 ABILITIES:
   Enters: "when ~ enters, empower jace 5."
       -> You gets Jace token
-  Static [only if Chance(0.5); may; may pays Sacrifice { types: 1, other: false } for effects 1..]: "planeswalkers you control have "[-2]: you may sacrifice a creature. if you do, create a 4/4 green beast creature token with trample.""
+  Static [may; may pays Sacrifice { types: 1, other: false } for effects 1..]: "planeswalkers you control have "[-2]: you may sacrifice a creature. if you do, create a 4/4 green beast creature token with trample.""
       (static: shown under "On entering")
 
 Way of the Healer | {3}{W} | Legendary Enchantment
@@ -13600,7 +13627,7 @@ On entering:
 ABILITIES:
   Enters: "when ~ enters, empower jace 5."
       -> You gets Jace token
-  Event(LoyaltyActivated, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if Chance(0.5)]: "whenever you activate a loyalty ability, if you removed two or more loyalty counters to activate it, draw a card."
+  Event(LoyaltyActivated, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if LoyaltyCostAtLeast(2)]: "whenever you activate a loyalty ability, if you removed two or more loyalty counters to activate it, draw a card."
       -> (nothing changes)
       if the condition holds -> You: hand +1, library -1
 
@@ -13663,9 +13690,8 @@ We Say Thee Nay! | {1}{U} | Instant — Arcane
 TEXT: Teamwork 2 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 2 or more.) / Counter target spell unless its controller pays {2}. Counter that spell unless its controller pays {4} instead if this spell was cast using teamwork.
 SIM: teamwork 2
 ABILITIES:
-  Spell [only if Teamwork]: "counter target spell unless its controller pays {2}. counter that spell unless its controller pays {4} instead if ~ was cast using teamwork."
+  Spell: "counter target spell unless its controller pays {2}. counter that spell unless its controller pays {4} instead if ~ was cast using teamwork."
       -> (nothing changes)
-      if the condition holds -> (nothing changes)
 
 Web Up | {2}{W} | Enchantment
 TEXT: When this enchantment enters, exile target nonland permanent an opponent controls until this enchantment leaves the battlefield.
@@ -13699,7 +13725,7 @@ On entering:
 ABILITIES:
   Static: "~ enters prepared."
       (static: shown under "On entering")
-  Static [only if Chance(0.5)]: "as long as an opponent was dealt noncombat damage this turn, ~ has flying and haste."
+  Static [only if OpponentNoncombatDamaged]: "as long as an opponent was dealt noncombat damage this turn, ~ has flying and haste."
       (static: shown under "On entering")
   Back: Spell: "~ deals 1 damage to target opponent."
       -> Opp B: life -1
@@ -13713,7 +13739,7 @@ On entering:
 ABILITIES:
   Static: "~ enters tapped."
       (no effects read)
-  Attacks [only if Chance(0.5)]: "whenever ~ attacks, if he's equipped, each opponent loses x life and you gain x life, where x is the number of equipment attached to him."
+  Attacks [only if Equipped]: "whenever ~ attacks, if he's equipped, each opponent loses x life and you gain x life, where x is the number of equipment attached to him."
       -> (nothing changes)
       if the condition holds -> (nothing changes)
 
@@ -13753,7 +13779,7 @@ Widow's Bite | {1}{B} | Instant
 TEXT: Teamwork 3 (As an additional cost to cast this spell, you may tap any number of creatures you control with total power 3 or more.) / Choose one. If this spell was cast using teamwork, choose both instead. / • Target creature gains deathtouch until end of turn. / • Target creature gets -2/-2 until end of turn.
 SIM: teamwork 3
 ABILITIES:
-  Spell [only if Teamwork]: "choose one. if ~ was cast using teamwork, choose both instead."
+  Spell: "choose one. if ~ was cast using teamwork, choose both instead."
       mode 1: Your Dragon: gains deathtouch
       mode 2: Opp A's Dragon: 6/6 -> 4/4
 
@@ -13821,9 +13847,9 @@ On entering:
 ABILITIES:
   Static: "other green creatures you control get +1/+1."
       (static: shown under "On entering")
-  Static [only if Not(Chance(0.5))]: "other white creatures you control get +1/+1."
+  Static: "other white creatures you control get +1/+1."
       (static: shown under "On entering")
-  Static [only if Chance(0.5)]: "if a spell or ability an opponent controls causes you to discard ~, put it onto the battlefield instead of putting it into your graveyard."
+  Static: "if a spell or ability an opponent controls causes you to discard ~, put it onto the battlefield instead of putting it into your graveyard."
       (static: shown under "On entering")
 
 Wind-Scarred Crag |  | Land
@@ -13905,7 +13931,7 @@ ABILITIES:
 
 Wizard's Staff | {1}{U} | Artifact — Equipment
 TEXT: Equipped creature has prowess. (Whenever its controller casts a noncreature spell, that creature gets +1/+1 until end of turn.) / If an ability of equipped creature triggers, that ability triggers an additional time. / Equip Wizard {1} / Equip {3}
-SIM: equip {1}
+SIM: equip {3}; equip wizard {1}
 On entering (attached to your Bear):
       itself: 
       -> Your Bear: gains prowess
@@ -13954,7 +13980,7 @@ ABILITIES:
 
 Woodland Weavemaster | {1}{G} | Creature — Elf Druid | 1/2
 TEXT: Vigilance / Whenever another Elf you control enters, this creature gets +1/+1 until end of turn. / {T}: Add X mana of any one color, where X is this creature's power. Spend this mana only to cast Elf spells and activate abilities of Elf sources.
-SIM: keywords vigilance; makes mana (colour mask 0b011111, 3 at a time)
+SIM: keywords vigilance; makes mana (colour mask 0b011111, 3 at a time); that mana only for elf spells or abilities of elf sources
 On entering:
       itself: 1/2 vigilance
       -> (nothing changes)
@@ -13974,7 +14000,7 @@ ABILITIES:
       -> (nothing changes)
       if the condition holds -> (nothing changes)
   Back: Spell: "create a heartwood token."
-      -> You gets Other token
+      -> You gets Heartwood token
 
 World War Hulk | {3}{G}{G} | Enchantment — Saga
 TEXT: (As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.) / I — The next red or green creature spell you cast this turn can be cast without paying its mana cost. / II — Put three +1/+1 counters on target creature you control. / III — Choose target creature you control. Until end of turn, double its power and toughness and it gains trample.
@@ -13989,16 +14015,15 @@ ABILITIES:
   Chapter(2): "ii — put three +1/+1 counters on target creature you control."
       -> Your Dragon: 6/6 -> 9/9, +1/+1 counters +3
   Chapter(3): "iii — choose target creature you control. until end of turn, double its power and toughness and it gains trample."
-      -> Your Dragon: 6/6 -> 12/12
-      -> Your World War Hulk: gains trample
+      -> Your Dragon: 6/6 -> 12/12, gains trample
 
 Worlds Within Worlds | {5}{G}{U} | Sorcery
 TEXT: Exile all creatures. Each player may put any number of creature cards from their hand onto the battlefield. Then put all cards exiled this way into their owners' hands. Exile Worlds Within Worlds.
 ABILITIES:
   Spell: "exile all creatures. each player may put any number of creature cards from their hand onto the battlefield. then put all cards exiled this way into their owners' hands. exile ~."
-      -> You: exile +4
-      -> Opp A: exile +4
-      -> Opp B: exile +4
+      -> You: hand +1
+      -> Opp A: hand +1
+      -> Opp B: hand +1
       -> Your Bear left the battlefield
       -> Your Ogre left the battlefield
       -> Your Knight left the battlefield
@@ -14011,6 +14036,15 @@ ABILITIES:
       -> Opp B's Ogre left the battlefield
       -> Opp B's Knight left the battlefield
       -> Opp B's Dragon left the battlefield
+      -> You gets Bear 2/2
+      -> You gets Bear 2/2
+      -> You gets Bear 2/2
+      -> Opp A gets Bear 2/2
+      -> Opp A gets Bear 2/2
+      -> Opp A gets Bear 2/2
+      -> Opp B gets Bear 2/2
+      -> Opp B gets Bear 2/2
+      -> Opp B gets Bear 2/2
 
 Worn Powerstone | {3} | Artifact
 TEXT: Worn Powerstone enters tapped. / {T}: Add {C}{C}.
@@ -14076,7 +14110,7 @@ ABILITIES:
   Static: "if one or more +1/+1 counters would be put on a creature you control, that many plus one +1/+1 counters are put on it instead."
       (static: shown under "On entering")
   Activated (6 mana): "{6}: put a +1/+1 counter on target legendary creature."
-      -> Your Yoshimaru, Beloved Companion: 2/2 -> 3/3, +1/+1 counters +1
+      -> Your Yoshimaru, Beloved Companion: 2/2 -> 4/4, +1/+1 counters +2
 
 Yoshimaru, Scrappy Stray | {1}{G} | Legendary Creature — Dog | 1/1
 TEXT: When Yoshimaru enters, another target creature you control fights up to one target creature an opponent controls. (Each deals damage equal to its power to the other.) / {6}: Put a +1/+1 counter on target nonlegendary creature.
@@ -14128,7 +14162,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Enters: "when ~ enters, choose one —"
-      mode 1: (nothing changes)
+      mode 1: Opp A's Dragon: 6/6 -> 4/6
       mode 2: (nothing changes)
 
 Zetalpa, Primal Dawn | {6}{W}{W} | Legendary Creature — Elder Dinosaur | 4/8

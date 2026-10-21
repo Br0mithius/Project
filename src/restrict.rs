@@ -1019,6 +1019,7 @@ pub fn object_restr(text: &str) -> Restr {
     }
     // The card a "return"/"put" moves; else one a search or choice finds.
     let mut best: Option<Restr> = None;
+    let mut from_exile = false;
     for c in card.captures_iter(text) {
         let verb = c.get(0).map(|m| m.as_str()).unwrap_or("");
         let phrase = &c[1];
@@ -1026,10 +1027,28 @@ pub fn object_restr(text: &str) -> Restr {
         if verb.starts_with("exile") && best.is_some() {
             continue;
         }
-        let r = Restr::read(phrase);
+        // "Return the chosen card / that card": the one chosen before.
         let moves = verb.starts_with("return") || verb.starts_with("put");
-        if best.is_none() || moves {
+        let back = ["the chosen card", "that card", "those cards", "the exiled card"]
+            .iter()
+            .any(|w| phrase.trim().starts_with(w));
+        if moves && best.is_some() && back {
+            break;
+        }
+        // "Choose target creature card in your graveyard with mana value 4 or less": the
+        // whole sentence says what fits.
+        let r = if verb.starts_with("choose") {
+            let start = c.get(1).map_or(0, |m| m.start());
+            Restr::read(text[start..].split(". ").next().unwrap_or(phrase))
+        } else {
+            Restr::read(phrase)
+        };
+        // "Exile ~ and four cards named ~ ... If you do, search your library for a Sphinx
+        // creature card": the search is what finds a card.
+        let search = verb.starts_with("search") && from_exile;
+        if best.is_none() || moves || search {
             best = Some(r);
+            from_exile = verb.starts_with("exile");
             if moves {
                 break;
             }

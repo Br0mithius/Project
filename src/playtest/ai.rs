@@ -122,6 +122,9 @@ fn perm_value_uncached(g: &Game, i: usize) -> f32 {
         Tok::Clue => return 1.0,
         Tok::Food | Tok::Map => return 0.5,
         Tok::Blood => return 0.4,
+        Tok::Heartwood => return 1.5,
+        Tok::Lotus => return 1.5,
+        Tok::Equip(p, t) => return 0.5 + 0.8 * p as f32 + 0.4 * t as f32,
         Tok::Jace => return 1.0 + x.loyalty as f32 * 0.5,
         _ => 0.0,
     };
@@ -585,7 +588,7 @@ fn lands_in_play(g: &Game, p: usize) -> usize {
 }
 
 /// How much a card in hand (or library) is worth to its owner now.
-fn card_worth(g: &Game, p: usize, c: &SimCard) -> f32 {
+pub fn card_worth(g: &Game, p: usize, c: &SimCard) -> f32 {
     if c.is(T_LAND) {
         return if lands_total(g, p) >= 6 { 0.3 } else { 2.5 };
     }
@@ -687,15 +690,19 @@ pub fn scry(g: &mut Game, p: usize, k: usize, surveil: bool) {
     g.emit(Ev::Scry, p, None);
 }
 
-/// Look at the top N, take the best, the rest go to the bottom.
-pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool) {
+/// Look at the top N, take the best (of the kind `r` allows: "you may reveal a Hero card
+/// from among them"), the rest go to the bottom.
+pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool, r: &Restr) {
     let n = n.min(g.players[p].library.len());
     if n == 0 {
         return;
     }
     let len = g.players[p].library.len();
     let top: Vec<u16> = g.players[p].library.drain(len - n..).collect();
-    let best = (0..top.len()).max_by(|&a, &b| {
+    let d = g.dyn_values(r, None, p, None);
+    let best = (0..top.len())
+        .filter(|&k| Game::card_ok(r, &g.players[p].cards[top[k] as usize], &d))
+        .max_by(|&a, &b| {
         let ca = &g.players[p].cards[top[a] as usize];
         let cb = &g.players[p].cards[top[b] as usize];
         let va = if ca.is(T_LAND) && !lands_ok {
@@ -988,6 +995,8 @@ fn effect_now(
         card_restr,
         x: None,
         paid: None,
+        teamwork: false,
+        about: None,
     };
     let d = g.dyn_values(&card_restr, Some(&ctx), p, src);
     let opp_value = |t: &crate::abilities::Target, kill: &dyn Fn(&Perm) -> bool| -> f32 {
@@ -1206,6 +1215,10 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
 /// The modes a modal ability picks: the best one, or two (`used`: a bit per mode already
 /// chosen, for "choose one that hasn't been chosen").
 pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usize> {
+    // "Choose one. If this spell was cast using teamwork, choose both instead."
+    if ctx.teamwork && ab.text.contains("choose both instead") {
+        return (0..ab.mode_groups().len()).collect();
+    }
     let two = ab.text.contains("choose two");
     let groups = ab.mode_groups();
     let mut v: Vec<(f32, usize)> = groups
@@ -1548,14 +1561,18 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             let Some(cost) = g.cast_cost(p, src, opts) else {
                 return;
             };
-            if !g.can_pay(p, &cost) {
+            let why = Purpose::Spell {
+                card: (p as u8, idx),
+                from_hand: matches!(src, Src::Hand(_)),
+            };
+            if !g.can_pay_for(p, &cost, why) {
                 // Try without the extras.
                 let plain = CastOpts {
                     back,
                     ..Default::default()
                 };
                 match g.cast_cost(p, src, plain) {
-                    Some(c2) if g.can_pay(p, &c2) => {
+                    Some(c2) if g.can_pay_for(p, &c2, why) => {
                         let v = spell_value(g, p, idx, back, commander);
                         out.push((v, c2.total(), Act::Cast(src, plain)));
                     }
@@ -1650,7 +1667,11 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                         ..Default::default()
                     },
                 ) {
-                    if g.can_pay(p, &cost) {
+                    let why = Purpose::Spell {
+                        card: r,
+                        from_hand: false,
+                    };
+                    if g.can_pay_for(p, &cost, why) {
                         out.push((
                             spell_value(g, p, r.1, true, false),
                             cost.total(),
@@ -1673,7 +1694,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             let Some(cost) = g.activation_cost(p, i, k) else {
                 continue;
             };
-            if !g.can_pay(p, &cost) {
+            if !g.can_pay_for(p, &cost, Purpose::Ability { src: x.id }) {
                 continue;
             }
             let mut v = ability_now(g, p, a, Some(x.id));
@@ -1727,23 +1748,37 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         }
         // Equip: move gear to the best attacker.
         if x.is(T_EQUIPMENT) && (!post || x.attached.is_none()) {
-            if let (Some(r), Some(t)) = (x.card, equip_target(g, p, x.id)) {
+            // Where it can go and what that costs ("Equip worthy {1}" only on a worthy one).
+            let target = equip_target(g, p, x.id)
+                .filter(|&t| g.equip_cost(i, t).is_some())
+                .or_else(|| {
+                    (0..g.perms.len())
+                        .filter(|&t| {
+                            let y = &g.perms[t];
+                            y.ctrl as usize == p && y.is_creature() && g.equip_cost(i, t).is_some()
+                        })
+                        .max_by_key(|&t| g.perms[t].p)
+                });
+            let gear = target.and_then(|t| g.equip_cost(i, t).map(|(m, l)| (m, l, x.card, t)));
+            if let Some((cost, life, r, t)) = gear {
                 let tid = g.perms[t].id;
-                let cost = g.card(r).equip.unwrap_or(Mana::generic(2));
-                let life = g.card(r).equip_life as i32;
                 if x.attached != Some(tid)
                     && x.attached.is_none_or(|a| g.idx(a).is_none())
-                    && g.can_pay(p, &cost)
+                    && g.can_pay_for(p, &cost, Purpose::Ability { src: x.id })
                     && (life == 0 || g.players[p].life > life + 5)
                 {
-                    let bonus = g
-                        .card(r)
-                        .abilities
-                        .iter()
-                        .filter(|a| a.trig == Trig::Static || a.text.contains("equipped"))
-                        .flat_map(|a| a.effects.iter())
-                        .map(effect_value)
-                        .sum::<f32>();
+                    let bonus = match (r, x.tok) {
+                        (Some(r), _) => g
+                            .card(r)
+                            .abilities
+                            .iter()
+                            .filter(|a| a.trig == Trig::Static || a.text.contains("equipped"))
+                            .flat_map(|a| a.effects.iter())
+                            .map(effect_value)
+                            .sum::<f32>(),
+                        (None, Tok::Equip(p, t)) => p as f32 + 0.5 * t as f32,
+                        _ => 0.0,
+                    };
                     out.push((1.0 + bonus, cost.total(), Act::Equip(x.id, tid)));
                 }
             }
@@ -1930,9 +1965,7 @@ fn hand_find(g: &Game, p: usize, f: impl Fn(&SimCard) -> bool) -> Option<usize> 
     let pl = &g.players[p];
     (0..pl.hand.len()).find(|&h| {
         let c = &pl.cards[pl.hand[h] as usize];
-        f(c) && g
-            .cast_cost(p, Src::Hand(h), CastOpts::default())
-            .is_some_and(|m| g.can_pay(p, &m))
+        f(c) && g.can_cast(p, Src::Hand(h), CastOpts::default())
     })
 }
 
@@ -2033,11 +2066,21 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
         let Some(cost) = g.cast_cost(o, Src::Hand(h), CastOpts::default()) else {
             continue;
         };
-        if !g.pay(o, &cost) {
+        let why = Purpose::Spell {
+            card: (o as u8, counter_idx),
+            from_hand: true,
+        };
+        if !g.pay_for(o, &cost, why) {
             continue;
         }
         g.players[o].hand.remove(h);
         g.players[o].graveyard.push(counter_idx);
+        // "If that spell's mana value was 2 or less, recruit" (Sound the Trumpets).
+        g.ext.countered_mv = Some(if back {
+            spell.back.as_ref().map_or(spell.mv, |b| b.cost.total() as u8)
+        } else {
+            spell.mv
+        });
         g.on_cast(o, counter);
         // Other effects on the counterspell (draw a card, etc.).
         for (k2, a) in counter.abilities.iter().enumerate() {
@@ -2168,10 +2211,7 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
             if !instant_speed || is_reactive_only(c) {
                 continue;
             }
-            if !g
-                .cast_cost(p, Src::Hand(h), CastOpts::default())
-                .is_some_and(|m| g.can_pay(p, &m))
-            {
+            if !g.can_cast(p, Src::Hand(h), CastOpts::default()) {
                 continue;
             }
             let v = spell_value(g, p, pl.hand[h], false, false);
@@ -2199,7 +2239,7 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
                 let Some(cost) = g.activation_cost(p, i, k) else {
                     continue;
                 };
-                if !g.can_pay(p, &cost) {
+                if !g.can_pay_for(p, &cost, Purpose::Ability { src: x.id }) {
                     continue;
                 }
                 let v = ability_now(g, p, a, Some(x.id))
@@ -2563,7 +2603,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                     0.0
                 };
                 let net = killed + trample - if dies { av } else { 0.0 };
-                if dies && net < 0.0 && at.goad.is_none() {
+                if dies && net < 0.0 && !g.must_attack(a) {
                     bad.push(a);
                 }
                 value += net;
@@ -2618,7 +2658,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
             }
         }
         if let Some((v, d)) = best {
-            if v > 0.2 || at.goad.is_some() {
+            if v > 0.2 || g.must_attack(a) {
                 out.push((at.id, d));
                 gains.push((v, a));
             }
@@ -2657,7 +2697,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
     let mut k = 0;
     while incoming - defenders(&out) >= my_life * 3 / 4 && k < gains.len() {
         let id = g.perms[gains[k].1].id;
-        if g.perms[gains[k].1].goad.is_none() {
+        if !g.must_attack(gains[k].1) {
             out.retain(|(x, _)| *x != id);
         }
         k += 1;
