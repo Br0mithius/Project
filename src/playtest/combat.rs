@@ -23,7 +23,13 @@ pub struct Attack {
 impl<'a> Game<'a> {
     pub fn can_attack(&self, i: usize) -> bool {
         let x = &self.perms[i];
-        x.is_creature() && !x.tapped && !(x.sick && !x.has(HASTE)) && !x.has(DEFENDER) && !x.locked
+        // "Creatures you control can attack as though they didn't have defender" (Ghalta).
+        let defender = x.has(DEFENDER)
+            && self
+                .rules
+                .get(x.ctrl as usize)
+                .is_none_or(|r| r & R_DEFENDERS_ATTACK == 0);
+        x.is_creature() && !x.tapped && !(x.sick && !x.has(HASTE)) && !defender && !x.locked
     }
 
     /// Can blocker `b` block attacker `a` (evasion, protection, "can't block")?
@@ -53,6 +59,20 @@ impl<'a> Game<'a> {
         true
     }
 
+    /// Mana per creature attacking player `d` (Propaganda; Dáin with an enduring story).
+    pub fn attack_tax(&self, d: usize) -> u32 {
+        if self.rules.get(d).is_none_or(|r| r & R_ATTACK_TAX == 0) {
+            return 0;
+        }
+        self.perms
+            .iter()
+            .filter(|x| x.ctrl as usize == d && self.perm_rules(x) & R_ATTACK_TAX != 0)
+            .filter_map(|x| x.card.and_then(|r| self.card(r).attack_tax.as_ref()))
+            .filter(|(_, cond)| self.cond_holds(cond, d, None))
+            .map(|(n, _)| *n as u32)
+            .sum()
+    }
+
     pub fn def_player(&self, d: Def) -> Option<usize> {
         match d {
             Def::Player(p) => Some(p),
@@ -63,7 +83,22 @@ impl<'a> Game<'a> {
     /// One combat phase for the active player `a`.
     pub fn combat(&mut self, a: usize) {
         ai::crew_for_combat(self, a);
-        let declared = ai::declare_attacks(self, a);
+        let mut declared = ai::declare_attacks(self, a);
+        // "Creatures can't attack you unless their controller pays {2} for each": what
+        // can't be paid for stays home.
+        if self.rule_anywhere(R_ATTACK_TAX) {
+            let mut keep = Vec::new();
+            for (id, def) in declared {
+                let tax = match def {
+                    Def::Player(d) => self.attack_tax(d),
+                    Def::Walker(_) => 0,
+                };
+                if tax == 0 || self.pay(a, &Mana::generic(tax)) {
+                    keep.push((id, def));
+                }
+            }
+            declared = keep;
+        }
         if declared.is_empty() {
             return;
         }
@@ -165,6 +200,12 @@ impl<'a> Game<'a> {
             }
         }
         attacks.retain(|at| self.idx(at.attacker).is_some());
+        // "End the turn" (Time Stop) in answer to the attack: no blocks, no damage.
+        if self.end_turn {
+            self.in_combat = false;
+            self.end_combat();
+            return;
+        }
         // Blocks.
         for &d in &defenders {
             if !self.players[d].alive {
@@ -297,14 +338,15 @@ impl<'a> Game<'a> {
             };
             let x = self.perms[ai_].clone();
             let blockers: Vec<usize> = at.blockers.iter().filter_map(|b| self.idx(*b)).collect();
-            if strikes(&x) && x.p > 0 {
+            let power = self.combat_power(&x);
+            if strikes(&x) && power > 0 {
                 if !at.blocked {
                     match at.def {
-                        Def::Player(p) => to_players.push((p, x.p as i32, x.id)),
-                        Def::Walker(w) => to_walkers.push((w, x.p)),
+                        Def::Player(p) => to_players.push((p, power as i32, x.id)),
+                        Def::Walker(w) => to_walkers.push((w, power)),
                     }
                 } else {
-                    let mut left = x.p;
+                    let mut left = power;
                     for (k, &bi) in blockers.iter().enumerate() {
                         let b = &self.perms[bi];
                         let lethal = if x.has(DEATHTOUCH) {
@@ -333,8 +375,9 @@ impl<'a> Game<'a> {
             }
             for &bi in &blockers {
                 let b = &self.perms[bi];
-                if strikes(b) && b.p > 0 {
-                    to_perms.push((x.id, b.p, b.id));
+                let power = self.combat_power(b);
+                if strikes(b) && power > 0 {
+                    to_perms.push((x.id, power, b.id));
                 }
             }
         }

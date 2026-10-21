@@ -28,6 +28,123 @@ pub const SKULK: u32 = 1 << 18;
 pub const FLANKING: u32 = 1 << 19;
 pub const CANT_BLOCK: u32 = 1 << 20;
 pub const SHROUD: u32 = 1 << 21;
+/// "Prevent all damage that would be dealt to ~" (Black Panther).
+pub const NO_DAMAGE: u32 = 1 << 22;
+
+// Rule-changing statics a permanent has (`SimCard::rules`): what its controller's game
+// does differently while it's on the battlefield.
+/// "You can't lose the game and your opponents can't win the game" (Herald of Eternal Dawn).
+pub const R_CANT_LOSE: u32 = 1;
+/// "Artifacts and creatures entering the battlefield don't cause abilities to trigger" (Karn).
+pub const R_NO_ETB_TRIGGERS: u32 = 1 << 1;
+/// "Creatures you control can attack as though they didn't have defender" (Ghalta).
+pub const R_DEFENDERS_ATTACK: u32 = 1 << 2;
+/// "Each creature you control with toughness greater than its power assigns combat damage
+/// equal to its toughness" (Ghalta the Immovable).
+pub const R_TOUGHNESS_DAMAGE: u32 = 1 << 3;
+/// "If ~'s power is negative, he assigns combat damage as though his power were positive"
+/// (Loot, the Anomaly: only itself).
+pub const R_NEGATIVE_POWER: u32 = 1 << 4;
+/// "Your opponents can't cast spells during your turn" (Jennifer Walters).
+pub const R_OPP_NO_CAST_MY_TURN: u32 = 1 << 5;
+/// "You may play lands from your graveyard" (Mole Man; Muldrotha's land).
+pub const R_LANDS_FROM_GY: u32 = 1 << 6;
+/// "Cast a permanent spell of each permanent type from your graveyard" (Muldrotha).
+pub const R_PERMANENTS_FROM_GY: u32 = 1 << 7;
+/// "You may cast spells from your hand without paying their mana costs" (Omniscience).
+pub const R_FREE_FROM_HAND: u32 = 1 << 8;
+/// The same for spells with mana value up to the number of creatures you control
+/// (Omnipresence).
+pub const R_FREE_BY_CREATURES: u32 = 1 << 9;
+/// "You may cast spells as though they had flash" (High Fae Trickster).
+pub const R_FLASH_SPELLS: u32 = 1 << 10;
+/// "During your turn, you may play cards you don't own with stash counters on them from
+/// exile" (Tinybones).
+pub const R_STASH: u32 = 1 << 11;
+/// "Activated abilities of sources with the chosen name can't be activated" (Sorcerous
+/// Spyglass).
+pub const R_NAMES_CARD: u32 = 1 << 12;
+/// "As long as an opponent has cast a spell this turn, you may cast spells as though they
+/// had flash" (Captain Mar-Vell).
+pub const R_FLASH_AFTER_OPPONENT: u32 = 1 << 13;
+/// "The first creature spell you cast each turn ... can be cast as though it had flash"
+/// (Radagast).
+pub const R_FIRST_CREATURE_FLASH: u32 = 1 << 14;
+/// It taxes opponents' spells (`SimCard::opp_tax`).
+pub const R_SPELL_TAX: u32 = 1 << 15;
+/// It taxes attacks on its controller (`SimCard::attack_tax`).
+pub const R_ATTACK_TAX: u32 = 1 << 16;
+/// "As long as you have an enduring story, you may pay {0} rather than pay the equip cost of
+/// the first equip ability you activate each turn" (Kíli).
+pub const R_FREE_FIRST_EQUIP: u32 = 1 << 17;
+
+/// The rule-changing statics in a face's rules text (card name as "~").
+pub fn rules_of(text: &str) -> u32 {
+    let mut r = 0;
+    let has = |s: &str| text.contains(s);
+    for (phrase, bit) in [
+        ("you can't lose the game", R_CANT_LOSE),
+        (
+            "entering the battlefield don't cause abilities to trigger",
+            R_NO_ETB_TRIGGERS,
+        ),
+        (
+            "can attack as though they didn't have defender",
+            R_DEFENDERS_ATTACK,
+        ),
+        (
+            "toughness greater than its power assigns combat damage equal to its toughness",
+            R_TOUGHNESS_DAMAGE,
+        ),
+        (
+            "power is negative, he assigns combat damage",
+            R_NEGATIVE_POWER,
+        ),
+        (
+            "your opponents can't cast spells during your turn",
+            R_OPP_NO_CAST_MY_TURN,
+        ),
+        ("you may play lands from your graveyard", R_LANDS_FROM_GY),
+        (
+            "you may play a land and cast a permanent spell",
+            R_LANDS_FROM_GY,
+        ),
+        (
+            "cast a permanent spell of each permanent type from your graveyard",
+            R_PERMANENTS_FROM_GY,
+        ),
+        (
+            "you may cast spells from your hand without paying their mana costs",
+            R_FREE_FROM_HAND,
+        ),
+        (
+            "number of creatures you control from your hand without paying their mana costs",
+            R_FREE_BY_CREATURES,
+        ),
+        ("with stash counters on them from exile", R_STASH),
+        (
+            "activated abilities of sources with the chosen name can't be activated",
+            R_NAMES_CARD,
+        ),
+        ("can be cast as though it had flash", R_FIRST_CREATURE_FLASH),
+        (
+            "rather than pay the equip cost of the first equip ability",
+            R_FREE_FIRST_EQUIP,
+        ),
+    ] {
+        if has(phrase) {
+            r |= bit;
+        }
+    }
+    if has("you may cast spells as though they had flash") {
+        r |= if has("as long as an opponent has cast a spell this turn") {
+            R_FLASH_AFTER_OPPONENT
+        } else {
+            R_FLASH_SPELLS
+        };
+    }
+    r
+}
 
 pub const KEYWORDS: [(&str, u32); 22] = [
     ("flying", FLYING),
@@ -467,6 +584,16 @@ pub enum Cond {
     AttackingPower(u16),
     /// You control a Jace or have a Jace card in hand (to behold).
     CanBeholdJace,
+    /// An opponent has a tapped creature the spell could target ("costs {3} less if it
+    /// targets a tapped creature").
+    TappedCreatureToTarget,
+    /// An opponent's nontoken creature is attacking ("if it targets an attacking nontoken
+    /// creature").
+    AttackingCreatureToTarget(bool),
+    /// You gained at least N life this turn.
+    GainedLifeAtLeast(i32),
+    /// You've cast a noncreature spell this turn.
+    CastNoncreatureThisTurn,
     /// Can't be checked: happens this often.
     Chance(f32),
     /// The other branch of an "X. If <c>, Y instead" / "X if <c>. Otherwise, Y" pair.
@@ -565,6 +692,9 @@ pub enum BackKind {
     Adventure,
     /// A creature's prepare spell: castable as a copy while it's prepared (CR 722).
     Prepare,
+    /// A transforming double-faced card (CR 712): only the front is cast; "transform ~"
+    /// turns the permanent into its back face.
+    Transform,
     /// Other double-faced cards: the back's spell is cast once instead.
     Other,
 }
@@ -572,10 +702,40 @@ pub enum BackKind {
 #[derive(Debug, Clone)]
 pub struct BackFace {
     pub kind: BackKind,
+    pub name: String,
     pub cost: Mana,
     pub types: u16,
+    pub subtypes: Vec<String>,
+    pub power: i16,
+    pub toughness: i16,
+    pub kw: u32,
+    /// Rule-changing statics (`R_*`).
+    pub rules: u32,
     pub abilities: Vec<SimAbility>,
     pub extra_cost: Option<ExtraCost>,
+}
+
+/// What an Aura or Equipment makes of the permanent it's attached to ("enchanted creature
+/// loses all abilities and is a black Skeleton creature with base power and toughness 1/1",
+/// "enchanted permanent is a Construct creature with base power and toughness 5/5").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AttachedSets {
+    pub power: i16,
+    pub toughness: i16,
+    /// It loses all abilities.
+    pub blank: bool,
+    /// It becomes a creature (in addition to its other types).
+    pub creature: bool,
+}
+
+/// "This spell costs {N} less to cast if ..." / "for each ..." and affinity.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelfReduce {
+    /// N less while the condition holds.
+    If(u8, Cond),
+    /// N less for each thing the phrase counts ("instant and sorcery card in your
+    /// graveyard", "creature on the battlefield", "elf you control" for affinity).
+    Each(u8, String),
 }
 
 #[derive(Debug, Clone)]
@@ -626,7 +786,6 @@ pub struct SimCard {
     pub extort: bool,
     pub convoke: bool,
     pub improvise: bool,
-    pub affinity: bool,
     pub living_weapon: bool,
     pub changeling: bool,
     pub cant_be_countered: bool,
@@ -636,8 +795,32 @@ pub struct SimCard {
     pub storied: bool,
     /// "Spells you cast cost {N} less" (with an optional subtype/type filter).
     pub cost_reduction: Option<(u8, Filter)>,
+    /// The reduction is "{X} less, where X is ~'s power" (The Scarlet Witch).
+    pub reduction_by_power: bool,
+    /// Only the first such spell each turn (Radagast: "the first creature spell you cast
+    /// each turn costs {2} less").
+    pub reduction_first: bool,
+    /// "Noncreature spells your opponents cast cost {1} more to cast" (Thalia).
+    pub opp_tax: Option<(u8, Filter)>,
+    /// "Creatures can't attack you unless their controller pays {2} for each creature"
+    /// (Propaganda; Dáin while you have an enduring story).
+    pub attack_tax: Option<(u8, Cond)>,
     /// "This spell costs {X} less to cast, where X is ..." (the Ghaltas).
     pub self_less: Option<SelfLess>,
+    /// "This spell costs {N} less to cast if ... / for each ...", affinity.
+    pub self_reduce: Vec<SelfReduce>,
+    /// Rule-changing statics (`R_*`).
+    pub rules: u32,
+    /// Hexproof from these colours (bits 0-4) or from instants (bit 5).
+    pub hexproof_from: u8,
+    /// What it makes of the permanent it's attached to.
+    pub attached_sets: Option<AttachedSets>,
+    /// "Equip abilities you activate that target this creature cost {2} less" (Dwarven
+    /// Mauler).
+    pub equip_target_less: u8,
+    /// "This ability costs {1} less to activate for each +1/+1 counter on the creature it
+    /// targets" (Warrior's Blades' equip).
+    pub equip_less_per_counter: bool,
     /// "Power-up abilities of other creatures you control cost {N} less to activate."
     pub power_up_less: u8,
     /// "As an additional cost to cast this spell, ...".
@@ -659,6 +842,9 @@ pub struct SimCard {
     pub enters_counters: Vec<(String, EntersCounters, Cond)>,
     /// Power and/or toughness defined by a count ("*/*": Crusader of Odric, Tarmogoyf).
     pub cda: Option<Cda>,
+    /// Emblems its loyalty abilities give: (the loyalty ability's index, an ability of the
+    /// emblem).
+    pub emblems: Vec<(u16, SimAbility)>,
 }
 
 /// A characteristic-defining ability (CR 604.3): power and/or toughness equal to a count.
@@ -1828,6 +2014,117 @@ fn counter_goal(text: &str) -> Option<i16> {
         .map(|n| n as i16)
 }
 
+/// Rules the game acts on that the card reader leaves out or names differently: they
+/// become `Effect::Rule`s the resolver plays (see `resolve::RULES_MODELLED`).
+fn sim_rules(text: &str, effects: &mut Vec<Effect>) {
+    let rule = |effects: &mut Vec<Effect>, label: &str| {
+        if !effects
+            .iter()
+            .any(|e| matches!(e, Effect::Rule(l) if l == label))
+        {
+            effects.push(Effect::Rule(label.to_string()));
+        }
+    };
+    let body = text.split_once(": ").map_or(text, |(c, b)| {
+        // "{2}{R}{R}{G}{G}: Transform ~": the effect after an activation cost.
+        if c.contains('{') || c.contains("sacrifice") || c.contains("remove") {
+            b
+        } else {
+            text
+        }
+    });
+    if body.starts_with("transform ~") {
+        rule(effects, "transforms");
+    }
+    if text.contains("take an extra turn after this one") {
+        rule(effects, "extra turn");
+    }
+    if body.starts_with("end the turn") {
+        rule(effects, "ends the turn");
+    }
+    // "Target creature can't block this turn" (Sower of Chaos, Frenzied Goblin).
+    if text.contains("target creature can't block this turn")
+        || text.contains("target creature can't block until end of turn")
+    {
+        rule(effects, "can't block this turn");
+    }
+    // "Fblthp's owner shuffles him into their library", "Gandalf's owner shuffles him into
+    // their library and draws three cards".
+    if text.contains("~'s owner shuffles") && text.contains("into their library") {
+        rule(effects, "shuffles itself into its library");
+    }
+    // Tinybones: "Whenever an opponent discards a card, exile it from their graveyard with a
+    // stash counter on it".
+    if text.contains("exile it from their graveyard with a stash counter") {
+        effects.clear();
+        rule(effects, "stashes the discarded card");
+    }
+    // "Target opponent creates The Void, a legendary 5/5 black Horror Villain creature token
+    // with flying, indestructible, ..." (The Sentry).
+    if (text.contains("target opponent creates") || text.contains("an opponent creates"))
+        && text.contains("creature token")
+        && !effects.iter().any(|e| matches!(e, Effect::Tokens { .. }))
+    {
+        effects.retain(|e| !matches!(e, Effect::Rule(_)));
+        rule(effects, "an opponent creates a creature token");
+    }
+    if text.contains("you get an emblem with \"") {
+        effects.clear();
+        rule(effects, "you get an emblem");
+    }
+    // "Up to one target creature gets -4/-1 until your next turn" (Garruk, Veiled Butcher).
+    if text.contains(" until your next turn") && text.contains("target creature gets ") {
+        effects.retain(|e| {
+            !matches!(
+                e,
+                Effect::Pump { .. } | Effect::Shrink { .. } | Effect::PlusCounters { .. }
+            )
+        });
+        rule(effects, "gets +N/+N until your next turn");
+    }
+    // "This land becomes a 3/3 creature with vigilance", "it becomes a 0/0 Construct Hero
+    // artifact creature with flying ... until end of turn" (Soulstone Sanctuary, Crawling
+    // Barrens, Iron Man Armor, Beorn's Hospitality): the permanent itself.
+    let animates = [
+        "~ becomes a",
+        "this land becomes a",
+        "this enchantment becomes a",
+    ]
+    .iter()
+    .any(|w| body.contains(w))
+        || body.contains("it becomes a 0/0")
+        || body.contains("have it become a");
+    if animates && body.contains(" creature") && !body.contains("copy") && !body.contains("target")
+    {
+        rule(effects, "becomes a creature");
+    }
+    if text.contains("an opponent gains control of ~") {
+        rule(effects, "gives itself to an opponent");
+    }
+    // "Until end of turn, creatures you control with toughness greater than their power
+    // assign combat damage equal to their toughness" (The Kingpin of Crime).
+    if text.contains("assign combat damage equal to their toughness") {
+        rule(effects, "assigns combat damage by toughness");
+    }
+    // "Target creature has base power and toughness 4/5 until end of turn", "~ has base
+    // power and toughness 6/6": not the Aura/Equipment statics (`AttachedSets`).
+    if text.contains("base power and toughness ")
+        && !text.starts_with("enchanted ")
+        && !text.starts_with("equipped ")
+        && !text.contains("loses all abilities")
+    {
+        effects.retain(|e| !matches!(e, Effect::Rule(l) if l == "sets base power/toughness"));
+        rule(effects, "sets base power/toughness");
+    }
+    // "Until end of turn, target creature gains 'When this creature dies, return it to the
+    // battlefield tapped under its owner's control with a +1/+1 counter on it'".
+    if text.contains("gains \"when ~ dies, return it to the battlefield")
+        || text.contains("gains \"when this creature dies, return it to the battlefield")
+    {
+        rule(effects, "returns when it dies");
+    }
+}
+
 fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
     let mut out = Vec::new();
     let mut instead: Vec<bool> = Vec::new();
@@ -1854,6 +2151,7 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
             if pays_discard {
                 redraw(&mut effects);
             }
+            sim_rules(&a.text, &mut effects);
             let event = matches!(trig, Trig::Event(..));
             // A trigger about another creature: "it"/"that creature" may be that one (not
             // when the trigger is about the card itself: "whenever ~ is dealt damage, put a
@@ -1946,6 +2244,10 @@ fn keyword_cost(words: &[String], key: &str) -> Option<Mana> {
 pub fn keyword_bits(words: &[String]) -> u32 {
     let mut bits = 0;
     for w in words {
+        // "Hexproof from black" is only against black (`SimCard::hexproof_from`).
+        if w.starts_with("hexproof from") {
+            continue;
+        }
         for (k, bit) in KEYWORDS {
             if w == k || w.starts_with(&format!("{} ", k)) && k != "flash" {
                 bits |= bit;
@@ -2064,9 +2366,31 @@ fn back_face(card: &Card, parsed: &abilities::Parsed) -> Option<BackFace> {
     let head = lines.next().unwrap_or("");
     let type_line = lines.next().unwrap_or("");
     let cost = Mana::parse(head);
+    let name = head.split(" {").next().unwrap_or(head).trim().to_string();
     let types = types_of(type_line);
+    // "Legendary Creature — Gamma Berserker Hero 8/8".
+    let (type_words, pt) = match type_line.trim().rsplit_once(' ') {
+        Some((rest, pt)) if pt.contains('/') => (rest, Some(pt)),
+        _ => (type_line.trim(), None),
+    };
+    let (power, toughness) = pt
+        .and_then(|pt| pt.split_once('/'))
+        .map(|(p, t)| (p.parse().unwrap_or(0), t.parse().unwrap_or(0)))
+        .unwrap_or((0, 0));
+    let subtypes = type_words
+        .split(" — ")
+        .nth(1)
+        .map(|s| s.split_whitespace().map(|w| w.to_lowercase()).collect())
+        .unwrap_or_default();
+    let back_text = {
+        let mut bc = card.clone();
+        bc.name = name.clone();
+        crate::abilities::self_refs(&crate::card::strip_reminder(raw), &bc)
+    };
     let kind = if type_line.contains("Adventure") {
         BackKind::Adventure
+    } else if card_text_transforms(&card.text_lower(), &card.name) && types & T_CREATURE != 0 {
+        BackKind::Transform
     } else if parsed
         .abilities
         .iter()
@@ -2080,10 +2404,136 @@ fn back_face(card: &Card, parsed: &abilities::Parsed) -> Option<BackFace> {
     let abilities = compile_abilities(back);
     Some(BackFace {
         kind,
+        name,
         cost,
         types,
+        subtypes,
+        power,
+        toughness,
+        kw: keyword_bits(&back.keywords) | text_kw(&back_text),
+        rules: rules_of(&back_text),
         extra_cost: extra_cost_of(&abilities),
         abilities,
+    })
+}
+
+/// "{2}{R}{R}{G}{G}: Transform Bruce Banner": the front face turns into its back.
+fn card_text_transforms(text: &str, name: &str) -> bool {
+    let front = text.split("// back face:").next().unwrap_or(text);
+    front.contains(&format!("transform {}", name.to_lowercase())) || front.contains("transform ~")
+}
+
+/// Keyword-like abilities written as sentences ("Prevent all damage that would be dealt to
+/// ~").
+fn text_kw(text: &str) -> u32 {
+    let mut kw = 0;
+    if text.contains("prevent all damage that would be dealt to ~") {
+        kw |= NO_DAMAGE;
+    }
+    kw
+}
+
+/// The abilities of the emblems loyalty abilities give ("[-10]: You get an emblem with
+/// "Creatures you control get +2/+2."").
+fn emblems_of(card: &Card, quoted: &[(u16, String)]) -> Vec<(u16, SimAbility)> {
+    let mut out = Vec::new();
+    for (k, text) in quoted {
+        let fake = Card {
+            name: card.name.clone(),
+            type_line: "Emblem".into(),
+            oracle_text: format!("{}.", text),
+            ..Default::default()
+        };
+        let parsed = abilities::parse(&fake);
+        for a in compile_abilities(&parsed) {
+            out.push((*k, a));
+        }
+    }
+    out
+}
+
+/// "Hexproof from black", "hexproof from instants": colour bits 0-4, instants bit 5.
+fn hexproof_from(words: &[String]) -> u8 {
+    let mut m = 0;
+    for w in words {
+        if let Some(rest) = w.strip_prefix("hexproof from ") {
+            m |= color_bits(rest);
+            if rest.contains("instant") {
+                m |= 1 << 5;
+            }
+        }
+    }
+    m
+}
+
+/// "This spell costs {3} less to cast if it targets a tapped creature", "costs {1} less to
+/// cast for each instant and sorcery card in your graveyard", "affinity for Elves".
+fn self_reduce_of(own_text: &str, kw_words: &[String]) -> Vec<SelfReduce> {
+    let mut out = Vec::new();
+    for line in own_text.lines() {
+        let l = line.trim();
+        let Some(rest) = l
+            .strip_prefix("this spell costs {")
+            .or_else(|| l.strip_prefix("~ costs {"))
+        else {
+            continue;
+        };
+        let Some((n, rest)) = rest.split_once("} less to cast") else {
+            continue;
+        };
+        let Ok(n) = n.parse::<u8>() else { continue };
+        let rest = rest.trim().trim_end_matches('.');
+        if let Some(phrase) = rest.strip_prefix("for each ") {
+            out.push(SelfReduce::Each(n, phrase.to_string()));
+        } else if let Some(clause) = rest.strip_prefix("if ") {
+            let cond = match clause {
+                c if c.contains("targets a tapped creature") => Cond::TappedCreatureToTarget,
+                c if c.contains("targets an attacking") => {
+                    Cond::AttackingCreatureToTarget(c.contains("nontoken"))
+                }
+                c if c.contains("gained") && c.contains("life this turn") => {
+                    Cond::GainedLifeAtLeast(number_before(c, " or more life").unwrap_or(1) as i32)
+                }
+                c if c.contains("cast a noncreature spell this turn") => {
+                    Cond::CastNoncreatureThisTurn
+                }
+                c if c.contains("legendary creature") => Cond::Control("legendary".into(), false),
+                c => cond_from(&format!("if {}", c)),
+            };
+            if !matches!(cond, Cond::Chance(_)) {
+                out.push(SelfReduce::If(n, cond));
+            }
+        }
+    }
+    // "Affinity for Elves": {1} less for each Elf you control.
+    for k in kw_words {
+        if let Some(what) = k.strip_prefix("affinity for ") {
+            let w = what.trim();
+            let one = if let Some(s) = w.strip_suffix("ves") {
+                format!("{}f", s)
+            } else {
+                w.strip_suffix('s').unwrap_or(w).to_string()
+            };
+            out.push(SelfReduce::Each(1, format!("{} you control", one)));
+        }
+    }
+    out
+}
+
+/// Auras and Equipment that make their permanent something else.
+fn attached_sets_of(own_text: &str) -> Option<AttachedSets> {
+    let l = own_text.lines().map(str::trim).find(|l| {
+        (l.starts_with("enchanted ") || l.starts_with("equipped "))
+            && l.contains("base power and toughness ")
+    })?;
+    let pt = l.split("base power and toughness ").nth(1)?;
+    let pt = pt.split([' ', '.']).next()?;
+    let (p, t) = pt.split_once('/')?;
+    Some(AttachedSets {
+        power: p.parse().ok()?,
+        toughness: t.parse().ok()?,
+        blank: l.contains("loses all abilities"),
+        creature: l.contains(" creature"),
     })
 }
 
@@ -2113,7 +2563,7 @@ pub fn compile(card: &Card) -> SimCard {
         }
     }
     let kw_words = &parsed.keywords;
-    let mut kw = keyword_bits(kw_words);
+    let mut kw = keyword_bits(kw_words) | text_kw(&own_text);
     // A line of its own: "This creature can't block." (`own_text` has the card as "~"; a
     // condition or "this turn" makes it something else).
     let own_line = |s: &str| own_text.lines().any(|l| l.trim() == s);
@@ -2144,7 +2594,16 @@ pub fn compile(card: &Card) -> SimCard {
         .iter()
         .filter(|k| k.starts_with("protection"))
         .fold(0, |m, k| m | color_bits(k));
-    let abilities = compile_abilities(parsed);
+    let mut abilities = compile_abilities(parsed);
+    // "Enchanted creature loses all abilities and is a 1/1 Skeleton": it can still attack
+    // and block (`AttachedSets`), it isn't locked.
+    for a in abilities.iter_mut().filter(|a| {
+        a.trig == Trig::Static
+            && (a.text.starts_with("enchanted") || a.text.starts_with("equipped"))
+            && a.text.contains("base power and toughness")
+    }) {
+        a.effects.retain(|e| !matches!(e, Effect::Lock { .. }));
+    }
     let mana_ability = abilities.iter().any(|a| {
         matches!(
             a.trig,
@@ -2231,29 +2690,63 @@ pub fn compile(card: &Card) -> SimCard {
                     || a.text.contains("loses all abilities")
                     || a.text.contains("gets -"))
         });
-    let cost_reduction = abilities.iter().find_map(|a| {
+    // "Spells you cast cost {N} less" / "noncreature spells your opponents cast cost {1}
+    // more": (N, whose spells, more, X = power, the first each turn, filter).
+    let spell_cost_change = |a: &SimAbility| -> Option<(u8, bool, bool, Filter)> {
         if a.trig != Trig::Static {
             return None;
         }
-        let i = a.text.find("cost {")?;
+        // ("Cost {1} less", "the first creature spell ... costs {2} less".)
+        let i = match a.text.find(" cost {") {
+            Some(i) => i + 1,
+            None => a.text.find(" costs {")? + 2,
+        };
         // "Power-up abilities ... cost {3} less to activate", "equip abilities ... cost {2}
         // less" aren't about spells.
-        if !a.text.contains("less")
-            || a.text.contains("opponent")
-            || a.text.contains("activate")
-            || !a.text[..i].contains("spell")
-        {
+        if a.text.contains("activate") || !a.text[..i].contains("spell") {
             return None;
         }
-        let n: u8 = a.text[i + 6..]
+        let more = a.text[i..].contains("} more");
+        if !more && !a.text[i..].contains("} less") {
+            return None;
+        }
+        let digits: String = a.text[i + 6..]
             .chars()
             .take_while(|c| c.is_ascii_digit())
-            .collect::<String>()
-            .parse()
-            .ok()?;
-        let what = a.text[..i].to_string();
-        Some((n, filter_of(&what)))
+            .collect();
+        // "{X} less, where X is ~'s power" (The Scarlet Witch).
+        let by_power = digits.is_empty()
+            && a.text[i + 6..].starts_with("x}")
+            && a.text.contains("where x is ~'s power");
+        let n: u8 = if by_power { 0 } else { digits.parse().ok()? };
+        Some((n, more, by_power, filter_of(&a.text[..i])))
+    };
+    let cost_change = abilities.iter().find_map(|a| {
+        spell_cost_change(a)
+            .filter(|c| !c.1 && !a.text.contains("opponent"))
+            .map(|c| (c.0, c.2, a.text.contains("the first "), c.3))
     });
+    let cost_reduction = cost_change.as_ref().map(|c| (c.0, c.3.clone()));
+    let opp_tax = abilities.iter().find_map(|a| {
+        spell_cost_change(a)
+            .filter(|c| c.1 && a.text.contains("opponents cast"))
+            .map(|c| (c.0, c.3))
+    });
+    // "Creatures can't attack you unless their controller pays {2} for each creature".
+    let attack_tax = own_text
+        .lines()
+        .find(|l| l.contains("can't attack you unless their controller pays {"))
+        .and_then(|l| {
+            let n = number_after(l, "pays {")?;
+            Some((
+                n,
+                if l.contains("enduring story") {
+                    Cond::Storied
+                } else {
+                    Cond::Always
+                },
+            ))
+        });
     let power_up_less = abilities
         .iter()
         .filter(|a| a.trig == Trig::Static && a.text.contains("power-up abilities"))
@@ -2300,6 +2793,22 @@ pub fn compile(card: &Card) -> SimCard {
     } else {
         0
     };
+    let rules = rules_of(&own_text)
+        | if opp_tax.is_some() { R_SPELL_TAX } else { 0 }
+        | if attack_tax.is_some() {
+            R_ATTACK_TAX
+        } else {
+            0
+        };
+    let abilities_for_emblems: Vec<(u16, String)> = abilities
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| matches!(a.trig, Trig::Loyalty(_)))
+        .filter_map(|(k, a)| {
+            let q = a.text.split("you get an emblem with \"").nth(1)?;
+            Some((k as u16, q.trim_end_matches(['.', '"']).to_string()))
+        })
+        .collect();
     let mut sc = SimCard {
         name: card.name.clone(),
         cost,
@@ -2365,7 +2874,6 @@ pub fn compile(card: &Card) -> SimCard {
         extort: kw_words.iter().any(|k| k == "extort"),
         convoke: kw_words.iter().any(|k| k == "convoke"),
         improvise: kw_words.iter().any(|k| k == "improvise"),
-        affinity: kw_words.iter().any(|k| k.starts_with("affinity")),
         living_weapon: kw_words.iter().any(|k| k == "living weapon"),
         changeling: kw_words.iter().any(|k| k == "changeling"),
         cant_be_countered: front_text.contains("can't be countered"),
@@ -2373,7 +2881,27 @@ pub fn compile(card: &Card) -> SimCard {
         chapters,
         storied: kw_words.iter().any(|k| k == "storied"),
         cost_reduction,
+        reduction_by_power: cost_change.as_ref().is_some_and(|c| c.1),
+        reduction_first: cost_change.as_ref().is_some_and(|c| c.2),
+        opp_tax,
+        attack_tax,
         self_less,
+        self_reduce: self_reduce_of(&own_text, kw_words),
+        rules,
+        hexproof_from: hexproof_from(kw_words),
+        equip_target_less: if own_text.contains("equip abilities you activate that target ~ cost {")
+        {
+            number_after(&own_text, "that target ~ cost {").unwrap_or(0)
+        } else {
+            0
+        },
+        equip_less_per_counter: own_text
+            .contains("less to activate for each +1/+1 counter on the creature it targets"),
+        attached_sets: if types & (T_AURA | T_EQUIPMENT) != 0 {
+            attached_sets_of(&own_text)
+        } else {
+            None
+        },
         power_up_less,
         extra_cost: extra_cost_of(&abilities),
         mana_ability,
@@ -2386,9 +2914,16 @@ pub fn compile(card: &Card) -> SimCard {
         has_static: false,
         enters_counters: enters_counters(&own_text),
         cda: cda_of(&own_text),
+        emblems: emblems_of(card, &abilities_for_emblems),
     };
     sc.value = static_value(&sc);
-    sc.ev_mask = sc.abilities.iter().fold(0, |m, a| match &a.trig {
+    // A transformed permanent listens with its back face's abilities.
+    let back_abilities: &[SimAbility] = match &sc.back {
+        Some(b) if b.kind == BackKind::Transform => &b.abilities,
+        _ => &[],
+    };
+    let both = || sc.abilities.iter().chain(back_abilities.iter());
+    sc.ev_mask = both().fold(0, |m, a| match &a.trig {
         Trig::Event(k, _) if !a.from_graveyard => m | ev_bit(*k),
         _ => m,
     });
@@ -2396,7 +2931,7 @@ pub fn compile(card: &Card) -> SimCard {
         Trig::Event(k, _) if a.from_graveyard => m | ev_bit(*k),
         _ => m,
     });
-    sc.has_static = sc.abilities.iter().any(|a| a.trig == Trig::Static);
+    sc.has_static = both().any(|a| a.trig == Trig::Static);
     sc
 }
 

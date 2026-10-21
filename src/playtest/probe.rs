@@ -132,6 +132,11 @@ struct PermSnap {
     goad: bool,
     attached: Option<u32>,
     shield: u8,
+    stun: u8,
+    blank: bool,
+    creature: bool,
+    returns: bool,
+    named: Option<String>,
 }
 
 #[derive(Clone)]
@@ -141,12 +146,23 @@ struct Snap {
     zones: Vec<[usize; 4]>,
     hijacked: Vec<bool>,
     extra_combats: Vec<u8>,
+    extra_turns: Vec<u8>,
+    alive: Vec<bool>,
+    playable: Vec<usize>,
+    by_toughness: Vec<bool>,
+    emblems: Vec<usize>,
     fog: bool,
+    end_turn: bool,
     perms: Vec<PermSnap>,
 }
 
 fn perm_name(g: &Game, x: &Perm) -> String {
     match x.card {
+        Some(r) if x.tok == Tok::None && x.transformed => g
+            .card(r)
+            .back
+            .as_ref()
+            .map_or_else(|| g.card(r).name.clone(), |b| b.name.clone()),
         Some(r) if x.tok == Tok::None => g.card(r).name.clone(),
         Some(r) => format!("{} (token copy)", g.card(r).name),
         None if x.tok == Tok::Creature => {
@@ -175,7 +191,13 @@ fn snap(g: &Game) -> Snap {
             .collect(),
         hijacked: g.players.iter().map(|p| p.hijacked).collect(),
         extra_combats: g.players.iter().map(|p| p.extra_combats).collect(),
+        extra_turns: g.players.iter().map(|p| p.extra_turns).collect(),
+        alive: g.players.iter().map(|p| p.alive).collect(),
+        playable: g.players.iter().map(|p| p.playable.len()).collect(),
+        by_toughness: g.players.iter().map(|p| p.toughness_damage_turn).collect(),
+        emblems: g.players.iter().map(|p| p.emblems.len()).collect(),
         fog: g.fog,
+        end_turn: g.end_turn,
         perms: g
             .perms
             .iter()
@@ -194,6 +216,11 @@ fn snap(g: &Game) -> Snap {
                 goad: x.goad.is_some(),
                 attached: x.attached,
                 shield: x.shield,
+                stun: x.stun,
+                blank: x.blank || x.no_abilities,
+                creature: x.is_creature(),
+                returns: x.returns_on_death != 0,
+                named: x.named.map(|r| g.card(r).name.clone()),
             })
             .collect(),
     }
@@ -202,10 +229,71 @@ fn snap(g: &Game) -> Snap {
 fn kw_names(bits: u32) -> String {
     KEYWORDS
         .iter()
+        .chain(
+            [
+                ("can't block", CANT_BLOCK),
+                ("damage to it prevented", NO_DAMAGE),
+            ]
+            .iter(),
+        )
         .filter(|(_, b)| bits & b != 0)
         .map(|(n, _)| *n)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Names of rule-changing statics (`R_*`).
+fn rule_names(bits: u32) -> String {
+    [
+        (R_CANT_LOSE, "you can't lose the game"),
+        (
+            R_NO_ETB_TRIGGERS,
+            "artifacts and creatures entering trigger nothing",
+        ),
+        (R_DEFENDERS_ATTACK, "your defenders can attack"),
+        (
+            R_TOUGHNESS_DAMAGE,
+            "your creatures deal combat damage by toughness when greater",
+        ),
+        (R_NEGATIVE_POWER, "negative power deals combat damage"),
+        (
+            R_OPP_NO_CAST_MY_TURN,
+            "opponents can't cast spells during your turn",
+        ),
+        (R_LANDS_FROM_GY, "lands playable from your graveyard"),
+        (
+            R_PERMANENTS_FROM_GY,
+            "one permanent of each type castable from your graveyard each turn",
+        ),
+        (R_FREE_FROM_HAND, "spells from your hand are free"),
+        (
+            R_FREE_BY_CREATURES,
+            "spells from your hand with MV <= your creatures are free",
+        ),
+        (R_FLASH_SPELLS, "your spells have flash"),
+        (
+            R_FLASH_AFTER_OPPONENT,
+            "your spells have flash once an opponent cast one this turn",
+        ),
+        (
+            R_FIRST_CREATURE_FLASH,
+            "your first creature spell each turn has flash",
+        ),
+        (R_STASH, "stashed cards playable on your turn"),
+        (
+            R_NAMES_CARD,
+            "names an opponent's card: its activated abilities stop",
+        ),
+        (
+            R_FREE_FIRST_EQUIP,
+            "the first equip each turn is free with an enduring story",
+        ),
+    ]
+    .iter()
+    .filter(|(b, _)| bits & b != 0)
+    .map(|(_, n)| *n)
+    .collect::<Vec<_>>()
+    .join("; ")
 }
 
 /// "{2}{U}{U}".
@@ -266,15 +354,36 @@ fn diff(a: &Snap, b: &Snap, skip: Option<u32>) -> Vec<String> {
         if b.extra_combats[p] > a.extra_combats[p] {
             bits.push("extra combat".into());
         }
+        if b.extra_turns[p] > a.extra_turns[p] {
+            bits.push("extra turn".into());
+        }
+        if b.playable[p] != a.playable[p] {
+            bits.push(format!(
+                "cards playable from exile {}",
+                signed(b.playable[p] as i64 - a.playable[p] as i64)
+            ));
+        }
+        if b.emblems[p] > a.emblems[p] {
+            bits.push("gets an emblem".into());
+        }
+        if b.by_toughness[p] && !a.by_toughness[p] {
+            bits.push("creatures deal combat damage by toughness this turn".into());
+        }
+        if a.alive[p] && !b.alive[p] {
+            bits.push("loses the game".into());
+        }
         if !bits.is_empty() {
             out.push(format!("{}: {}", who, bits.join(", ")));
         }
     }
-    if b.fog && !a.fog {
+    if b.end_turn && !a.end_turn {
+        out.push("The turn ends".into());
+    } else if b.fog && !a.fog {
         out.push("Combat damage prevented this turn".into());
     }
     for x in &a.perms {
-        if Some(x.id) == skip {
+        // (A player who lost took their permanents with them.)
+        if Some(x.id) == skip || !b.alive[x.ctrl as usize] && a.alive[x.ctrl as usize] {
             continue;
         }
         match b.perms.iter().find(|y| y.id == x.id) {
@@ -311,10 +420,33 @@ fn diff(a: &Snap, b: &Snap, skip: Option<u32>) -> Vec<String> {
                 if y.shield != x.shield {
                     bits.push("shield counter".into());
                 }
+                if y.stun != x.stun {
+                    bits.push(format!(
+                        "stun counters {}",
+                        signed(y.stun as i64 - x.stun as i64)
+                    ));
+                }
+                if y.name != x.name {
+                    bits.push(format!("becomes {}", y.name));
+                }
+                if y.blank && !x.blank {
+                    bits.push("loses all abilities".into());
+                }
+                if y.creature && !x.creature {
+                    bits.push("becomes a creature".into());
+                }
+                if y.returns && !x.returns {
+                    bits.push("returns to the battlefield if it dies this turn".into());
+                }
+                if let (Some(n), None) = (&y.named, &x.named) {
+                    bits.push(format!("names {}", n));
+                }
                 if y.tapped != x.tapped {
                     bits.push(if y.tapped { "tapped" } else { "untapped" }.into());
                 }
-                let gained = y.kw & !x.kw;
+                // ("Can't attack or block" says it already.)
+                let lock = if y.locked && !x.locked { CANT_BLOCK } else { 0 };
+                let gained = y.kw & !x.kw & !lock;
                 let lost = x.kw & !y.kw;
                 if gained != 0 {
                     bits.push(format!("gains {}", kw_names(gained)));
@@ -490,14 +622,23 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     let x = card.cost.x.then_some(3);
     g.cur_x = x;
     g.entering_x = x.filter(|_| card.is_permanent() && !back && !ab.from_graveyard);
+    // A transforming card's back face fires from the transformed permanent.
+    let transformed = back
+        && card
+            .back
+            .as_ref()
+            .is_some_and(|b| b.kind == BackKind::Transform);
     let src = if ab.from_graveyard {
         g.players[0].graveyard.push(PROBED);
         None
-    } else if card.is_permanent() && !back {
+    } else if card.is_permanent() && (!back || transformed) {
         let i = g.enter_card(0, PROBED, 0, false);
         let id = i.map(|i| g.perms[i].id);
         if let Some(i) = i {
             g.perms[i].sick = false;
+            if transformed {
+                g.transform(i);
+            }
             if card.is(T_EQUIPMENT) || card.is(T_AURA) {
                 g.perms[i].attached = Some(bear);
             }
@@ -521,6 +662,10 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     } else {
         None
     };
+    // Forcing "if target player has exactly 10 life": Opp A has 10.
+    if let (Some(_), Cond::OpponentLifeExactly(n)) = (mode, &ab.cond) {
+        g.players[1].life = *n;
+    }
     let before = snap(&g);
     let snapshot = died.or_else(|| src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone()));
     let groups = ab.mode_groups();
@@ -609,6 +754,16 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
         }
         if ab.once_per_turn {
             flags.push("once each turn".into());
+        }
+        if ab.second_draw {
+            flags.push(
+                if ab.text.contains("second spell") {
+                    "the second spell each turn"
+                } else {
+                    "the second card drawn each turn"
+                }
+                .into(),
+            );
         }
         if let Some(p) = &ab.pay {
             flags.push(format!(
@@ -764,7 +919,6 @@ pub fn probe(card: &Card) -> String {
     for (label, on) in [
         ("convoke", c.convoke),
         ("improvise", c.improvise),
-        ("affinity for artifacts", c.affinity),
         ("extort", c.extort),
     ] {
         if on {
@@ -799,7 +953,81 @@ pub fn probe(card: &Card) -> String {
         ));
     }
     if let Some((n, f)) = &c.cost_reduction {
-        sim.push(format!("spells cost {} less ({:?})", n, f));
+        let first = if c.reduction_first {
+            "the first such spell each turn: "
+        } else {
+            ""
+        };
+        if c.reduction_by_power {
+            sim.push(format!(
+                "{}spells cost X less, X = its power ({:?})",
+                first, f
+            ));
+        } else {
+            sim.push(format!("{}spells cost {} less ({:?})", first, n, f));
+        }
+    }
+    for r in &c.self_reduce {
+        sim.push(match r {
+            SelfReduce::If(n, cond) => format!("costs {} less if {:?}", n, cond),
+            SelfReduce::Each(n, what) => format!("costs {} less for each {}", n, what),
+        });
+    }
+    if let Some((n, f)) = &c.opp_tax {
+        sim.push(format!("opponents' spells cost {} more ({:?})", n, f));
+    }
+    if let Some((n, cond)) = &c.attack_tax {
+        sim.push(format!(
+            "attacking you costs {} per creature{}",
+            n,
+            if *cond == Cond::Always {
+                String::new()
+            } else {
+                format!(" while {:?}", cond)
+            }
+        ));
+    }
+    let rules = c.rules & !(R_SPELL_TAX | R_ATTACK_TAX);
+    if rules != 0 {
+        sim.push(format!("rules: {}", rule_names(rules)));
+    }
+    if c.hexproof_from != 0 {
+        sim.push(format!(
+            "hexproof from {}",
+            (0..6)
+                .filter(|i| c.hexproof_from & (1 << i) != 0)
+                .map(|i| ["white", "blue", "black", "red", "green", "instants"][i])
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(a) = &c.attached_sets {
+        sim.push(format!(
+            "makes its permanent a {}/{}{}{}",
+            a.power,
+            a.toughness,
+            if a.creature { " creature" } else { "" },
+            if a.blank { " with no abilities" } else { "" }
+        ));
+    }
+    if c.equip_target_less > 0 {
+        sim.push(format!("equipping it costs {} less", c.equip_target_less));
+    }
+    if c.equip_less_per_counter {
+        sim.push("equip costs 1 less per +1/+1 counter on the target".into());
+    }
+    if let Some(cond) = &c.enters_tapped_unless {
+        sim.push(format!("enters tapped unless {:?}", cond));
+    }
+    if let Some(b) = c.back.as_ref().filter(|b| b.kind == BackKind::Transform) {
+        let mut back = format!("transforms into {} {}/{}", b.name, b.power, b.toughness);
+        if b.kw != 0 {
+            back.push_str(&format!(" {}", kw_names(b.kw)));
+        }
+        if b.rules != 0 {
+            back.push_str(&format!(" ({})", rule_names(b.rules)));
+        }
+        sim.push(back);
     }
     if !sim.is_empty() {
         out.push(format!("SIM: {}", sim.join("; ")));
@@ -830,13 +1058,17 @@ pub fn probe(card: &Card) -> String {
             let mine = after.perms.iter().find(|x| x.id == id).cloned();
             if let Some(m) = &mine {
                 out.push(format!(
-                    "      itself: {}{}",
+                    "      itself: {}{}{}",
                     if m.t > 0 {
                         format!("{}/{} ", m.p, m.t)
                     } else {
                         String::new()
                     },
-                    kw_names(m.kw)
+                    kw_names(m.kw),
+                    m.named
+                        .as_ref()
+                        .map(|n| format!(" (names {})", n))
+                        .unwrap_or_default()
                 ));
             }
             after.perms.retain(|x| x.id != id);

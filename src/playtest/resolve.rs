@@ -72,6 +72,19 @@ pub const RULES_MODELLED: &[&str] = &[
     "steals the enchanted permanent",
     "fetches a card from outside the game",
     "damage to you",
+    "transforms",
+    "extra turn",
+    "ends the turn",
+    "can't block this turn",
+    "shuffles itself into its library",
+    "gives itself to an opponent",
+    "assigns combat damage by toughness",
+    "returns when it dies",
+    "stashes the discarded card",
+    "an opponent creates a creature token",
+    "you get an emblem",
+    "gets +N/+N until your next turn",
+    "becomes a creature",
     // and "you lose N life" (see `rule_modelled`)
 ];
 
@@ -645,6 +658,14 @@ impl<'a> Game<'a> {
                 if x.protection & src_colors != 0 && !mine {
                     continue;
                 }
+                // "Hexproof from black", "hexproof from instants" (Knight of Grace, Elenda).
+                if !mine
+                    && (x.hexproof_from & src_colors & 0b11111 != 0
+                        || x.hexproof_from & (1 << 5) != 0
+                            && ctx.card.is_some_and(|c| c.is(T_INSTANT)))
+                {
+                    continue;
+                }
                 if !mine && !self.ward_payable(me, x) {
                     continue;
                 }
@@ -846,9 +867,22 @@ impl<'a> Game<'a> {
                     None => return,
                 },
             }
+        } else if pend.ability >= EMBLEM_BASE {
+            let c = self.card(pend.card);
+            match c.emblems.get((pend.ability - EMBLEM_BASE) as usize) {
+                Some((_, a)) => std::slice::from_ref(a),
+                None => return,
+            }
         } else {
             let c = self.card(pend.card);
-            if pend.back {
+            // A transformed permanent's abilities are its back face's.
+            let transformed = pend
+                .source
+                .and_then(|id| self.idx(id))
+                .map(|i| &self.perms[i])
+                .or(pend.snapshot.as_ref())
+                .is_some_and(|x| x.transformed && x.card == Some(pend.card));
+            if pend.back || transformed {
                 match &c.back {
                     Some(b) => &b.abilities,
                     None => return,
@@ -863,7 +897,11 @@ impl<'a> Game<'a> {
                 }
             }
         };
-        let Some(ab) = abilities.get(pend.ability as usize) else {
+        let Some(ab) = abilities.get(if pend.ability >= EMBLEM_BASE {
+            0
+        } else {
+            pend.ability as usize
+        }) else {
             return;
         };
         let src_idx = pend.source.and_then(|id| self.idx(id));
@@ -2575,6 +2613,11 @@ impl<'a> Game<'a> {
                 }
                 self.leave(i, Zone::Exile, false);
                 let owner = x.owner as usize;
+                // "Return it to the battlefield ... at the beginning of the next end step".
+                if text.contains("beginning of the next end step") {
+                    self.delayed_returns.push(r);
+                    return;
+                }
                 if let Some(k) = self.players[owner].exile.iter().rposition(|&c| c == r.1) {
                     self.players[owner].exile.remove(k);
                     if let Some(j) = self.enter_card(owner, r.1, x.ctrl as usize, false) {
@@ -2711,6 +2754,11 @@ impl<'a> Game<'a> {
             // Doublers work while the permanent is in play (`doubles`).
             Effect::Doubler(_) => {}
             Effect::Fog => self.fog = true,
+            // Impulse draws: the cards are exiled and may be played for a while.
+            Effect::Dig if impulse_of(text).is_some() => {
+                let imp = impulse_of(text).unwrap_or_default();
+                self.impulse(ctx, imp);
+            }
             Effect::Dig => {
                 let n = text
                     .split("top ")
@@ -3399,6 +3447,218 @@ impl<'a> Game<'a> {
                     self.perms[i].ctrl = o as u8;
                 }
             }
+            "sets base power/toughness"
+                if base_pt_of(text).is_some()
+                    || text.contains("equal to ~'s power and toughness") =>
+            {
+                self.set_base_pt(ctx);
+            }
+            "transforms" => {
+                if let Some(i) = self.src_idx(ctx) {
+                    self.transform(i);
+                }
+            }
+            "extra turn" => {
+                self.players[me].extra_turns = self.players[me].extra_turns.saturating_add(1);
+            }
+            // Time Stop: the stack is exiled and the rest of the turn is skipped (combat
+            // damage included).
+            "ends the turn" => {
+                self.end_turn = true;
+                self.fog = true;
+                self.pending.clear();
+            }
+            "can't block this turn" => {
+                let t = Target {
+                    kind: Kind::Creature,
+                    whose: Whose::Theirs,
+                    mass: false,
+                    other: false,
+                    restricted: false,
+                    restr: Default::default(),
+                    count: 1,
+                };
+                for id in self.choose(ctx, &t, true) {
+                    if let Some(i) = self.idx(id) {
+                        self.perms[i].temp_kw |= CANT_BLOCK;
+                    }
+                }
+                self.recalc();
+            }
+            // "Fblthp's owner shuffles him into their library".
+            "shuffles itself into its library" => {
+                if let Some(i) = self.src_idx(ctx) {
+                    let owner = self.perms[i].owner as usize;
+                    self.leave(i, Zone::Library(false), false);
+                    let mut lib = std::mem::take(&mut self.players[owner].library);
+                    self.rng.shuffle(&mut lib);
+                    self.players[owner].library = lib;
+                }
+            }
+            // Wishclaw Talisman: the least threatening opponent gets it.
+            "gives itself to an opponent" => {
+                let to = self.opponents(me).into_iter().min_by(|&a, &b| {
+                    ai::threat(self, a)
+                        .partial_cmp(&ai::threat(self, b))
+                        .unwrap()
+                });
+                if let (Some(i), Some(o)) = (self.src_idx(ctx), to) {
+                    self.perms[i].ctrl = o as u8;
+                    self.recalc();
+                }
+            }
+            // Tinybones: the discarded card goes to exile with a stash counter, playable by
+            // us on our turns.
+            "you get an emblem" => {
+                // The emblem abilities of the loyalty ability resolving.
+                let Some(r) = ctx.card_ref else { return };
+                let Some(k) = self.card(r).abilities.iter().position(|a| a.text == text) else {
+                    return;
+                };
+                let ks: Vec<u16> = self
+                    .card(r)
+                    .emblems
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (from, _))| *from as usize == k)
+                    .map(|(j, _)| j as u16)
+                    .collect();
+                for j in ks {
+                    self.players[me].emblems.push((r, j));
+                }
+                self.recalc();
+            }
+            // "Up to one target creature gets -4/-1 until your next turn" (Garruk).
+            "gets +N/+N until your next turn" => {
+                let Some(pt) = text.split(" gets ").nth(1) else {
+                    return;
+                };
+                let pt = pt.split(' ').next().unwrap_or("");
+                let Some((p, t)) = pt.split_once('/') else {
+                    return;
+                };
+                let num = |s: &str| s.trim_start_matches('+').parse::<i16>().ok();
+                let (Some(dp), Some(dt)) = (num(p), num(t)) else {
+                    return;
+                };
+                let harmful = dp + dt < 0;
+                let t = Target {
+                    kind: Kind::Creature,
+                    whose: if harmful { Whose::Theirs } else { Whose::Yours },
+                    mass: false,
+                    other: false,
+                    restricted: false,
+                    restr: Default::default(),
+                    count: 1,
+                };
+                for id in self.choose(ctx, &t, harmful) {
+                    if let Some(i) = self.idx(id) {
+                        self.perms[i].till = Some((dp, dt, me as u8));
+                    }
+                }
+                self.recalc();
+            }
+            // (The card was exiled as it was discarded: see `Game::emit`.)
+            "stashes the discarded card" => {}
+            // The Sentry: The Void, a 5/5 flying indestructible token, for the opponent it
+            // helps least.
+            "an opponent creates a creature token" => {
+                let Some(o) = self.opponents(me).into_iter().min_by(|&a, &b| {
+                    ai::threat(self, a)
+                        .partial_cmp(&ai::threat(self, b))
+                        .unwrap()
+                }) else {
+                    return;
+                };
+                let rest = text.split("creates ").nth(1).unwrap_or("");
+                let (p, t) = rest
+                    .split_whitespace()
+                    .find_map(|w| {
+                        let (p, t) = w.split_once('/')?;
+                        Some((p.parse().ok()?, t.trim_end_matches(',').parse().ok()?))
+                    })
+                    .unwrap_or((1, 1));
+                let with = rest.split(" with ").nth(1).unwrap_or("");
+                let with = with.split('"').next().unwrap_or("");
+                let kw = KEYWORDS
+                    .iter()
+                    .filter(|(k, _)| with.contains(k))
+                    .fold(0, |m, (_, b)| m | b);
+                let i = self.make_token(o, p, t, kw, token_subtypes(text));
+                self.after_enter(i);
+            }
+            // The permanent itself becomes a creature (for good, or until end of turn).
+            "becomes a creature" => {
+                let Some(i) = self.src_idx(ctx) else { return };
+                if self.perms[i].is_creature() && text.contains("isn't a creature") {
+                    return;
+                }
+                let rest = text.split(" become").nth(1).unwrap_or("");
+                let mut pt = rest
+                    .split_whitespace()
+                    .find_map(|w| {
+                        let (p, t) = w.split_once('/')?;
+                        Some((p.parse::<i16>().ok()?, t.parse::<i16>().ok()?))
+                    })
+                    .unwrap_or((0, 0));
+                // "Power and toughness are each equal to the number of lands you control":
+                // counted now. ("+1/+1 for each artifact" is the ability's own pump.)
+                if let Some(what) = rest.split("equal to the number of ").nth(1) {
+                    let n = self.count_of(me, ctx.src, what).unwrap_or(0) as i16;
+                    pt = (n, n);
+                }
+                let with = rest.split(" with ").nth(1).unwrap_or("");
+                let with = with.split('"').next().unwrap_or("");
+                let kw = KEYWORDS
+                    .iter()
+                    .filter(|(k, _)| with.contains(k))
+                    .fold(0, |m, (_, b)| m | b);
+                let x = &mut self.perms[i];
+                // An Equipment that becomes a creature falls off (CR 301.5c).
+                if x.is(T_EQUIPMENT) {
+                    x.attached = None;
+                }
+                if text.contains("until end of turn") {
+                    x.temp_creature = true;
+                    x.temp_base = Some(pt);
+                    x.temp_kw |= kw;
+                } else {
+                    x.types |= T_CREATURE;
+                    x.base_p = pt.0;
+                    x.base_t = pt.1;
+                    x.kw |= kw;
+                }
+                self.recalc();
+            }
+            "assigns combat damage by toughness" => {
+                self.players[me].toughness_damage_turn = true;
+            }
+            "returns when it dies" => {
+                let t = Target {
+                    kind: Kind::Creature,
+                    whose: Whose::Yours,
+                    mass: false,
+                    other: false,
+                    restricted: false,
+                    restr: Default::default(),
+                    count: 1,
+                };
+                for id in self.choose(ctx, &t, false) {
+                    if let Some(i) = self.idx(id) {
+                        self.perms[i].returns_on_death = RETURNS
+                            | if text.contains("with a +1/+1 counter") {
+                                RETURNS_COUNTER
+                            } else {
+                                0
+                            }
+                            | if text.contains("create a treasure") {
+                                RETURNS_TREASURE
+                            } else {
+                                0
+                            };
+                    }
+                }
+            }
             "turns a permanent into a creature" | "sets base power/toughness" => {
                 if let Some(a) = self
                     .src_perm(ctx)
@@ -3637,6 +3897,263 @@ impl<'a> Game<'a> {
             }
             _ => {}
         }
+    }
+}
+
+/// An impulse draw ("exile the top two cards of your library. Choose one of them. Until the
+/// end of your next turn, you may play that card").
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Impulse {
+    /// How many cards (0: X).
+    pub n: usize,
+    pub choose_one: bool,
+    /// "Until the end of your next turn".
+    pub next_turn: bool,
+    /// "For as long as they remain exiled".
+    pub lasting: bool,
+    /// A card from your graveyard (Thor), not the library.
+    pub from_graveyard: bool,
+    /// The top of an opponent's library (Inside Information).
+    pub opponent: bool,
+    pub pay_life: bool,
+}
+
+/// Reads an impulse draw (None for other "look at the top" texts).
+pub fn impulse_of(text: &str) -> Option<Impulse> {
+    let plays = text.contains("you may play")
+        || text.contains("you may cast that card")
+        || text.contains("you may cast it this turn");
+    if !plays || !text.contains("exile") || text.contains("without paying") {
+        return None;
+    }
+    let from_graveyard = text.contains("card from your graveyard");
+    let n = if from_graveyard {
+        1
+    } else {
+        let w = text
+            .split("exile the top ")
+            .nth(1)
+            .or_else(|| text.split("look at the top ").nth(1))?
+            .split_whitespace()
+            .next()?;
+        match w {
+            "card" => 1,
+            "two" => 2,
+            "three" => 3,
+            "four" => 4,
+            "five" => 5,
+            "x" => 0,
+            d => d.parse().ok()?,
+        }
+    };
+    Some(Impulse {
+        n,
+        choose_one: text.contains("choose one"),
+        next_turn: text.contains("end of your next turn"),
+        lasting: text.contains("for as long as"),
+        from_graveyard,
+        opponent: text.contains("opponent's library"),
+        pay_life: text.contains("pay life equal to its mana value"),
+    })
+}
+
+/// "Has base power and toughness 4/5", "base power and toughness become 6/6".
+fn base_pt_of(text: &str) -> Option<(i16, i16)> {
+    let rest = text.split("base power and toughness ").nth(1)?;
+    let rest = rest
+        .trim_start_matches("become ")
+        .trim_start_matches("becomes ");
+    let pt = rest.split([' ', '.', ',']).next()?;
+    let (p, t) = pt.split_once('/')?;
+    Some((p.parse().ok()?, t.parse().ok()?))
+}
+
+impl<'a> Game<'a> {
+    /// When a card made playable now stops being playable: the end of this turn, of
+    /// `p`'s next turn, or never.
+    pub fn play_until(&self, p: usize, next_turn: bool, lasting: bool) -> (u32, u8) {
+        if lasting {
+            (u32::MAX, p as u8)
+        } else if !next_turn {
+            (self.round, self.active as u8)
+        } else if self.active == p || p < self.active {
+            (self.round + 1, p as u8)
+        } else {
+            (self.round, p as u8)
+        }
+    }
+
+    /// Exiles the impulse draw's cards and makes them playable (the best one, if only one
+    /// of them may be played).
+    fn impulse(&mut self, ctx: &Ctx, imp: Impulse) {
+        let me = ctx.ctrl;
+        let until = self.play_until(me, imp.next_turn, imp.lasting);
+        if imp.from_graveyard {
+            // "Exile target Equipment, instant, or sorcery card from your graveyard" (Thor),
+            // "exile that card from your graveyard" (Moonstone: the card just discarded).
+            let pl = &self.players[me];
+            let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
+            let that = ctx.text.contains("exile that card");
+            let best = (0..pl.graveyard.len())
+                .filter(|&k| !that || k + 1 == pl.graveyard.len())
+                .filter(|&k| {
+                    let c = &pl.cards[pl.graveyard[k] as usize];
+                    Game::card_ok(&ctx.card_restr, c, &d)
+                })
+                .max_by(|&a, &b| {
+                    let v = |k: usize| pl.cards[pl.graveyard[k] as usize].value;
+                    v(a).partial_cmp(&v(b)).unwrap()
+                });
+            if let Some(k) = best {
+                let c = self.players[me].graveyard.remove(k);
+                self.players[me].exile.push(c);
+                self.players[me].playable.push(Playable {
+                    card: (me as u8, c),
+                    until,
+                    own_turn: false,
+                    pay_life: false,
+                });
+                self.emit(Ev::LeavesGraveyard, me, None);
+            }
+            return;
+        }
+        let from = if imp.opponent {
+            match ai::choose_opponent(self, me, 0) {
+                Some(o) => o,
+                None => return,
+            }
+        } else {
+            me
+        };
+        let n = if imp.n == 0 {
+            // X paid for it, or "where X is ~'s power".
+            match ctx.x.or(self.cur_x) {
+                Some(x) if !ctx.text.contains("where x is") => x.max(0) as usize,
+                _ => self.x_value(ctx, &Amount { n: 3, x: true }).max(0) as usize,
+            }
+        } else {
+            imp.n
+        };
+        let mut cards = Vec::new();
+        for _ in 0..n {
+            match self.players[from].library.pop() {
+                Some(c) => {
+                    self.players[from].exile.push(c);
+                    cards.push(c);
+                }
+                None => break,
+            }
+        }
+        if imp.choose_one && cards.len() > 1 {
+            let pl = &self.players[from];
+            let best = cards.iter().copied().max_by(|&a, &b| {
+                let v = |c: u16| pl.cards[c as usize].value;
+                v(a).partial_cmp(&v(b)).unwrap()
+            });
+            cards = best.into_iter().collect();
+        }
+        if let Some(&c) = cards.first() {
+            self.focus_card = Some((from as u8, c));
+        }
+        for c in cards {
+            self.players[me].playable.push(Playable {
+                card: (from as u8, c),
+                until,
+                own_turn: false,
+                pay_life: imp.pay_life,
+            });
+        }
+    }
+
+    /// A transforming double-faced permanent turns into its back face (CR 712): its
+    /// characteristics are the back's; counters, damage and attachments stay.
+    pub fn transform(&mut self, i: usize) {
+        let x = &self.perms[i];
+        let back = x
+            .card
+            .and_then(|r| self.card(r).back.as_ref())
+            .filter(|b| b.kind == BackKind::Transform && !x.transformed);
+        let Some(b) = back else { return };
+        let mut colors = 0;
+        for (k, &n) in b.cost.pips.iter().enumerate() {
+            if n > 0 {
+                colors |= 1 << k;
+            }
+        }
+        let ctrl = x.ctrl;
+        let x = &mut self.perms[i];
+        x.transformed = true;
+        x.base_p = b.power;
+        x.base_t = b.toughness;
+        x.kw = b.kw;
+        x.types = b.types | (x.types & T_TOKEN);
+        x.subtypes = b.subtypes.clone();
+        if colors != 0 {
+            x.colors = colors;
+        }
+        self.note(|| format!("P{} transforms it into {}", ctrl, b.name));
+        self.recalc();
+    }
+
+    /// "Target creature has base power and toughness 1/1 until end of turn", "~'s base power
+    /// and toughness become 4/2 until end of turn", "its base power and toughness become equal
+    /// to Galion's power and toughness".
+    fn set_base_pt(&mut self, ctx: &Ctx) {
+        let text = ctx.text;
+        let pt = match base_pt_of(text) {
+            Some(pt) => pt,
+            None => match self.src_perm(ctx) {
+                Some(s) => (s.p, s.t),
+                None => return,
+            },
+        };
+        let ids: Vec<u32> = if text.contains("target creature") {
+            // Small (1/1, 0/0) is for an opponent's creature; big for ours, the one it
+            // grows the most.
+            let harmful = pt.0 + pt.1 <= 2;
+            let t = Target {
+                kind: Kind::Creature,
+                whose: if harmful { Whose::Theirs } else { Whose::Yours },
+                mass: false,
+                other: text.contains("other target creature"),
+                restricted: false,
+                restr: Default::default(),
+                count: 1,
+            };
+            if harmful {
+                self.choose(ctx, &t, true)
+            } else {
+                let grows = |x: &Perm| {
+                    let (bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+                    (pt.0 + pt.1) - (bp + bt)
+                };
+                let best = self
+                    .candidates(ctx, &t, false)
+                    .into_iter()
+                    .filter(|&i| grows(&self.perms[i]) > 0)
+                    .max_by_key(|&i| grows(&self.perms[i]))
+                    .map(|i| self.perms[i].id);
+                self.last_targets = best.into_iter().collect();
+                self.targeted = true;
+                best.into_iter().collect()
+            }
+        } else {
+            self.src_idx(ctx)
+                .map(|i| self.perms[i].id)
+                .into_iter()
+                .collect()
+        };
+        for id in ids {
+            let Some(i) = self.idx(id) else { continue };
+            let x = &mut self.perms[i];
+            if text.contains("until end of turn") || ctx.until_eot {
+                x.temp_base = Some(pt);
+            } else {
+                x.base_p = pt.0;
+                x.base_t = pt.1;
+            }
+        }
+        self.recalc();
     }
 }
 

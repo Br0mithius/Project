@@ -1703,3 +1703,505 @@ fn trigger_timing_and_filters() {
         }
     ));
 }
+
+// ------------------------------------------------------------ mechanisms: transform, turns,
+// other zones, cost modifiers, rule-changing statics, characteristics
+
+fn untap_all(g: &mut Game) {
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+}
+
+#[test]
+fn transforming_cards_turn_into_their_back_face() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Bruce Banner",
+            "King T'Challa",
+            "Jennifer Walters",
+            "Lightning Strike",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 6, 'R');
+    let bruce = put(&mut g, 0, 1);
+    // Only the front face is cast.
+    g.players[0].hand.push(1);
+    let back = CastOpts {
+        back: true,
+        ..Default::default()
+    };
+    assert!(g.cast_cost(0, Src::Hand(0), back).is_none());
+    g.players[0].hand.clear();
+    let k = ability(&d, 1, "transform");
+    assert!(g.activate(0, bruce, k));
+    let x = perm(&g, bruce);
+    assert!(x.transformed);
+    assert_eq!((x.p, x.t), (8, 8), "The Incredible Hulk is an 8/8");
+    assert!(x.has(TRAMPLE) && x.has(REACH));
+    // The Hulk's own abilities: enrage puts a +1/+1 counter on him.
+    let i = g.idx(bruce).unwrap();
+    g.damage_perm(i, 1, false);
+    g.run_pending();
+    assert_eq!(perm(&g, bruce).counters, 1);
+    // Black Panther: double strike, and all damage to him is prevented.
+    untap_all(&mut g);
+    let tc = put(&mut g, 0, 2);
+    let k = ability(&d, 2, "transform");
+    assert!(g.activate(0, tc, k));
+    let i = g.idx(tc).unwrap();
+    assert!(g.perms[i].has(DOUBLE_STRIKE));
+    g.damage_perm(i, 5, false);
+    g.sba();
+    assert_eq!(
+        perm(&g, tc).damage,
+        0,
+        "damage to Black Panther is prevented"
+    );
+    // Jennifer Walters: her controller's opponents can't cast spells during their turn.
+    put(&mut g, 0, 3);
+    lands(&mut g, 1, 2, 'R');
+    g.players[1].hand.push(4);
+    g.active = 0;
+    assert!(g.cast_cost(1, Src::Hand(0), CastOpts::default()).is_none());
+    g.active = 1;
+    assert!(g.cast_cost(1, Src::Hand(0), CastOpts::default()).is_some());
+}
+
+#[test]
+fn extra_turns_and_ending_the_turn() {
+    let db = db();
+    let mut cards: Vec<Card> = ["Island", "Kang the Conqueror", "Time Stop"]
+        .iter()
+        .map(|n| db.get(n).unwrap().clone())
+        .collect();
+    cards.push(card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("5", "5")),
+    ));
+    let d = prep(&cards);
+    // Kang's power-up: an extra turn after this one, in which power-ups can't be activated.
+    let mut g = game(&[&d, &d]);
+    let kang = put(&mut g, 0, 1);
+    let k = ability(&d, 1, "extra turn");
+    fire_card(&mut g, 1, k, Some(kang));
+    assert_eq!(g.players[0].extra_turns, 1);
+    let library = g.players[0].library.len();
+    g.take_turns(0, false);
+    assert_eq!(
+        g.players[0].library.len(),
+        library - 2,
+        "two turns, two draws"
+    );
+    assert_eq!(g.players[0].extra_turns, 0);
+    let i = g.idx(kang).unwrap();
+    g.perms[i].powered = false;
+    g.players[0].no_powerups = true;
+    assert!(g.activation_cost(0, i, k).is_none());
+    // Time Stop in answer to a lethal attack: the turn ends, no damage is dealt.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 3);
+    lands(&mut g, 1, 6, 'U');
+    g.players[1].hand.push(2);
+    g.players[1].life = 4;
+    g.active = 0;
+    g.combat(0);
+    assert!(g.end_turn, "Time Stop ended the turn");
+    assert_eq!(g.players[1].life, 4);
+    assert!(g.players[1].hand.is_empty());
+}
+
+#[test]
+fn free_casts_and_casting_from_other_zones() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Island",
+            "Omniscience",
+            "Omnipresence",
+            "Tolarian Terror",
+            "Helpful Hunter",
+            "Muldrotha, the Gravetide",
+            "Gleaming Barrier",
+            "Mole Man, Moloid Master",
+            "Thor, God of Thunder",
+            "Lightning Strike",
+            "Tinybones, Bauble Burglar",
+            "Mountain",
+            "Jessica Jones, Private Eye",
+            "Plains",
+        ],
+    );
+    // Omniscience: spells from hand are free.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    g.players[0].hand.push(3);
+    assert_eq!(
+        g.cast_cost(0, Src::Hand(0), CastOpts::default())
+            .unwrap()
+            .total(),
+        0
+    );
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 3))));
+    // Omnipresence: free up to the number of creatures you control.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 6);
+    put(&mut g, 0, 6);
+    g.players[0].hand = vec![4, 3];
+    let cost = |g: &Game, h: usize| {
+        g.cast_cost(0, Src::Hand(h), CastOpts::default())
+            .unwrap()
+            .total()
+    };
+    assert_eq!(cost(&g, 0), 0, "Helpful Hunter (MV 2) with two creatures");
+    assert_eq!(cost(&g, 1), 7, "Tolarian Terror (MV 7) isn't free");
+    // Muldrotha: one permanent of each type from the graveyard on your turn.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 8, 'W');
+    put(&mut g, 0, 5);
+    g.active = 0;
+    g.players[0].graveyard = vec![4, 4, 6];
+    assert!(g.cast(0, Src::Graveyard(0), CastOpts::default()));
+    assert!(
+        g.cast_cost(0, Src::Graveyard(0), CastOpts::default())
+            .is_none(),
+        "a second creature can't come from the graveyard this turn"
+    );
+    assert!(
+        g.cast(0, Src::Graveyard(1), CastOpts::default()),
+        "Gleaming Barrier is an artifact too: it uses the artifact type"
+    );
+    g.players[0].graveyard = vec![4];
+    g.players[0].gy_types_used = 0;
+    g.active = 1;
+    assert!(
+        g.cast_cost(0, Src::Graveyard(0), CastOpts::default())
+            .is_none()
+    );
+    // Mole Man: a land from the graveyard.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 7);
+    g.active = 0;
+    g.players[0].graveyard = vec![0];
+    ai::main_phase(&mut g, 0, false);
+    assert!(g.players[0].graveyard.is_empty());
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 0))));
+    // Thor: an instant from the graveyard to exile, playable until the end of the next turn.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].graveyard = vec![9];
+    g.active = 0;
+    put(&mut g, 0, 8);
+    assert_eq!(g.players[0].playable.len(), 1);
+    assert!(g.players[0].graveyard.is_empty());
+    assert!(g.cast(0, Src::Exile(0), CastOpts::default()));
+    assert!(g.players[0].playable.is_empty());
+    assert!(g.players[0].graveyard.contains(&9));
+    // Tinybones: an opponent's discarded card is stashed, castable on our turn with any
+    // mana; it stays its owner's card.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'U');
+    put(&mut g, 0, 10);
+    g.players[1].hand = vec![9];
+    g.discard(1);
+    assert!(g.players[1].graveyard.is_empty());
+    assert_eq!(g.players[0].playable.len(), 1);
+    g.active = 1;
+    assert!(g.cast_cost(0, Src::Exile(0), CastOpts::default()).is_none());
+    g.active = 0;
+    assert_eq!(
+        g.cast_cost(0, Src::Exile(0), CastOpts::default()),
+        Some(Mana::generic(2)),
+        "any type of mana: Islands pay for Lightning Strike"
+    );
+    assert!(g.cast(0, Src::Exile(0), CastOpts::default()));
+    assert!(g.players[1].graveyard.contains(&9), "back to its owner");
+    // Jessica Jones: exile the top X (her power) cards, playable this turn only.
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let jj = put(&mut g, 0, 12);
+    let k = ability(&d, 12, "exile the top");
+    assert!(g.activate(0, jj, k));
+    assert_eq!(g.players[0].playable.len(), 2);
+    assert_eq!(perm(&g, jj).stun, 1);
+    g.cleanup(0);
+    assert!(g.players[0].playable.is_empty(), "only this turn");
+}
+
+#[test]
+fn cost_taxes_and_reductions() {
+    let db = db();
+    let mut cards: Vec<Card> = [
+        "Island",
+        "Thalia, the Survivor",
+        "Lightning Strike",
+        "Tolarian Terror",
+        "The Scarlet Witch",
+        "Arcane Epiphany",
+        "Radagast of Rhosgobel",
+        "Cantankerous Keepers",
+        "Propaganda",
+    ]
+    .iter()
+    .map(|n| db.get(n).unwrap().clone())
+    .collect();
+    cards.push(card("Elf", "{G}", "Creature — Elf", "", Some(("1", "1"))));
+    let d = prep(&cards);
+    let cost = |g: &Game, p: usize| {
+        g.cast_cost(p, Src::Hand(0), CastOpts::default())
+            .unwrap()
+            .total()
+    };
+    // Thalia, the Survivor: opponents' noncreature spells cost {1} more.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 1, 1);
+    g.players[0].hand = vec![2];
+    assert_eq!(cost(&g, 0), 3);
+    g.players[0].hand = vec![9];
+    assert_eq!(cost(&g, 0), 1, "creature spells aren't taxed");
+    g.players[1].hand = vec![2];
+    assert_eq!(cost(&g, 1), 2, "not her controller's spells");
+    // Tolarian Terror: {1} less per instant and sorcery card in your graveyard.
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![3];
+    g.players[0].graveyard = vec![2, 2, 2, 9];
+    assert_eq!(cost(&g, 0), 4);
+    // The Scarlet Witch: instants and sorceries of mana value 4+ cost {X} less (her power).
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 4);
+    g.players[0].hand = vec![5];
+    assert_eq!(cost(&g, 0), 3, "Arcane Epiphany 5 - 2");
+    g.players[0].hand = vec![2];
+    assert_eq!(cost(&g, 0), 2, "Lightning Strike is under mana value 4");
+    // Radagast: the first creature spell each turn costs {2} less (and he's a Wizard, so
+    // Arcane Epiphany costs {1} less).
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 6);
+    g.players[0].hand = vec![3];
+    assert_eq!(cost(&g, 0), 5);
+    g.players[0].creature_spells_turn = 1;
+    assert_eq!(cost(&g, 0), 7);
+    g.players[0].hand = vec![5];
+    assert_eq!(cost(&g, 0), 4);
+    // Cantankerous Keepers: affinity for Elves.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 9);
+    put(&mut g, 0, 9);
+    g.players[0].hand = vec![7];
+    assert_eq!(cost(&g, 0), 4);
+    // Propaganda: each attacker costs {2}; what can't be paid for doesn't attack.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 1, 8);
+    put(&mut g, 0, 9);
+    put(&mut g, 0, 9);
+    lands(&mut g, 0, 2, 'U');
+    g.players[1].life = 1;
+    g.active = 0;
+    g.combat(0);
+    assert!(g.players[1].life <= 0, "one Elf paid for and connected");
+    let attacked = g.perms.iter().filter(|x| x.attacked_turn).count();
+    assert_eq!(attacked, 1, "only one attacker could be paid for");
+    assert!(
+        g.perms
+            .iter()
+            .filter(|x| x.is(T_LAND) && x.ctrl == 0)
+            .all(|x| x.tapped)
+    );
+}
+
+#[test]
+fn rule_changing_statics() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Island",
+            "Karn, Argent Defender",
+            "Helpful Hunter",
+            "Ghalta the Immovable",
+            "Gleaming Barrier",
+            "Loot, the Anomaly",
+            "Sorcerous Spyglass",
+            "Bruce Banner",
+        ],
+    );
+    // Karn: creatures entering trigger nothing.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    put(&mut g, 0, 2);
+    assert!(g.players[0].hand.is_empty(), "Helpful Hunter drew nothing");
+    // Ghalta: defenders attack and toughness assigns the damage.
+    let mut g = game(&[&d, &d]);
+    let wall = put(&mut g, 0, 4);
+    let i = g.idx(wall).unwrap();
+    assert!(!g.can_attack(i));
+    put(&mut g, 0, 3);
+    let i = g.idx(wall).unwrap();
+    assert!(g.can_attack(i));
+    assert_eq!(g.combat_power(&g.perms[i].clone()), 4);
+    // Loot: negative power deals damage as though it were positive.
+    let loot = put(&mut g, 1, 5);
+    let i = g.idx(loot).unwrap();
+    assert_eq!(g.perms[i].p, -2);
+    assert_eq!(g.combat_power(&g.perms[i].clone()), 2);
+    // Sorcerous Spyglass names Bruce Banner: his activated abilities stop.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 6, 'U');
+    let bruce = put(&mut g, 1, 7);
+    let i = g.idx(bruce).unwrap();
+    let k = ability_of(&g, bruce, |a| a.text.contains("transform"));
+    assert!(g.activation_cost(1, i, k).is_some());
+    let glass = put(&mut g, 0, 6);
+    assert_eq!(perm(&g, glass).named, Some((1, 7)));
+    let i = g.idx(bruce).unwrap();
+    assert!(g.activation_cost(1, i, k).is_none());
+}
+
+#[test]
+fn characteristic_changes_and_odd_effects() {
+    let db = db();
+    let mut cards: Vec<Card> = [
+        "Island",
+        "Eaten by Piranhas",
+        "Puppet Crafting",
+        "Sower of Chaos",
+        "Knight of Grace",
+        "Bilbo's Deadly Slice",
+        "The Sentry, Golden Guardian",
+        "Wishclaw Talisman",
+        "Undying Malice",
+        "Gandalf, Wandering Wizard",
+        "Ajani Resolute",
+        "Garruk, Veiled Butcher",
+        "Chandra, Chill of Compliance",
+    ]
+    .iter()
+    .map(|n| db.get(n).unwrap().clone())
+    .collect();
+    cards.push(card(
+        "Drake",
+        "{2}{U}",
+        "Creature — Drake",
+        "Flying",
+        Some(("3", "3")),
+    ));
+    cards.push(card("Relic", "{1}", "Artifact", "", None));
+    let d = prep(&cards);
+    const DRAKE: u16 = 13;
+    const RELIC: u16 = 14;
+    // Eaten by Piranhas: a 1/1 with no abilities that can still attack and block.
+    let mut g = game(&[&d, &d]);
+    let drake = put(&mut g, 1, DRAKE);
+    let i = g.enter_card(0, 1, 0, false).unwrap();
+    g.perms[i].attached = Some(drake);
+    g.recalc();
+    let x = perm(&g, drake);
+    assert_eq!((x.p, x.t), (1, 1));
+    assert!(!x.has(FLYING) && x.blank && !x.locked);
+    // Puppet Crafting: an artifact becomes a 5/5 creature.
+    let relic = put(&mut g, 0, RELIC);
+    let i = g.enter_card(0, 2, 0, false).unwrap();
+    g.perms[i].attached = Some(relic);
+    g.recalc();
+    let x = perm(&g, relic);
+    assert!(x.is_creature() && (x.p, x.t) == (5, 5));
+    // Sower of Chaos: target creature can't block this turn.
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let sower = put(&mut g, 0, 3);
+    let blocker = put(&mut g, 1, DRAKE);
+    let k = ability(&d, 3, "can't block");
+    fire_card(&mut g, 3, k, Some(sower));
+    let (b, a) = (g.idx(blocker).unwrap(), g.idx(sower).unwrap());
+    assert!(!g.can_block(b, a));
+    // Knight of Grace: hexproof from black.
+    let mut g = game(&[&d, &d]);
+    let knight = put(&mut g, 1, 4);
+    fire_card(&mut g, 5, 0, None);
+    assert!(g.idx(knight).is_some(), "black removal can't target it");
+    let drake = put(&mut g, 1, DRAKE);
+    fire_card(&mut g, 5, 0, None);
+    assert!(g.idx(drake).is_none());
+    // The Sentry: an opponent gets The Void, a 5/5 flying indestructible token.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 6);
+    let void = g
+        .perms
+        .iter()
+        .find(|x| x.ctrl == 1 && x.is_token())
+        .unwrap();
+    assert_eq!((void.p, void.t), (5, 5));
+    assert!(void.has(FLYING) && void.has(INDESTRUCTIBLE));
+    // Wishclaw Talisman: after the search, an opponent gains control of it.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'U');
+    g.active = 0;
+    let claw = put(&mut g, 0, 7);
+    let k = ability(&d, 7, "search");
+    assert!(g.activate(0, claw, k));
+    assert_eq!(perm(&g, claw).ctrl, 1);
+    // Undying Malice: the creature comes back tapped with a +1/+1 counter.
+    let mut g = game(&[&d, &d]);
+    let drake = put(&mut g, 0, DRAKE);
+    fire_card(&mut g, 8, 0, None);
+    let i = g.idx(drake).unwrap();
+    g.destroy(i);
+    g.run_pending();
+    let back = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, DRAKE)))
+        .expect("returned");
+    assert!(back.tapped && back.counters == 1);
+    // Gandalf, Wandering Wizard: shuffled into his owner's library, three cards drawn.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 6, 'U');
+    let gandalf = put(&mut g, 0, 9);
+    let library = g.players[0].library.len();
+    let k = ability(&d, 9, "shuffles");
+    assert!(g.activate(0, gandalf, k));
+    assert!(g.idx(gandalf).is_none());
+    assert_eq!(g.players[0].hand.len(), 3);
+    assert_eq!(g.players[0].library.len(), library - 2);
+    // Ajani Resolute's emblem: creatures you control get +2/+2, new ones too.
+    let mut g = game(&[&d, &d]);
+    let ajani = put(&mut g, 0, 10);
+    let k = ability(&d, 10, "emblem");
+    fire_card(&mut g, 10, k, Some(ajani));
+    let drake = put(&mut g, 0, DRAKE);
+    assert_eq!(perm(&g, drake).p, 5);
+    assert_eq!(g.players[0].emblems.len(), 1);
+    // Chandra's emblem: whenever you cast a spell, draw a card.
+    let chandra = put(&mut g, 0, 12);
+    let k = ability(&d, 12, "emblem");
+    fire_card(&mut g, 12, k, Some(chandra));
+    lands(&mut g, 0, 1, 'U');
+    g.players[0].hand = vec![RELIC];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[0].hand.len(), 1, "the emblem drew a card");
+    // Garruk: -4/-1 until Garruk's controller's next turn.
+    let mut g = game(&[&d, &d]);
+    let garruk = put(&mut g, 0, 11);
+    let drake = put(&mut g, 1, DRAKE);
+    let k = ability(&d, 11, "-4/-1");
+    fire_card(&mut g, 11, k, Some(garruk));
+    assert_eq!(perm(&g, drake).p, -1);
+    g.cleanup(0);
+    g.recalc();
+    assert_eq!(perm(&g, drake).p, -1, "still during the opponent's turn");
+    // (Garruk goes, so the turn doesn't use him again.)
+    let i = g.idx(garruk).unwrap();
+    g.leave(i, Zone::Graveyard, false);
+    g.take_turn(0, false);
+    assert_eq!(perm(&g, drake).p, 3, "gone at our next turn");
+}

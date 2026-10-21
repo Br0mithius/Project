@@ -76,6 +76,8 @@ pub enum Src {
     Adventure(usize),
     /// A prepared creature's spell copy (CR 722).
     Prepared(u32),
+    /// Index into the cards in exile the player may play (`Player::playable`).
+    Exile(usize),
 }
 
 /// How an additional cost to cast a spell is paid.
@@ -161,6 +163,15 @@ impl<'a> Game<'a> {
                 inst_sorc_this_turn: 0,
                 last_ability: None,
                 mulligans: 0,
+                extra_turns: 0,
+                no_powerups: false,
+                creature_spells_turn: 0,
+                noncreature_spells_turn: 0,
+                gy_types_used: 0,
+                playable: Vec::new(),
+                toughness_damage_turn: false,
+                emblems: Vec::new(),
+                equips_turn: 0,
             })
             .collect();
         let mut g = Game {
@@ -199,6 +210,9 @@ impl<'a> Game<'a> {
             last_countered: Vec::new(),
             last_destroyed: 0,
             last_drawn: 0,
+            rules: [0; 8],
+            end_turn: false,
+            delayed_returns: Vec::new(),
         };
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
@@ -217,6 +231,7 @@ impl<'a> Game<'a> {
             Src::Command(k) => (pl.command.get(k)?.0, false),
             Src::Graveyard(k) => (*pl.graveyard.get(k)?, false),
             Src::Adventure(k) => (*pl.adventure.get(k)?, false),
+            Src::Exile(k) => (pl.playable.get(k)?.card.1, false),
             Src::Prepared(id) => {
                 let x = &self.perms[self.idx(id)?];
                 if !x.prepared || x.ctrl as usize != p {
@@ -229,6 +244,34 @@ impl<'a> Game<'a> {
                 (r.1, true)
             }
         })
+    }
+
+    /// Whose card list the spell cast from `src` is in: the caster's own, or an opponent's
+    /// for a stolen card in exile (Tinybones' stash).
+    pub fn spell_list(&self, p: usize, src: Src) -> usize {
+        match src {
+            Src::Exile(k) => self.players[p]
+                .playable
+                .get(k)
+                .map_or(p, |x| x.card.0 as usize),
+            _ => p,
+        }
+    }
+
+    /// The permanent type Muldrotha would use to cast card `c` from the graveyard this
+    /// turn (a type bit not used yet), if she lets `p` cast it.
+    pub fn graveyard_type_free(&self, p: usize, c: &SimCard) -> Option<u16> {
+        if self.active != p
+            || self.rules[p % 8] & R_PERMANENTS_FROM_GY == 0
+            || c.is(T_LAND)
+            || !c.is_permanent()
+        {
+            return None;
+        }
+        let used = self.players[p].gy_types_used;
+        [T_CREATURE, T_ARTIFACT, T_ENCHANTMENT, T_PLANESWALKER]
+            .into_iter()
+            .find(|&t| c.is(t) && used & t == 0)
     }
 
     /// What casting from `src` costs right now (tax, reductions, extras), if it's allowed.
@@ -295,12 +338,28 @@ impl<'a> Game<'a> {
         opts: CastOpts,
     ) -> Option<(Mana, Option<i32>, Option<ExtraPay>)> {
         let (idx, back) = self.spell_card(p, src, opts)?;
-        let c = &self.players[p].cards[idx as usize];
+        let list = self.spell_list(p, src);
+        let c = &self.players[list].cards[idx as usize];
         if c.is(T_LAND) && !back {
             return None;
         }
+        // "Your opponents can't cast spells during your turn" (Jennifer Walters).
+        if self.active != p && self.rules[self.active % 8] & R_OPP_NO_CAST_MY_TURN != 0 {
+            return None;
+        }
+        // Stashed cards: only during your turn (and not once their owner has left the game).
+        if let Src::Exile(k) = src {
+            if self.players[p].playable[k].own_turn && self.active != p || !self.players[list].alive
+            {
+                return None;
+            }
+        }
+        let muldrotha = matches!(src, Src::Graveyard(_))
+            && !self.players[p].recast.contains(&idx)
+            && c.flashback.is_none()
+            && self.graveyard_type_free(p, c).is_some();
         if let Src::Graveyard(_) = src {
-            if !self.players[p].recast.contains(&idx) && c.flashback.is_none() {
+            if !self.players[p].recast.contains(&idx) && c.flashback.is_none() && !muldrotha {
                 return None;
             }
             // "Flashback—{1}{U/R}{U/R}, Discard a card".
@@ -310,13 +369,18 @@ impl<'a> Game<'a> {
         }
         let (mut cost, types, subtypes) = if back {
             let b = c.back.as_ref()?;
-            if matches!(src, Src::Hand(_)) && b.kind == BackKind::Prepare {
+            if matches!(src, Src::Hand(_)) && b.kind == BackKind::Prepare
+                || b.kind == BackKind::Transform
+            {
                 return None;
             }
             (b.cost, b.types, &c.subtypes)
-        } else if let (Src::Graveyard(_), Some(fb), false) =
-            (src, c.flashback, self.players[p].recast.contains(&idx))
-        {
+        } else if let (Src::Graveyard(_), Some(fb), false, false) = (
+            src,
+            c.flashback,
+            self.players[p].recast.contains(&idx),
+            muldrotha,
+        ) {
             (fb, c.types, &c.subtypes)
         } else if opts.overload && c.overload.is_some() {
             (c.overload.unwrap(), c.types, &c.subtypes)
@@ -336,8 +400,40 @@ impl<'a> Game<'a> {
             let slot = self.players[p].command[k].1 as usize;
             cost = cost.plus_generic(2 * self.players[p].casts[slot.min(2)] as u32);
         }
+        // "You may cast spells from your hand without paying their mana costs" (Omniscience;
+        // Omnipresence up to the number of creatures you control). X spells are cast paying
+        // for the X instead.
+        let free_cast = matches!(src, Src::Hand(_))
+            && !cost.x
+            && (self.rules[p % 8] & R_FREE_FROM_HAND != 0
+                || self.rules[p % 8] & R_FREE_BY_CREATURES != 0 && {
+                    let mv = if back { cost.total() } else { c.mv as u32 };
+                    let creatures = self
+                        .perms
+                        .iter()
+                        .filter(|x| x.ctrl as usize == p && x.is_creature())
+                        .count() as u32;
+                    mv <= creatures
+                });
         if opts.free {
             return Some((Mana::default(), x, None));
+        }
+        // "Noncreature spells your opponents cast cost {1} more" (Thalia, the Survivor).
+        let mut tax = 0u32;
+        if self.rule_anywhere(R_SPELL_TAX) {
+            for y in self.perms.iter().filter(|y| y.ctrl as usize != p) {
+                let Some(r) = y.card else { continue };
+                if y.no_abilities || y.blank {
+                    continue;
+                }
+                if let Some((n, f)) = &self.card(r).opp_tax {
+                    let type_ok = f.types == 0 || types & f.types != 0;
+                    let not_ok = f.not_types == 0 || types & f.not_types == 0;
+                    if type_ok && not_ok {
+                        tax += *n as u32;
+                    }
+                }
+            }
         }
         // "This spell costs {X} less to cast, where X is the greatest power among creatures
         // you control" (the Ghaltas).
@@ -357,11 +453,41 @@ impl<'a> Game<'a> {
             };
             cost = cost.minus_generic(n);
         }
+        // "This spell costs {3} less to cast if ...", "{1} less for each ...", affinity.
+        if !back {
+            let mut n = 0u32;
+            for r in &c.self_reduce {
+                n += match r {
+                    SelfReduce::If(k, cond) => {
+                        if self.cond_holds(cond, p, None) {
+                            *k as u32
+                        } else {
+                            0
+                        }
+                    }
+                    SelfReduce::Each(k, phrase) => {
+                        *k as u32 * self.count_of(p, None, phrase).unwrap_or(0).max(0) as u32
+                    }
+                };
+            }
+            cost = cost.minus_generic(n);
+        }
         // "Spells you cast cost {N} less" (and the like).
         let mut less = 0;
         for x in self.perms.iter().filter(|x| x.ctrl as usize == p) {
             let Some(r) = x.card else { continue };
-            if let Some((n, f)) = &self.card(r).cost_reduction {
+            let card = self.card(r);
+            // "The first creature spell you cast each turn" (Radagast).
+            if card.reduction_first && self.players[p].creature_spells_turn > 0 {
+                continue;
+            }
+            if let Some((n, f)) = &card.cost_reduction {
+                // "{X} less, where X is ~'s power" (The Scarlet Witch).
+                let n = if card.reduction_by_power {
+                    x.p.max(0) as u32
+                } else {
+                    *n as u32
+                };
                 let type_ok = f.types == 0 || types & f.types != 0;
                 let not_ok = f.not_types == 0 || types & f.not_types == 0;
                 // "Kithkin spells and Soldier spells", "Instant and sorcery spells".
@@ -374,21 +500,31 @@ impl<'a> Game<'a> {
                     Game::card_ok(&f.restr, c, &d)
                 };
                 if type_ok && not_ok && sub_ok {
-                    less += *n as u32;
+                    less += n;
                 }
             }
-        }
-        if c.affinity {
-            less += self
-                .perms
-                .iter()
-                .filter(|x| x.ctrl as usize == p && x.is(T_ARTIFACT))
-                .count() as u32;
         }
         if opts.convoke && (c.convoke || c.improvise) {
             less += self.convoke_tappers(p, c).len() as u32;
         }
-        cost = cost.minus_generic(less);
+        cost = cost.minus_generic(less).plus_generic(tax);
+        if free_cast {
+            cost = Mana::default();
+        }
+        // Stashed cards: "mana of any type can be spent to cast those spells"; Inside
+        // Information: life equal to its mana value instead of its mana cost.
+        if let Src::Exile(k) = src {
+            let x = &self.players[p].playable[k];
+            if x.own_turn {
+                cost = Mana::generic(cost.total());
+            }
+            if x.pay_life {
+                if self.players[p].life <= c.mv as i32 + 5 {
+                    return None;
+                }
+                cost = Mana::default();
+            }
+        }
         if opts.offspring {
             cost = cost.plus_generic(c.offspring.unwrap_or(0) as u32);
         }
@@ -446,9 +582,20 @@ impl<'a> Game<'a> {
         let Some((cost, x, extra)) = self.cast_plan(p, src, opts) else {
             return false;
         };
-        let by_flashback =
-            matches!(src, Src::Graveyard(_)) && !self.players[p].recast.contains(&idx);
-        let c: &'a SimCard = &self.players[p].cards[idx as usize];
+        let list = self.spell_list(p, src);
+        let c: &'a SimCard = &self.players[list].cards[idx as usize];
+        // Muldrotha: a permanent type used up for this turn.
+        let gy_type = match src {
+            Src::Graveyard(_)
+                if !self.players[p].recast.contains(&idx) && c.flashback.is_none() =>
+            {
+                self.graveyard_type_free(p, c)
+            }
+            _ => None,
+        };
+        let by_flashback = matches!(src, Src::Graveyard(_))
+            && !self.players[p].recast.contains(&idx)
+            && gy_type.is_none();
         // X paid (for "enters with X counters" and the spell's own X).
         let x_paid = x;
         // Pyromancer's Goggles: its mana casting a red instant or sorcery copies it.
@@ -519,6 +666,11 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        if let Src::Exile(k) = src {
+            if self.players[p].playable[k].pay_life {
+                self.lose_life(p, c.mv as i32);
+            }
+        }
         // The card leaves its zone.
         let mut commander_slot = 0;
         let from_graveyard = matches!(src, Src::Graveyard(_));
@@ -534,7 +686,17 @@ impl<'a> Game<'a> {
             Src::Graveyard(k) => {
                 self.players[p].graveyard.remove(k);
                 self.players[p].recast.retain(|&x| x != idx);
+                if let Some(t) = gy_type {
+                    self.players[p].gy_types_used |= t;
+                }
                 self.emit(Ev::LeavesGraveyard, p, None);
+            }
+            Src::Exile(k) => {
+                let r = self.players[p].playable.remove(k).card;
+                let owner = &mut self.players[r.0 as usize];
+                if let Some(e) = owner.exile.iter().position(|&c| c == r.1) {
+                    owner.exile.remove(e);
+                }
             }
             Src::Adventure(k) => {
                 self.players[p].adventure.remove(k);
@@ -580,7 +742,7 @@ impl<'a> Game<'a> {
             ..c.clone()
         };
         let outer = (self.casting, self.cur_x);
-        self.casting = Some(((p as u8, idx), back));
+        self.casting = Some(((list as u8, idx), back));
         self.cur_x = x_paid;
         if spell_types & (T_INSTANT | T_SORCERY) != 0 {
             self.players[p].inst_sorc_this_turn =
@@ -601,7 +763,7 @@ impl<'a> Game<'a> {
             match src {
                 Src::Prepared(_) => {}
                 _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
-                _ => self.players[p].graveyard.push(idx),
+                _ => self.players[list].graveyard.push(idx),
             }
             self.run_pending();
             (self.casting, self.cur_x) = outer;
@@ -611,7 +773,7 @@ impl<'a> Game<'a> {
         if permanent {
             self.entering_x = x_paid;
             self.entering_kicked = kicked;
-            let entered = self.enter_card(p, idx, p, commander_slot > 0);
+            let entered = self.enter_card(list, idx, p, commander_slot > 0);
             let Some(i) = entered else {
                 self.run_pending();
                 self.sba();
@@ -637,7 +799,7 @@ impl<'a> Game<'a> {
                 }
             }
             if opts.offspring && c.offspring.is_some() {
-                let t = self.new_perm(p, p, Some((p as u8, idx)), Tok::Other);
+                let t = self.new_perm(p, p, Some((list as u8, idx)), Tok::Other);
                 self.perms[t].base_p = 1;
                 self.perms[t].base_t = 1;
                 self.after_enter(t);
@@ -661,10 +823,10 @@ impl<'a> Game<'a> {
                 };
                 if let Some(k) = self.players[p].copy_next.iter().position(|&l| mv <= l) {
                     self.players[p].copy_next.remove(k);
-                    self.copy_spell(p, ((p as u8, idx), back));
+                    self.copy_spell(p, ((list as u8, idx), back));
                 }
                 if goggles.is_some() {
-                    self.copy_spell(p, ((p as u8, idx), back));
+                    self.copy_spell(p, ((list as u8, idx), back));
                 }
             }
             for (k, a) in abilities.iter().enumerate() {
@@ -674,7 +836,7 @@ impl<'a> Game<'a> {
                     self.pending.push(Pending {
                         ctrl: p as u8,
                         source: None,
-                        card: (p as u8, idx),
+                        card: (list as u8, idx),
                         back,
                         ability: k as u16,
                         snapshot: None,
@@ -690,7 +852,7 @@ impl<'a> Game<'a> {
             }
             self.run_pending();
             if c.is(T_INSTANT | T_SORCERY) || back {
-                self.players[p].last_spell = Some(((p as u8, idx), back));
+                self.players[p].last_spell = Some(((list as u8, idx), back));
             }
             // Where the card goes.
             let kind = c.back.as_ref().map(|b| b.kind);
@@ -701,7 +863,7 @@ impl<'a> Game<'a> {
                 }
                 Src::Graveyard(_) => self.players[p].exile.push(idx),
                 _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
-                _ => self.players[p].graveyard.push(idx),
+                _ => self.players[list].graveyard.push(idx),
             }
         }
         self.run_pending();
@@ -843,6 +1005,10 @@ impl<'a> Game<'a> {
         if ab.from_graveyard {
             return None; // used from the graveyard only
         }
+        // Sorcerous Spyglass naming this card.
+        if self.rule_anywhere(R_NAMES_CARD) && self.named_shut(x) {
+            return None;
+        }
         match &ab.trig {
             Trig::Activated {
                 mana,
@@ -923,7 +1089,8 @@ impl<'a> Game<'a> {
                 Some((Mana::generic(total), x_paid))
             }
             Trig::PowerUp(full) => {
-                if x.powered {
+                // (Kang's extra turn: "power-up abilities can't be activated".)
+                if x.powered || self.players[p].no_powerups {
                     return None;
                 }
                 // The turn it entered, the cost is reduced by the permanent's mana cost:
@@ -964,6 +1131,17 @@ impl<'a> Game<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Are permanent `x`'s activated abilities shut off by a Sorcerous Spyglass naming it?
+    pub fn named_shut(&self, x: &Perm) -> bool {
+        let Some(name) = x.card.map(|r| &self.card(r).name) else {
+            return false;
+        };
+        self.perms.iter().any(|y| {
+            y.named.is_some_and(|r| self.card(r).name == *name)
+                && self.perm_rules(y) & R_NAMES_CARD != 0
+        })
     }
 
     /// Activates ability `k` of permanent `id` (paying all its costs). False if it couldn't.
@@ -1190,6 +1368,31 @@ impl<'a> Game<'a> {
         true
     }
 
+    /// What equipping `equip_id` to `target_id` costs `p`: the equip cost, less Dwarven
+    /// Mauler's {2}, Warrior's Blades' {1} per +1/+1 counter, or {0} for Kíli's first equip
+    /// each turn.
+    pub fn equip_cost(&self, p: usize, equip_id: u32, target_id: u32) -> Option<Mana> {
+        let e = self.idx(equip_id)?;
+        let c = self.card(self.perms[e].card?);
+        let mut cost = c.equip.unwrap_or(Mana::generic(2));
+        if let Some(t) = self.idx(target_id) {
+            let x = &self.perms[t];
+            if let Some(r) = x.card.filter(|_| !x.blank && !x.no_abilities) {
+                cost = cost.minus_generic(self.card(r).equip_target_less as u32);
+            }
+            if c.equip_less_per_counter {
+                cost = cost.minus_generic(x.counters.max(0) as u32);
+            }
+        }
+        if self.rules[p % 8] & R_FREE_FIRST_EQUIP != 0
+            && self.players[p].equips_turn == 0
+            && self.players[p].enduring_story
+        {
+            cost = Mana::default();
+        }
+        Some(cost)
+    }
+
     pub fn equip(&mut self, p: usize, equip_id: u32, target_id: u32) -> bool {
         let Some(e) = self.idx(equip_id) else {
             return false;
@@ -1198,7 +1401,9 @@ impl<'a> Game<'a> {
             return false;
         };
         let c = self.card(r);
-        let cost = c.equip.unwrap_or(Mana::generic(2));
+        let Some(cost) = self.equip_cost(p, equip_id, target_id) else {
+            return false;
+        };
         let life = c.equip_life as i32;
         if self.perms[e].attached == Some(target_id)
             || life > 0 && self.players[p].life <= life
@@ -1209,6 +1414,7 @@ impl<'a> Game<'a> {
         if life > 0 {
             self.lose_life(p, life);
         }
+        self.players[p].equips_turn = self.players[p].equips_turn.saturating_add(1);
         if let Some(e) = self.idx(equip_id) {
             self.perms[e].attached = Some(target_id);
         }
@@ -1272,6 +1478,27 @@ impl<'a> Game<'a> {
         }
         self.run_pending();
         true
+    }
+
+    /// Plays a land from the graveyard (`(true, slot)`: Mole Man, Muldrotha) or from exile
+    /// (`(false, playable slot)`).
+    pub fn play_land_from(&mut self, p: usize, (gy, k): (bool, usize)) {
+        let c = if gy {
+            let c = self.players[p].graveyard.remove(k);
+            self.players[p].gy_types_used |= T_LAND;
+            self.emit(Ev::LeavesGraveyard, p, None);
+            c
+        } else {
+            let r = self.players[p].playable.remove(k).card;
+            if let Some(e) = self.players[p].exile.iter().position(|&c| c == r.1) {
+                self.players[p].exile.remove(e);
+            }
+            r.1
+        };
+        self.players[p].lands_played += 1;
+        self.enter_card(p, c, p, false);
+        self.run_pending();
+        self.sba();
     }
 
     pub fn play_land(&mut self, p: usize, h: usize) {
@@ -1381,6 +1608,11 @@ impl<'a> Game<'a> {
             pl.extra_lands = 0;
             pl.scried_turn = false;
             pl.loyalty_turn = false;
+            pl.creature_spells_turn = 0;
+            pl.noncreature_spells_turn = 0;
+            pl.gy_types_used = 0;
+            pl.equips_turn = 0;
+            pl.toughness_damage_turn = false;
             for g in pl.grudge.iter_mut() {
                 *g *= 0.8;
             }
@@ -1389,6 +1621,9 @@ impl<'a> Game<'a> {
         for x in self.perms.iter_mut() {
             if x.goad == Some(a as u8) {
                 x.goad = None;
+            }
+            if x.till.is_some_and(|t| t.2 == a as u8) {
+                x.till = None;
             }
             x.fired = 0;
             x.hit_turn = 0;
@@ -1522,18 +1757,24 @@ impl<'a> Game<'a> {
             ai::main_phase(self, a, false);
             let combats = 1 + self.players[a].extra_combats as usize;
             for _ in 0..combats {
-                if self.alive_count() <= 1 || !self.players[a].alive {
+                if self.alive_count() <= 1 || !self.players[a].alive || self.end_turn {
                     break;
                 }
                 self.phase_triggers(a, Phase::Combat);
                 self.combat(a);
             }
             self.players[a].extra_combats = 0;
-            if self.players[a].alive && self.alive_count() > 1 {
+            if self.players[a].alive && self.alive_count() > 1 && !self.end_turn {
                 ai::main_phase(self, a, true);
             }
         }
         if !self.players[a].alive || self.alive_count() <= 1 {
+            self.end_turn = false;
+            return;
+        }
+        // "End the turn" (Time Stop): straight to the cleanup step.
+        if std::mem::take(&mut self.end_turn) {
+            self.cleanup(a);
             return;
         }
         // Token copies made "with haste and 'at the beginning of the end step, sacrifice this
@@ -1549,6 +1790,15 @@ impl<'a> Game<'a> {
                 self.sacrifice(i);
             }
         }
+        // Cards exiled "until the beginning of the next end step" come back.
+        for r in std::mem::take(&mut self.delayed_returns) {
+            let owner = r.0 as usize;
+            if let Some(k) = self.players[owner].exile.iter().rposition(|&c| c == r.1) {
+                self.players[owner].exile.remove(k);
+                self.enter_card(owner, r.1, owner, false);
+            }
+        }
+        self.run_pending();
         self.phase_triggers(a, Phase::End);
         // Other players use instant-speed tricks at the end of the turn - mostly the next
         // player, whose mana is about to untap.
@@ -1559,7 +1809,25 @@ impl<'a> Game<'a> {
                 ai::end_of_turn(self, o, k == 1);
             }
         }
-        // Cleanup.
+        self.cleanup(a);
+    }
+
+    /// Player `a`'s turn and any extra turns after it (Kang: power-ups can't be activated
+    /// during them).
+    pub fn take_turns(&mut self, a: usize, first_turn: bool) {
+        self.take_turn(a, first_turn);
+        self.sba();
+        while self.players[a].alive && self.players[a].extra_turns > 0 && self.alive_count() > 1 {
+            self.players[a].extra_turns -= 1;
+            self.players[a].no_powerups = true;
+            self.take_turn(a, false);
+            self.players[a].no_powerups = false;
+            self.sba();
+        }
+    }
+
+    /// The cleanup step of player `a`'s turn: hand size, damage and "this turn" effects end.
+    fn cleanup(&mut self, a: usize) {
         while self.players[a].hand.len() > 7 {
             self.discard(a);
         }
@@ -1570,13 +1838,20 @@ impl<'a> Game<'a> {
             x.temp_p = 0;
             x.temp_t = 0;
             x.temp_kw = 0;
+            x.temp_base = None;
+            x.temp_creature = false;
+            x.returns_on_death = 0;
             x.crewed = false;
             if x.threaten_from.is_some() && x.ctrl as usize == a {
                 x.ctrl = x.threaten_from.take().unwrap_or(x.ctrl);
             }
         }
+        // Cards that could be played "this turn" / "until the end of your next turn" can't
+        // any more.
+        let now = (self.round, a as u8);
         for pl in self.players.iter_mut() {
             pl.pool = 0;
+            pl.playable.retain(|x| x.until != now);
         }
         self.fog = false;
         self.run_pending();
@@ -1786,8 +2061,7 @@ pub fn play(g: &mut Game) -> usize {
             if !g.players[a].alive {
                 continue;
             }
-            g.take_turn(a, round == 1 && a == 0);
-            g.sba();
+            g.take_turns(a, round == 1 && a == 0);
             let alive: Vec<usize> = (0..n).filter(|&i| g.players[i].alive).collect();
             match alive.len() {
                 0 => return a,
