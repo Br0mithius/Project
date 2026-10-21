@@ -41,6 +41,7 @@ pub fn run(data_dir: PathBuf) -> Result<(), String> {
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
     Build,
+    Lab,
     Commanders,
     Draft,
     Trade,
@@ -50,8 +51,9 @@ enum Tab {
     Collection,
 }
 
-const TABS: [(Tab, &str); 8] = [
+const TABS: [(Tab, &str); 9] = [
     (Tab::Build, "Deck Builder"),
+    (Tab::Lab, "Playtest Lab"),
     (Tab::Commanders, "Commanders"),
     (Tab::Draft, "Draft Helper"),
     (Tab::Trade, "Trades & VP"),
@@ -91,6 +93,33 @@ struct Settings {
     zoom_width: f32,
     /// How much each part of the commander ranking counts.
     weights: crate::ranking::Weights,
+    /// Playtest lab run started when a commander is chosen or a deck auto-built.
+    lab_auto: LabAuto,
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+enum LabAuto {
+    Off,
+    Quick,
+    Thorough,
+}
+
+impl LabAuto {
+    fn effort(self) -> Option<crate::lab::Effort> {
+        match self {
+            LabAuto::Off => None,
+            LabAuto::Quick => Some(crate::lab::Effort::QUICK),
+            LabAuto::Thorough => Some(crate::lab::Effort::THOROUGH),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LabAuto::Off => "nothing (run it by hand)",
+            LabAuto::Quick => "a quick lab (about 1 minute)",
+            LabAuto::Thorough => "a thorough lab (about 5 minutes)",
+        }
+    }
 }
 
 impl Default for Settings {
@@ -102,6 +131,7 @@ impl Default for Settings {
             hover_zoom: true,
             zoom_width: 400.0,
             weights: crate::ranking::Weights::default(),
+            lab_auto: LabAuto::Thorough,
         }
     }
 }
@@ -133,6 +163,18 @@ enum Action {
     RulesChanged,
     /// Mana Mixer import: (list text, replace the whole pool?).
     Import(String, bool),
+    /// Replace the deck (a playtest lab suggestion), with a status message.
+    ApplyDeck(Deck, String),
+    RunLab(crate::lab::Effort),
+    StopLab,
+}
+
+/// A playtest lab running on a background thread.
+struct LabJob {
+    progress: std::sync::Arc<crate::lab::Progress>,
+    rx: std::sync::mpsc::Receiver<Option<crate::lab::LabReport>>,
+    commander: String,
+    started: std::time::Instant,
 }
 
 /// A commander ranking being built on a background thread.
@@ -199,6 +241,9 @@ pub struct GuiApp {
     ranking: Option<crate::ranking::Rankings>,
     ranking_key: String,
     rank_job: Option<RankJob>,
+    lab_job: Option<LabJob>,
+    /// The last playtest lab report.
+    lab: Option<crate::lab::LabReport>,
     data_job: Option<std::sync::mpsc::Receiver<String>>,
     /// Next background update also re-checks Scryfall for new league cards.
     force_card_update: bool,
@@ -206,6 +251,15 @@ pub struct GuiApp {
     /// Bumped whenever the deck, pool or rules change; invalidates `memo`.
     rev: u64,
     memo: Memo,
+}
+
+/// "45 s", "3 min".
+fn fmt_secs(secs: f32) -> String {
+    if secs < 90.0 {
+        format!("{:.0} s", secs.max(1.0))
+    } else {
+        format!("{:.0} min", secs / 60.0)
+    }
 }
 
 fn settings_path(dir: &std::path::Path) -> PathBuf {
@@ -332,6 +386,8 @@ impl GuiApp {
             ranking: None,
             ranking_key: String::new(),
             rank_job: None,
+            lab_job: None,
+            lab: None,
             data_job: None,
             force_card_update: false,
             error,
@@ -501,6 +557,8 @@ impl GuiApp {
         if changes_data {
             self.rev += 1;
         }
+        let commander_before = self.deck.commander.clone();
+        let mut chose_commander = false;
         for a in actions {
             let before = self.deck.clone();
             match a {
@@ -512,7 +570,10 @@ impl GuiApp {
                         self.status = format!("Removed {} x {}.", took, n);
                     }
                 }
-                Action::SetCommander(n) => self.set_commander(&n),
+                Action::SetCommander(n) => {
+                    self.set_commander(&n);
+                    chose_commander |= self.deck.commander != commander_before;
+                }
                 Action::SetPartner(p) => {
                     match &p {
                         Some(name) if name == PIPER => {
@@ -567,6 +628,7 @@ impl GuiApp {
                         d.name = self.deck.name.clone();
                         self.deck = d;
                         self.tab = Tab::Build;
+                        chose_commander = true;
                         self.status = if short > 0 {
                             format!(
                                 "Built a deck around {} - your pool ran {} cards short, so extra basics fill the gap.",
@@ -748,6 +810,16 @@ impl GuiApp {
                         self.hand.push(c);
                     }
                 }
+                Action::ApplyDeck(mut d, msg) => {
+                    d.name = self.deck.name.clone();
+                    self.deck = d;
+                    self.status = msg;
+                }
+                Action::RunLab(effort) => self.start_lab(effort),
+                Action::StopLab => {
+                    self.stop_lab();
+                    self.status = "Playtest lab stopped.".into();
+                }
             }
             if self.deck != before {
                 self.history.push(before);
@@ -755,6 +827,13 @@ impl GuiApp {
                     self.history.remove(0);
                 }
                 self.autosave();
+            }
+        }
+        // Choosing a commander (or auto-building) starts the playtest lab on that deck.
+        if chose_commander {
+            match self.settings.lab_auto.effort() {
+                Some(e) => self.start_lab(e),
+                None => self.stop_lab(),
             }
         }
     }
@@ -1065,6 +1144,38 @@ impl GuiApp {
                         ui.label(e.as_str());
                     }
                 });
+            }
+            // The playtest lab, running or done.
+            let lab = if let Some(job) = &self.lab_job {
+                Some(format!(
+                    "Playtest lab {:.0}%...",
+                    job.progress.fraction() * 100.0
+                ))
+            } else {
+                self.lab
+                    .as_ref()
+                    .filter(|r| self.deck.commander.as_deref() == Some(r.commander.as_str()))
+                    .map(|r| match &r.best {
+                        Some(b) if b.deck.cards == self.deck.cards => {
+                            "Playtest lab: best combination applied".to_string()
+                        }
+                        Some(b) => format!(
+                            "Playtest lab: {} swaps measured {} pts",
+                            b.swaps.len(),
+                            crate::lab::pts_se(&b.gain)
+                        ),
+                        None => "Playtest lab: no change beats this build".to_string(),
+                    })
+            };
+            if let Some(text) = lab {
+                ui.separator();
+                if ui
+                    .link(text)
+                    .on_hover_text("Open the Playtest Lab tab")
+                    .clicked()
+                {
+                    self.tab = Tab::Lab;
+                }
             }
         });
     }
@@ -1964,7 +2075,80 @@ impl GuiApp {
         });
     }
 
+    /// Starts the playtest lab on the current deck (or, if it isn't complete, on the deck
+    /// auto-build makes for the commander), replacing any lab already running.
+    fn start_lab(&mut self, effort: crate::lab::Effort) {
+        self.stop_lab();
+        let Some(cmd) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|c| self.db.get(c))
+            .cloned()
+        else {
+            self.status = "Choose a commander first.".into();
+            return;
+        };
+        if self.lab.as_ref().is_some_and(|r| r.commander != cmd.name) {
+            self.lab = None;
+        }
+        let (db, coll, rules, deck) = (
+            self.db.clone(),
+            self.coll.clone(),
+            self.rules.clone(),
+            self.deck.clone(),
+        );
+        let progress = std::sync::Arc::new(crate::lab::Progress::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let p = progress.clone();
+        let name = cmd.name.clone();
+        std::thread::spawn(move || {
+            let report = crate::lab::explore(&cmd, &deck, &db, &coll, &rules, effort, &p);
+            let _ = tx.send(report);
+        });
+        self.lab_job = Some(LabJob {
+            progress,
+            rx,
+            commander: name,
+            started: std::time::Instant::now(),
+        });
+    }
+
+    fn stop_lab(&mut self) {
+        if let Some(job) = self.lab_job.take() {
+            job.progress.cancel();
+        }
+    }
+
+    fn poll_lab(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.lab_job else { return };
+        // A lab for a commander the deck no longer has is of no use: stop it.
+        if self.deck.commander.as_deref() != Some(job.commander.as_str()) {
+            self.stop_lab();
+            return;
+        }
+        match job.rx.try_recv() {
+            Ok(Some(report)) => {
+                self.status = match &report.best {
+                    Some(b) => format!(
+                        "Playtest lab finished: a combination of {} swaps measured {} win-rate points - see the Playtest Lab tab.",
+                        b.swaps.len(),
+                        crate::lab::pts_se(&b.gain)
+                    ),
+                    None => "Playtest lab finished: no change beat the current build (details on the Playtest Lab tab).".into(),
+                };
+                self.lab = Some(report);
+                self.lab_job = None;
+            }
+            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => self.lab_job = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(300))
+            }
+        }
+    }
+
     fn poll_jobs(&mut self, ctx: &egui::Context) {
+        self.poll_lab(ctx);
         if let Some(job) = &self.rank_job {
             match job.rx.try_recv() {
                 Ok(ranks) => {
@@ -2076,6 +2260,314 @@ impl GuiApp {
         });
         self.data_job = Some(rx);
         self.status = "Downloading card ratings in the background...".into();
+    }
+
+    // ------------------------------------------------------------------ playtest lab
+
+    fn lab_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        const GOOD: Color32 = Color32::from_rgb(110, 220, 120);
+        const BAD: Color32 = Color32::from_rgb(255, 120, 100);
+        const NOTE: Color32 = Color32::from_rgb(255, 190, 110);
+        // Coloured when clearly (2+ standard errors) better or worse.
+        let gain = |m: &crate::lab::Measure| {
+            let t = RichText::new(crate::lab::pts_se(m)).monospace();
+            if m.z() > 2.0 {
+                t.color(GOOD)
+            } else if m.z() < -2.0 {
+                t.color(BAD)
+            } else {
+                t
+            }
+        };
+        ui.heading("Playtest lab");
+        ui.label(
+            "The deck builder picks cards by score, and scores can be wrong. The lab plays your deck and changed versions \
+             of it through the same simulated 4-player games, measures what each card and each possible addition is worth, \
+             and confirms the best combination on fresh games. Your deck only changes if you apply a suggestion.",
+        );
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let has_cmd = self.deck.commander.is_some();
+            if let Some(job) = &self.lab_job {
+                let f = job.progress.fraction();
+                let secs = job.started.elapsed().as_secs_f32();
+                let left = if f > 0.03 {
+                    format!(" · about {} left", fmt_secs(secs * (1.0 - f) / f))
+                } else {
+                    String::new()
+                };
+                ui.add(egui::ProgressBar::new(f).desired_width(360.0).text(format!(
+                    "{} {:.0}%{}",
+                    job.progress.stage(),
+                    f * 100.0,
+                    left
+                )));
+                if ui.button("Stop").clicked() {
+                    acts.push(Action::StopLab);
+                }
+            } else {
+                if ui
+                    .add_enabled(has_cmd, egui::Button::new("Run quick lab (about 1 min)"))
+                    .clicked()
+                {
+                    acts.push(Action::RunLab(crate::lab::Effort::QUICK));
+                }
+                if ui
+                    .add_enabled(has_cmd, egui::Button::new("Run thorough lab (about 5 min)"))
+                    .clicked()
+                {
+                    acts.push(Action::RunLab(crate::lab::Effort::THOROUGH));
+                }
+            }
+            ui.separator();
+            ui.label("When I choose a commander or auto-build, run");
+            let before = self.settings.lab_auto;
+            egui::ComboBox::from_id_salt("lab_auto")
+                .selected_text(self.settings.lab_auto.label())
+                .show_ui(ui, |ui| {
+                    for a in [LabAuto::Thorough, LabAuto::Quick, LabAuto::Off] {
+                        ui.selectable_value(&mut self.settings.lab_auto, a, a.label());
+                    }
+                });
+            if self.settings.lab_auto != before {
+                self.save_settings();
+            }
+        });
+        ui.separator();
+        let Some(r) = &self.lab else {
+            ui.label(if self.lab_job.is_some() {
+                "Playtesting in the background - you can keep building meanwhile."
+            } else if self.deck.commander.is_none() {
+                "Choose a commander (Commanders tab) and the lab starts by itself."
+            } else {
+                "No report yet: run the lab above."
+            });
+            return;
+        };
+        let current = r.fits(&self.deck);
+        let applied = r
+            .best
+            .as_ref()
+            .is_some_and(|b| b.deck.cards == self.deck.cards);
+        let mins = (r.seconds / 60.0).floor();
+        ui.label(
+            RichText::new(format!(
+                "{} - the tested deck won {:.1}% of {} games (25% = even) · {} lab, {} games in {}m {:02}s",
+                r.commander,
+                r.base_win * 100.0,
+                r.base_games,
+                r.effort.name,
+                r.games,
+                mins,
+                (r.seconds - mins * 60.0).round() as u32
+            ))
+            .strong(),
+        );
+        for n in &r.notes {
+            ui.label(RichText::new(n.as_str()).color(NOTE));
+        }
+        if !current && !applied {
+            ui.label(
+                RichText::new("Your deck has changed since this report - run the lab again to test the new list.")
+                    .color(NOTE),
+            );
+        }
+        ScrollArea::vertical()
+            .id_salt("lab_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Best combination.
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    match &r.best {
+                        Some(b) => {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Best combination the playtests support: {} win-rate points",
+                                    crate::lab::pts_se(&b.gain)
+                                ))
+                                .heading()
+                                .color(GOOD),
+                            );
+                            ui.label(format!(
+                                "Confirmed on {} fresh games (not the ones that found it). Each swap's number is the combination with it minus without it.",
+                                b.gain.games
+                            ));
+                            egui::Grid::new("lab_best").striped(true).show(ui, |ui| {
+                                for (s, m) in &b.swaps {
+                                    ui.label("cut");
+                                    if ui.link(s.cut.as_str()).clicked() {
+                                        acts.push(Action::Select(s.cut.clone()));
+                                    }
+                                    ui.label("add");
+                                    if ui.link(s.add.as_str()).clicked() {
+                                        acts.push(Action::Select(s.add.clone()));
+                                    }
+                                    ui.label(gain(m));
+                                    ui.end_row();
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                if applied {
+                                    ui.label(RichText::new("Applied to your deck (Undo takes it back).").color(GOOD));
+                                } else {
+                                    let ok = current;
+                                    let resp = ui.add_enabled(ok, egui::Button::new("Apply best combination"));
+                                    if resp.clicked() {
+                                        acts.push(Action::ApplyDeck(
+                                            b.deck.clone(),
+                                            format!(
+                                                "Applied the lab's best combination ({} win-rate points). Undo takes it back.",
+                                                crate::lab::pts_se(&b.gain)
+                                            ),
+                                        ));
+                                    }
+                                    if !ok {
+                                        let _ = resp.on_disabled_hover_text("Your deck changed since the lab ran.");
+                                    }
+                                }
+                            });
+                        }
+                        None => {
+                            ui.label(RichText::new("No change beats the current build.").heading());
+                            if let Some(c) = &r.rejected {
+                                let list: Vec<String> = c
+                                    .swaps
+                                    .iter()
+                                    .map(|(s, _)| format!("{} -> {}", s.cut, s.add))
+                                    .collect();
+                                ui.label(format!(
+                                    "The best try ({}) measured {} points on {} fresh games - not clearly better (needs 2 standard errors).",
+                                    list.join(", "),
+                                    crate::lab::pts_se(&c.gain),
+                                    c.gain.games
+                                ));
+                            }
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                if !r.colors.is_empty() {
+                    ui.label(RichText::new("Colour sets").strong());
+                    ui.label(
+                        RichText::new(format!(
+                            "The deck rebuilt by auto-build in each colour set, {} games each against the same opponents and seats.",
+                            r.colors[0].games
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    egui::Grid::new("lab_colors").striped(true).show(ui, |ui| {
+                        for c in &r.colors {
+                            ui.label(RichText::new(c.colors.to_string()).monospace().strong());
+                            ui.label(format!("won {:.1}%", c.win * 100.0));
+                            if c.current {
+                                ui.label("the tested deck");
+                                ui.label("");
+                            } else {
+                                ui.label(gain(&c.vs_current));
+                                if ui
+                                    .small_button("Use this build")
+                                    .on_hover_text("Replace the deck with this colour set's auto-build (Undo takes it back)")
+                                    .clicked()
+                                {
+                                    acts.push(Action::ApplyDeck(
+                                        c.deck.clone(),
+                                        format!("Rebuilt in {}. Undo takes it back.", c.colors),
+                                    ));
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                if !r.lands.is_empty() {
+                    ui.label(RichText::new("Land count").strong());
+                    egui::Grid::new("lab_lands").striped(true).show(ui, |ui| {
+                        for l in &r.lands {
+                            ui.label(format!("{} lands", l.lands));
+                            ui.label(gain(&l.gain));
+                            ui.label(
+                                RichText::new(format!("cut {}, add {}", l.swap.cut, l.swap.add))
+                                    .small()
+                                    .weak(),
+                            );
+                            ui.end_row();
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                let repl = r.worth.first().map(|w| w.replacement.clone()).unwrap_or_default();
+                egui::CollapsingHeader::new(RichText::new("What each card is worth").strong())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "Win-rate points lost when one copy is replaced by the best card left on your bench ({}), {} games each. \
+                                 Dead weight: replacing it helped, clearly more than replacing a typical card of the deck. \
+                                 Score: the deck builder's estimate.",
+                                repl,
+                                r.worth.first().map_or(0, |w| w.worth.games)
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                        egui::Grid::new("lab_worth").striped(true).show(ui, |ui| {
+                            for w in &r.worth {
+                                ui.label(gain(&w.worth));
+                                let name = if w.copies > 1 {
+                                    format!("{} (1 of {})", w.name, w.copies)
+                                } else {
+                                    w.name.clone()
+                                };
+                                if ui.link(name).clicked() {
+                                    acts.push(Action::Select(w.name.clone()));
+                                }
+                                ui.label(RichText::new(format!("score {:.1}", w.heuristic)).weak());
+                                if w.dead_weight {
+                                    ui.label(RichText::new("dead weight").color(BAD));
+                                } else {
+                                    ui.label("");
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    });
+                egui::CollapsingHeader::new(RichText::new("Additions from your pool").strong())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "The best-scoring cards you could add, each tried in place of the least valuable cards; the best place is shown. {} games each.",
+                                r.additions.first().map_or(0, |a| a.gain.games)
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                        egui::Grid::new("lab_adds").striped(true).show(ui, |ui| {
+                            for a in &r.additions {
+                                ui.label(gain(&a.gain));
+                                if ui.link(a.add.as_str()).clicked() {
+                                    acts.push(Action::Select(a.add.clone()));
+                                }
+                                ui.label(RichText::new(format!("for {}", a.cut)).weak());
+                                ui.label(RichText::new(format!("score {:.1}", a.heuristic)).weak());
+                                ui.end_row();
+                            }
+                        });
+                    });
+                egui::CollapsingHeader::new("How to read this").show(ui, |ui| {
+                    ui.label(
+                        "Numbers are win-rate points (+2.0 = the deck wins 2% more of its games) ± one standard error. \
+                         Each change is paired: the deck and the changed deck play exactly the same games (same opponents, \
+                         seats and shuffles), so the games only differ once the changed card shows up - much less noise than \
+                         comparing two separate win rates. Anything within about ±2 standard errors could be luck. \
+                         Card worths and additions are screening numbers; the best combination is re-measured on fresh games, \
+                         because the best of many noisy screens tends to be the luckiest one.",
+                    );
+                });
+            });
     }
 
     fn commanders_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
@@ -3499,6 +3991,13 @@ impl eframe::App for GuiApp {
         }
         match self.tab {
             Tab::Build => self.build_tab(ui, &mut acts),
+            Tab::Lab => {
+                Panel::right("inspector_l")
+                    .resizable(true)
+                    .default_size(330.0)
+                    .show(ui, |ui| self.inspector(ui, &mut acts));
+                egui::CentralPanel::default().show(ui, |ui| self.lab_tab(ui, &mut acts));
+            }
             Tab::Commanders => {
                 Panel::right("inspector_c")
                     .resizable(true)
@@ -3554,6 +4053,7 @@ impl eframe::App for GuiApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.stop_lab();
         self.autosave();
         self.save_settings();
     }

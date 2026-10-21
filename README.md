@@ -23,6 +23,7 @@ See `dist/README-windows.txt` for a tour. To rebuild the zip from Linux: `tools/
 | Tab | What it does |
 | --- | --- |
 | Deck Builder | Pool browser (filters by colour, type, role, mana value), deck as card stacks or a list, card inspector, auto-build, basic-land controls, suggestions |
+| Playtest Lab | Starts by itself when you choose a commander or auto-build: playtests what each card in the deck is worth, the best additions from your pool, one land more or fewer and the other colour sets, then shows - separately from your deck - the best combination of swaps the games support, with an "Apply" button (undoable) |
 | Commanders | Every legendary creature you own, ranked 0-100 by the deck your pool gives it (eight weighted parts you can adjust, including simulated 4-player games and EDHREC), with a preview of the ranking once singleton starts; one-click build, Prismatic Piper option |
 | Draft Helper | Type a pack's cards and get them ranked for your deck - or, with no commander yet, for your top-ranked commanders' decks (fit, upgrade over the weakest card, VP value, raw strength); "I took it" adds to your pool |
 | Trades & VP | Trade-in plan for the 10 VP minimum (with the rarity floor), VP prices, Skill Tree costs, Shop |
@@ -56,7 +57,7 @@ cargo run --release                 # the windowed app
 cargo run --release --bin msh-cli   # the same tools as a typed command line
 ```
 
-Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red hulk; web up; truck toss`,
+Command-line examples: `commanders`, `auto madame hydra`, `lab` / `lab thorough` (then `lab apply`), `season 6`, `draft red hulk; web up; truck toss`,
 `trade 10 rare`, `export mixer`, `import pool.txt`, `ratings`, `update-cards`, `why red hulk`, `upgrades`,
 `publicpool pool.txt`, `roster`, `opponents`, `opponent 3 commander Gandalf, Wandering Wizard`, `help`.
 `cargo run --release --example testbed_timing -- data` times building the simulated opponents (fresh and cached) and
@@ -212,6 +213,36 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
     its spells swapped for lands wins clearly less. One game takes about 2.5 ms; a full ranking with the singleton
     preview takes under a minute on 4 cores. `sim_bench`, `sim_log` (one game, move by move) and `sim_decks` are in
     `examples/`.
+* **Playtest lab** (`src/lab.rs`, Playtest Lab tab, `lab` in the command line). Auto-build picks cards by their
+  score, and a score can be wrong: a card can look strong and still lose games (and fitting it in costs the cards it
+  pushes out). The lab checks the deck by playing it instead. It never changes your deck by itself; its suggestion is
+  shown separately and applied only when you press "Apply best combination" (`lab apply`; Undo takes it back).
+  - **Paired playtests** (`src/playtest/lab.rs`): every game has its own seed, which fixes the opponents, your seat
+    and every shuffle. A changed deck keeps the library's layout and only changes which card one library slot is, so it
+    plays exactly the same games as your deck until the swapped card turns up. Comparing the two game by game ("did
+    the change win a game the deck lost, or lose one it won?") cancels most of the luck that separate win rates
+    carry: the same accuracy needs several times fewer games. Results are the same on any number of CPU cores.
+  - **What each card is worth:** each nonland card is replaced by the best card left on your bench (by score), and
+    the win rate lost is the card's worth. When the best bench card is strong, swapping almost anything for it helps,
+    so "dead weight" marks the cards whose swap helped clearly more (two standard errors) than the deck's typical card.
+  - **Additions:** the best-scoring bench cards, each tried in place of the cards measured least valuable; and one
+    land more (the weakest spell becomes a basic) or fewer (a basic becomes the best bench card).
+  - **Best combination:** the swaps that measured well are combined, biggest first (each card cut or added only as
+    often as you have it). The combination is then **confirmed on fresh games** - different seeds, several times as
+    many - and each swap is checked by playing the combination without it; swaps that don't hold up are dropped (and
+    what's left is measured again on new games). Choosing the best of many noisy measurements picks lucky ones (the
+    winner's curse); measuring the winner again on games that didn't choose it gives an honest number. The
+    combination is reported only if its confirmed gain is more than two standard errors; otherwise the lab says no
+    change beats the current build.
+  - **Colour sets:** for commanders with a choice of colours (Thanos: WBR, WUBR, WBRG, WUBRG), the deck is rebuilt in
+    each and played against the same opponents and seats ("Use this build" switches to one).
+  - **Reading the numbers:** win-rate points (+2.0 = wins 2% more of its games; 25% is even in a 4-player game) ±
+    one standard error. Within about ±2 standard errors is noise; green and red mark changes clearly better or worse.
+    Card worths and additions are screening numbers (fewer games); the best combination's numbers are confirmed ones.
+  - **Effort:** *quick* (about 1 minute on 4 cores: 800 games per card, 600 per addition, 3,000 to confirm, 2,000 per
+    colour set) or *thorough* (about 5 minutes: 3,000 / 2,400 / 10,000 / 6,000, more additions and cut candidates).
+    The app runs a thorough lab in the background when you choose a commander (the Playtest Lab tab can switch this
+    to quick or off) and stops it if you change commander.
 * **Upgrades / pack odds** use Play Booster contents: 7 commons, 3 uncommons, a rare or mythic (mythic about 1 in 7),
   plus a wildcard and a foil of any rarity at typical published rates. "Your table" means the card is opened at your
   4-player draft table (so it's in your face-up draft) - you plus 3 of the other 7 players, any seating equally likely;

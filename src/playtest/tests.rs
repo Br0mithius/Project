@@ -2771,3 +2771,58 @@ fn ramos_counters_pay_for_spells_once_each_turn() {
     g.perms[i].counters = 6;
     assert!(!g.can_pay(0, &Mana::parse("{W}")), "only once each turn");
 }
+
+#[test]
+fn ronin_sacrifices_only_its_own_equipment() {
+    let db = db();
+    let mut cards = vec![db.get("Ronin, Shadow Stalker").unwrap().clone()];
+    cards.push(card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    ));
+    cards.push(card(
+        "Blade",
+        "{1}",
+        "Artifact — Equipment",
+        "Equipped creature gets +1/+0.\nEquip {1}",
+        None,
+    ));
+    let d0 = prep(&cards);
+    let d1 = prep(&[card(
+        "Dragon",
+        "{4}{R}{R}",
+        "Creature — Dragon",
+        "Flying",
+        Some(("4", "4")),
+    )]);
+    let mut g = game(&[&d0, &d1]);
+    let ronin = put(&mut g, 0, 0);
+    let bear = put(&mut g, 0, 1);
+    let dragon = put(&mut g, 1, 0);
+    let i = g.idx(ronin).unwrap();
+    let k = g
+        .abilities_of(&g.perms[i])
+        .iter()
+        .position(|a| matches!(a.trig, Trig::Activated { tap: true, .. }))
+        .unwrap();
+    assert!(
+        !g.activate(0, ronin, k),
+        "no Equipment attached: the -4/-4 can't be paid for with the Bear"
+    );
+    assert!(g.idx(bear).is_some(), "the Bear isn't sacrificed");
+    let blade = put(&mut g, 0, 2);
+    let b = g.idx(blade).unwrap();
+    g.perms[b].attached = Some(ronin);
+    assert!(g.activate(0, ronin, k));
+    g.run_pending();
+    g.sba();
+    assert!(
+        g.idx(blade).is_none(),
+        "the attached Equipment is sacrificed"
+    );
+    assert!(g.idx(bear).is_some(), "the Bear survives");
+    assert!(g.idx(dragon).is_none(), "the 4/4 gets -4/-4");
+}

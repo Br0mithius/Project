@@ -14,6 +14,7 @@
 pub mod ai;
 pub mod combat;
 pub mod compile;
+pub mod lab;
 pub mod probe;
 pub mod resolve;
 #[cfg(test)]
@@ -966,6 +967,12 @@ impl<'a> Game<'a> {
 
     /// The fodder an activated "sacrifice a ..." cost would use.
     fn sac_fodder(&self, p: usize, src_id: u32, text: &str) -> Option<usize> {
+        // "Sacrifice an Equipment attached to ~" (Ronin): only that Equipment will do.
+        if text.contains("sacrifice an equipment attached to") {
+            return self.perms.iter().position(|x| {
+                x.ctrl as usize == p && x.is(T_EQUIPMENT) && x.attached == Some(src_id)
+            });
+        }
         let types = if text.contains("sacrifice a creature")
             || text.contains("sacrifice another creature")
         {
