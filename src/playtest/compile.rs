@@ -150,6 +150,8 @@ impl Mana {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Phase {
     Upkeep,
+    /// "At the beginning of your (pre-combat / first) main phase".
+    Main,
     Combat,
     End,
 }
@@ -218,6 +220,8 @@ pub enum Trig {
     Phase {
         phase: Phase,
         any_player: bool,
+        /// "Each opponent's draw step": not on its controller's own turn.
+        opponents_only: bool,
     },
     Event(Ev, Filter),
     Activated {
@@ -290,6 +294,8 @@ pub struct SimAbility {
     pub optional: bool,
     pub once: bool,
     pub modal: bool,
+    /// The mode each effect belongs to (modal abilities).
+    pub modes: Vec<u8>,
     pub effects: Vec<Effect>,
     /// Lower-case rules text (for X values and details).
     pub text: String,
@@ -303,6 +309,14 @@ pub struct SimAbility {
     pub once_per_turn: bool,
     /// "Whenever you draw your second card each turn".
     pub second_draw: bool,
+    /// Works while the card is in its owner's graveyard ("return ~ from your graveyard to
+    /// the battlefield", "exile ~ from your graveyard: ..."), not on the battlefield.
+    pub from_graveyard: bool,
+}
+
+/// Does this ability work from the graveyard (and only there)?
+pub fn graveyard_ability(text: &str) -> bool {
+    text.contains("~ from your graveyard")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -377,7 +391,58 @@ pub struct SimCard {
     pub value: f32,
     /// Bit per `Ev` kind its abilities listen for (so events skip cards that don't care).
     pub ev_mask: u32,
+    /// The same for abilities that work from the graveyard.
+    pub gy_ev_mask: u32,
     pub has_static: bool,
+    /// Counters it enters with: (kind - "+1/+1", "shield", other names -, amount, condition).
+    pub enters_counters: Vec<(String, EntersCounters, Cond)>,
+    /// Power and/or toughness defined by a count ("*/*": Crusader of Odric, Tarmogoyf).
+    pub cda: Option<Cda>,
+}
+
+/// A characteristic-defining ability (CR 604.3): power and/or toughness equal to a count.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cda {
+    /// What is counted ("creatures you control", "card types among cards in all graveyards").
+    pub phrase: String,
+    pub power: bool,
+    pub toughness: bool,
+    /// "Its toughness is equal to that number plus 1".
+    pub plus_t: i16,
+}
+
+/// "~'s power and toughness are each equal to the number of creatures you control", "~'s
+/// power is equal to the number of ...".
+fn cda_of(text: &str) -> Option<Cda> {
+    for line in text.lines() {
+        let l = line.trim();
+        let l = l.split(" — ").last().unwrap_or(l);
+        if !l.starts_with("~'s power") {
+            continue;
+        }
+        let both = l.starts_with("~'s power and toughness are each equal to the number of ");
+        let power = both || l.starts_with("~'s power is equal to the number of ");
+        if !power {
+            continue;
+        }
+        let phrase = l
+            .split("the number of ")
+            .nth(1)?
+            .trim_end_matches('.')
+            .to_string();
+        let plus_t = if l.contains("toughness is equal to that number plus 1") {
+            1
+        } else {
+            0
+        };
+        return Some(Cda {
+            phrase,
+            power: true,
+            toughness: both || l.contains("its toughness is equal to that number"),
+            plus_t,
+        });
+    }
+    None
 }
 
 impl SimCard {
@@ -495,12 +560,24 @@ pub fn filter_of(what: &str) -> Filter {
             f.types |= bit;
         }
     }
+    // Whole words only ("sorcery" has no Orc in it; "Elves" is Elf, "Wolves" is Wolf).
+    let words: Vec<&str> = w
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|x| !x.is_empty())
+        .collect();
     for sub in [
         "hero", "villain", "robot", "human", "dwarf", "elf", "goblin", "hobbit", "halfling",
         "wizard", "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant",
         "avenger", "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
     ] {
-        if w.contains(sub) {
+        let plural = |x: &&str| {
+            *x == sub
+                || x.strip_suffix('s') == Some(sub)
+                || x.strip_suffix("es") == Some(sub)
+                || sub.ends_with('f') && x.strip_suffix("ves") == Some(&sub[..sub.len() - 1])
+                || sub == "dwarf" && *x == "dwarves"
+        };
+        if words.iter().any(plural) {
             f.subtype = Some(sub.to_string());
             break;
         }
@@ -637,8 +714,23 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     Cond::Chance(0.5)
 }
 
+/// The trigger part of a triggered ability's text ("whenever a nontoken, non-Angel creature
+/// you control dies" out of "..., return that card ...").
+fn trigger_part(t: &str) -> &str {
+    let mut from = 0;
+    while let Some(off) = t[from..].find(", ") {
+        let i = from + off;
+        if !t[i + 2..].starts_with("non") {
+            return &t[..i];
+        }
+        from = i + 2;
+    }
+    t
+}
+
 fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
     let t = a.text.as_str();
+    let head = trigger_part(t);
     match w {
         When::Spell => Trig::Spell,
         When::Enters => Trig::Enters,
@@ -650,6 +742,8 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 Phase::End
             } else if t.contains("beginning of combat") || t.contains("beginning of each combat") {
                 Phase::Combat
+            } else if t.contains("main phase") {
+                Phase::Main
             } else {
                 Phase::Upkeep
             },
@@ -658,19 +752,31 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 || t.contains("each combat")
                 || t.contains("each player's")
                 || t.contains("each opponent's"),
+            opponents_only: t.contains("each opponent's"),
         },
         When::Event(e) => {
             let (kind, what) = match e {
                 Event::Cast(what) => (Ev::Cast, what.as_str()),
                 Event::OtherEnters(what) => (Ev::OtherEnters, what.as_str()),
                 Event::Landfall => (Ev::Landfall, "a land you control"),
-                Event::Death => (Ev::Death, t),
+                Event::Death => (Ev::Death, head),
                 Event::GainLife => (Ev::GainLife, "you"),
-                Event::Draw => (Ev::Draw, "you"),
-                Event::Discard => (Ev::Discard, t),
+                // "Whenever an opponent draws a card", "whenever a player draws their second
+                // card each turn".
+                Event::Draw => (
+                    Ev::Draw,
+                    if head.contains("opponent draws") {
+                        "an opponent"
+                    } else if head.contains("player draws") {
+                        "a player"
+                    } else {
+                        "you"
+                    },
+                ),
+                Event::Discard => (Ev::Discard, head),
                 Event::Damaged => (Ev::Damaged, "~"),
-                Event::Counters => (Ev::Counters, t),
-                Event::Sacrifice => (Ev::Sacrifice, t),
+                Event::Counters => (Ev::Counters, head),
+                Event::Sacrifice => (Ev::Sacrifice, head),
                 Event::Tokens => (Ev::Tokens, "you"),
                 Event::Targeted => (Ev::Targeted, "~"),
                 Event::OthersAttack => (Ev::OthersAttack, "you"),
@@ -712,6 +818,12 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 }
             };
             let mut f = filter_of(what);
+            // "Whenever you sacrifice a token", "whenever you put counters on ...": yours.
+            if f.yours.is_none()
+                && (head.starts_with("whenever you ") || head.starts_with("when you "))
+            {
+                f.yours = Some(true);
+            }
             if matches!(
                 kind,
                 Ev::Cast
@@ -736,8 +848,19 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 f.yours = Some(false);
                 f.types = 0;
             }
-            if matches!(kind, Ev::Cast | Ev::LoyaltyActivated) && what.contains("opponent") {
+            if matches!(kind, Ev::Cast | Ev::LoyaltyActivated | Ev::Draw)
+                && what.contains("opponent")
+            {
                 f.yours = Some(false);
+            }
+            if kind == Ev::Draw && what == "a player" {
+                f.yours = None;
+            }
+            // "Whenever you cast a spell that targets a creature you control" (Colleen Wing,
+            // Ms. Marvel): tricks and Auras - noncreature spells - not creature spells.
+            if kind == Ev::Cast && what.contains("that targets") {
+                f.types = 0;
+                f.not_types = T_CREATURE | T_LAND;
             }
             Trig::Event(kind, f)
         }
@@ -800,6 +923,11 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 optional: a.optional,
                 once: a.once,
                 modal: a.modal,
+                modes: if a.modal && a.modes.len() == a.effects.len() {
+                    a.modes.clone()
+                } else {
+                    (0..a.effects.len() as u8).collect()
+                },
                 effects: a.effects.clone(),
                 text: a.text.clone(),
                 until_eot: a.text.contains("until end of turn"),
@@ -811,6 +939,8 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 filter: filter_of(&a.text),
                 once_per_turn: a.text.contains("only once each turn"),
                 second_draw: a.text.contains("second card"),
+                from_graveyard: graveyard_ability(&a.text)
+                    && !matches!(w, When::Dies | When::Spell | When::Static),
             });
         }
     }
@@ -879,6 +1009,68 @@ fn color_bits(text: &str) -> u8 {
     m
 }
 
+/// How many counters a permanent enters with.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntersCounters {
+    Fixed(u8),
+    /// The X paid for it.
+    X,
+    /// "Where X is the greatest power among other creatures you control" (Zegana).
+    GreatestOtherPower,
+}
+
+/// "~ enters with four +1/+1 counters on it", "enters with X +1/+1 counters", "enters with
+/// a shield counter", "if it was kicked, it enters with two +1/+1 counters": (counter kind,
+/// how many, condition).
+fn enters_counters(text: &str) -> Vec<(String, EntersCounters, Cond)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let l = line.trim();
+        let Some(i) = l.find("enters with ") else {
+            continue;
+        };
+        // Only the card itself ("~ enters", "this creature enters", "it enters").
+        let head = &l[..i];
+        if !(head.ends_with("~ ") || head.ends_with("it ")) || head.contains("each other") {
+            continue;
+        }
+        let rest = &l[i + "enters with ".len()..];
+        let mut words = rest.split_whitespace();
+        let n = words.next().unwrap_or("");
+        let kind = words
+            .next()
+            .unwrap_or("")
+            .trim_start_matches("additional")
+            .to_string();
+        let kind = if kind.is_empty() {
+            words.next().unwrap_or("").to_string()
+        } else {
+            kind
+        };
+        if !rest.contains(" counter") || rest.contains("for each") {
+            continue;
+        }
+        let amount = if n == "x" {
+            if rest.contains("greatest power among other creatures") {
+                EntersCounters::GreatestOtherPower
+            } else {
+                EntersCounters::X
+            }
+        } else {
+            match number_word(n) {
+                Some(k) => EntersCounters::Fixed(k),
+                None => continue,
+            }
+        };
+        let cond = cond_of(
+            l,
+            l.contains(" if ") || l.starts_with("if ") || l.contains("raid"),
+        );
+        out.push((kind, amount, cond));
+    }
+    out
+}
+
 /// Back face: "// Back face: Name {cost}\nType line\n..." in the rules text.
 fn back_face(card: &Card, parsed: &abilities::Parsed) -> Option<BackFace> {
     let back = parsed.back.as_ref()?;
@@ -919,6 +1111,14 @@ pub fn compile(card: &Card) -> SimCard {
         .to_string();
     let types = types_of(&card.type_line);
     let cost = Mana::parse(&card.mana_cost);
+    // The front face's rules text, reminders dropped and the card's name as "~".
+    let own_text = crate::abilities::self_refs(
+        crate::card::strip_reminder(&card.oracle_text)
+            .split("// Back face:")
+            .next()
+            .unwrap_or(""),
+        card,
+    );
     let mut colors = 0u8;
     for (i, &p) in cost.pips.iter().enumerate() {
         if p > 0 {
@@ -972,9 +1172,18 @@ pub fn compile(card: &Card) -> SimCard {
             0
         };
     }
-    // Sources of {C} (Thanos's power-up and other {C} costs need one).
-    if (types & T_LAND != 0 || mana_ability) && (card.makes_colorless() || produces == 0) {
+    // Sources of {C} (Thanos's power-up and other {C} costs need one). A land with no mana
+    // ability at all (Evolving Wilds, Hobbit Hole) makes no mana.
+    let land_mana = types & T_LAND != 0
+        && (card.produces().0 != 0
+            || card.makes_colorless()
+            || front_text.contains("add ")
+            || types & T_BASIC != 0);
+    if (land_mana || mana_ability) && (card.makes_colorless() || produces == 0) {
         produces |= COLORLESS;
+    }
+    if types & T_LAND != 0 && !land_mana && !mana_ability {
+        produces = 0;
     }
     let mana_amount = abilities
         .iter()
@@ -999,7 +1208,10 @@ pub fn compile(card: &Card) -> SimCard {
             return None;
         }
         let i = a.text.find("cost {")?;
-        if !a.text.contains("less") || a.text.contains("opponent") {
+        // "Power-up abilities ... cost {3} less", "equip abilities ... cost {2} less" aren't
+        // about spells.
+        if !a.text.contains("less") || a.text.contains("opponent") || !a.text[..i].contains("spell")
+        {
             return None;
         }
         let n: u8 = a.text[i + 6..]
@@ -1101,11 +1313,18 @@ pub fn compile(card: &Card) -> SimCard {
         back: back_face(card, parsed),
         value: 0.0,
         ev_mask: 0,
+        gy_ev_mask: 0,
         has_static: false,
+        enters_counters: enters_counters(&own_text),
+        cda: cda_of(&own_text),
     };
     sc.value = static_value(&sc);
     sc.ev_mask = sc.abilities.iter().fold(0, |m, a| match &a.trig {
-        Trig::Event(k, _) => m | ev_bit(*k),
+        Trig::Event(k, _) if !a.from_graveyard => m | ev_bit(*k),
+        _ => m,
+    });
+    sc.gy_ev_mask = sc.abilities.iter().fold(0, |m, a| match &a.trig {
+        Trig::Event(k, _) if a.from_graveyard => m | ev_bit(*k),
         _ => m,
     });
     sc.has_static = sc.abilities.iter().any(|a| a.trig == Trig::Static);

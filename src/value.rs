@@ -220,7 +220,15 @@ pub fn ability_value(a: &Ability) -> f32 {
         .collect();
     // A modal ability is worth its best mode, but a forced drawback mode still counts.
     let v = if a.modal {
-        vals.iter().copied().fold(0.0, f32::max) + vals.iter().filter(|v| **v < -1.0).sum::<f32>()
+        let mut per: Vec<f32> = Vec::new();
+        for (k, v) in vals.iter().enumerate() {
+            let m = a.modes.get(k).copied().unwrap_or(k as u8) as usize;
+            if per.len() <= m {
+                per.resize(m + 1, 0.0);
+            }
+            per[m] += v;
+        }
+        per.iter().copied().fold(0.0, f32::max) + per.iter().filter(|v| **v < -1.0).sum::<f32>()
     } else {
         vals.iter().sum()
     };

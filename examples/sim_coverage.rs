@@ -15,11 +15,21 @@ fn trig_name(t: &Trig) -> (String, &'static str) {
         Trig::Dies => ("dies".into(), "exact"),
         Trig::Attacks => ("attacks".into(), "exact"),
         Trig::CombatDamage => ("deals combat damage to a player".into(), "exact"),
-        Trig::Phase { phase, any_player } => (
+        Trig::Phase {
+            phase,
+            any_player,
+            opponents_only,
+        } => (
             format!(
                 "beginning of {:?}{}",
                 phase,
-                if *any_player { " (each player's)" } else { "" }
+                if *opponents_only {
+                    " (each opponent's)"
+                } else if *any_player {
+                    " (each player's)"
+                } else {
+                    ""
+                }
             ),
             "exact",
         ),

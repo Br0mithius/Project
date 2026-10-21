@@ -914,6 +914,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         src,
         snap: None,
         card: None,
+        card_ref: None,
         subject: None,
         text,
         until_eot: false,
@@ -1112,26 +1113,46 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
         .collect();
     if a.modal {
         let two = a.text.contains("choose two");
-        let mut v = vals.clone();
-        v.sort_by(|a, b| b.partial_cmp(a).unwrap());
-        v.iter().take(if two { 2 } else { 1 }).sum()
+        // Value per mode (a mode can have several effects).
+        let mut per: Vec<f32> = Vec::new();
+        for (k, v) in vals.iter().enumerate() {
+            let m = a.modes.get(k).copied().unwrap_or(k as u8) as usize;
+            if per.len() <= m {
+                per.resize(m + 1, 0.0);
+            }
+            per[m] += v;
+        }
+        per.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        per.iter().take(if two { 2 } else { 1 }).sum()
     } else {
         vals.iter().sum()
     }
 }
 
-pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility) -> Vec<usize> {
+/// The modes to use (`used`: a bit per mode already chosen, for "choose one that hasn't been
+/// chosen"); returns the indices of the effects of the chosen modes.
+pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usize> {
     let two = ab.text.contains("choose two");
-    let mut v: Vec<(f32, usize)> = ab
-        .effects
-        .iter()
-        .enumerate()
-        .map(|(k, e)| (effect_now(g, ctx.ctrl, e, &ab.text, ctx.src), k))
+    let mode = |k: usize| ab.modes.get(k).copied().unwrap_or(k as u8) as usize;
+    let n_modes = (0..ab.effects.len()).map(mode).max().map_or(0, |m| m + 1);
+    let mut v: Vec<(f32, usize)> = (0..n_modes)
+        .filter(|&m| m >= 32 || used & (1 << m) == 0)
+        .map(|m| {
+            let val: f32 = (0..ab.effects.len())
+                .filter(|&k| mode(k) == m)
+                .map(|k| effect_now(g, ctx.ctrl, &ab.effects[k], &ab.text, ctx.src))
+                .sum();
+            (val, m)
+        })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-    v.into_iter()
+    let chosen: Vec<usize> = v
+        .into_iter()
         .take(if two { 2 } else { 1 })
-        .map(|(_, k)| k)
+        .map(|(_, m)| m)
+        .collect();
+    (0..ab.effects.len())
+        .filter(|&k| chosen.contains(&mode(k)))
         .collect()
 }
 
@@ -1288,6 +1309,8 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
 enum Act {
     Cast(Src, CastOpts),
     Activate(u32, usize),
+    /// An ability of a card in the graveyard: (card, ability).
+    GraveyardActivate(u16, usize),
     Equip(u32, u32),
     Cycle(usize),
 }
@@ -1427,6 +1450,31 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     for (k, &idx) in pl.graveyard.iter().enumerate() {
         if pl.recast.contains(&idx) || pl.cards[idx as usize].flashback.is_some() {
             push_cast(&mut out, Src::Graveyard(k), idx, false, false);
+        }
+        // Abilities used from the graveyard ("{1}{B}: Return ~ from your graveyard...").
+        let c = &pl.cards[idx as usize];
+        for (j, a) in c.abilities.iter().enumerate() {
+            if !a.from_graveyard || pl.graveyard[..k].contains(&idx) {
+                continue;
+            }
+            let Some(cost) = g.graveyard_activation_cost(p, k, j) else {
+                continue;
+            };
+            if !g.can_pay(p, &cost) {
+                continue;
+            }
+            let v = if a.effects.contains(&Effect::Reanimate) {
+                c.value
+            } else if a.effects.contains(&Effect::Regrowth) {
+                c.value * 0.6
+            } else {
+                ability_now(g, p, a, None)
+            };
+            out.push((
+                v - 0.1 * cost.total() as f32,
+                cost.total(),
+                Act::GraveyardActivate(idx, j),
+            ));
         }
     }
     for (i, x) in g.perms.iter().enumerate() {
@@ -1616,6 +1664,12 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
     match act {
         Act::Cast(src, opts) => g.cast(p, src, opts),
         Act::Activate(id, k) => g.activate(p, id, k),
+        Act::GraveyardActivate(idx, k) => {
+            match g.players[p].graveyard.iter().position(|&c| c == idx) {
+                Some(gy) => g.activate_from_graveyard(p, gy, k),
+                None => false,
+            }
+        }
         Act::Equip(e, t) => g.equip(p, e, t),
         Act::Cycle(h) => g.cycle(p, h),
     }

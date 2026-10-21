@@ -121,6 +121,9 @@ impl<'a> Game<'a> {
                 extra_combats: 0,
                 grudge: [0.0; 8],
                 last_spell: None,
+                copy_next: Vec::new(),
+                inst_sorc_this_turn: 0,
+                last_ability: None,
                 mulligans: 0,
             })
             .collect();
@@ -143,6 +146,14 @@ impl<'a> Game<'a> {
             vcache: Default::default(),
             tcache: std::cell::RefCell::new([(0, 0.0); 8]),
             wcache: std::cell::RefCell::new([[(0, 0.0); 8]; 8]),
+            reborn: None,
+            entering_x: None,
+            cur_x: None,
+            casting: None,
+            entering_kicked: false,
+            last_left: None,
+            last_discarded: 0,
+            last_countered: Vec::new(),
         };
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
@@ -287,6 +298,23 @@ impl<'a> Game<'a> {
             return false;
         };
         let c: &'a SimCard = &self.players[p].cards[idx as usize];
+        // X paid (`cast_cost` spends about half the spare mana on it).
+        let x_paid = (!back && c.cost.x && !opts.free)
+            .then(|| (self.mana_available(p).saturating_sub(c.cost.total()) / 2).max(1) as i32);
+        // Pyromancer's Goggles: its mana casting a red instant or sorcery copies it.
+        let goggles = if c.is(T_INSTANT | T_SORCERY) && !back && c.colors & (1 << 3) != 0 {
+            self.perms.iter().position(|x| {
+                x.ctrl as usize == p
+                    && !x.tapped
+                    && self.abilities_of(x).iter().any(|a| {
+                        a.text
+                            .contains("when that mana is spent to cast a red instant or sorcery")
+                    })
+            })
+        } else {
+            None
+        }
+        .map(|i| self.perms[i].id);
         // Convoke / improvise: tap helpers first (the cost already counts them).
         if opts.convoke && (c.convoke || c.improvise) && !opts.free {
             let tappers = self.convoke_tappers(p, c);
@@ -314,6 +342,13 @@ impl<'a> Game<'a> {
             }
         } else if !self.pay(p, &cost) {
             return false;
+        }
+        if let Some(i) = goggles.and_then(|id| self.idx(id)) {
+            if !self.perms[i].tapped {
+                // Its {R} went into this spell instead of another source's.
+                self.perms[i].tapped = true;
+                self.players[p].pool = self.players[p].pool.saturating_add(1);
+            }
         }
         // Teamwork: tap creatures with enough total power as an extra cost.
         let kicked = opts.kicker && c.kicker.is_some();
@@ -379,6 +414,13 @@ impl<'a> Game<'a> {
             types: spell_types,
             ..c.clone()
         };
+        let outer = (self.casting, self.cur_x);
+        self.casting = Some(((p as u8, idx), back));
+        self.cur_x = x_paid;
+        if spell_types & (T_INSTANT | T_SORCERY) != 0 {
+            self.players[p].inst_sorc_this_turn =
+                self.players[p].inst_sorc_this_turn.saturating_add(1);
+        }
         self.on_cast(p, &probe_card);
         self.note(|| {
             format!(
@@ -397,14 +439,18 @@ impl<'a> Game<'a> {
                 _ => self.players[p].graveyard.push(idx),
             }
             self.run_pending();
+            (self.casting, self.cur_x) = outer;
             return true;
         }
         let permanent = !back && c.is_permanent();
         if permanent {
+            self.entering_x = x_paid;
+            self.entering_kicked = kicked;
             let entered = self.enter_card(p, idx, p, commander_slot > 0);
             let Some(i) = entered else {
                 self.run_pending();
                 self.sba();
+                (self.casting, self.cur_x) = outer;
                 return true;
             };
             let id = self.perms[i].id;
@@ -438,6 +484,22 @@ impl<'a> Game<'a> {
             } else {
                 &c.abilities
             };
+            // "When you next cast an instant or sorcery spell this turn, copy that spell"
+            // (Loki: mana value up to his power) and Pyromancer's Goggles.
+            if spell_types & (T_INSTANT | T_SORCERY) != 0 {
+                let mv = if back {
+                    c.back.as_ref().map_or(c.mv, |b| b.cost.total() as u8)
+                } else {
+                    c.mv
+                };
+                if let Some(k) = self.players[p].copy_next.iter().position(|&l| mv <= l) {
+                    self.players[p].copy_next.remove(k);
+                    self.copy_spell(p, ((p as u8, idx), back));
+                }
+                if goggles.is_some() {
+                    self.copy_spell(p, ((p as u8, idx), back));
+                }
+            }
             for (k, a) in abilities.iter().enumerate() {
                 if a.trig == Trig::Spell
                     || (back && a.trig != Trig::Static && !matches!(a.trig, Trig::Activated { .. }))
@@ -476,6 +538,7 @@ impl<'a> Game<'a> {
         }
         self.run_pending();
         self.sba();
+        (self.casting, self.cur_x) = outer;
         true
     }
 
@@ -504,6 +567,9 @@ impl<'a> Game<'a> {
             return None;
         }
         let ab = self.abilities_of(x).get(k)?;
+        if ab.from_graveyard {
+            return None; // used from the graveyard only
+        }
         match &ab.trig {
             Trig::Activated {
                 mana,
@@ -657,6 +723,126 @@ impl<'a> Game<'a> {
         true
     }
 
+    /// The mana ability `k` of the card at `gy` in `p`'s graveyard needs to be activated
+    /// from there ("{1}{B}: Return ~ from your graveyard to the battlefield"), if it can be.
+    pub fn graveyard_activation_cost(&self, p: usize, gy: usize, k: usize) -> Option<Mana> {
+        let idx = *self.players[p].graveyard.get(gy)?;
+        let c = &self.players[p].cards[idx as usize];
+        let ab = c.abilities.get(k)?;
+        let Trig::Activated {
+            mana,
+            sac_other,
+            discard,
+            life,
+            ..
+        } = &ab.trig
+        else {
+            return None;
+        };
+        if !ab.from_graveyard || !self.cond_holds(&ab.cond, p, None) {
+            return None;
+        }
+        let cost = ab.text.split(": ").next().unwrap_or("");
+        if *sac_other && self.sac_fodder(p, u32::MAX, &ab.text).is_none()
+            || *discard && self.players[p].hand.is_empty()
+            || *life as i32 >= self.players[p].life
+        {
+            return None;
+        }
+        // "Exile another creature card from your graveyard" (Gallia).
+        if cost.contains("exile another creature card from your graveyard")
+            && self.other_creature_card(p, gy).is_none()
+        {
+            return None;
+        }
+        if ab.text.contains("activate only as a sorcery") && self.active != p {
+            return None;
+        }
+        let m = Mana::parse(cost);
+        Some(if m.total() == 0 && *mana > 0 {
+            Mana::generic(*mana as u32)
+        } else {
+            m
+        })
+    }
+
+    /// Another creature card in `p`'s graveyard (the least valuable), not the one at `gy`.
+    fn other_creature_card(&self, p: usize, gy: usize) -> Option<usize> {
+        let pl = &self.players[p];
+        (0..pl.graveyard.len())
+            .filter(|&j| j != gy && pl.cards[pl.graveyard[j] as usize].is(T_CREATURE))
+            .min_by(|&a, &b| {
+                let va = pl.cards[pl.graveyard[a] as usize].value;
+                let vb = pl.cards[pl.graveyard[b] as usize].value;
+                va.partial_cmp(&vb).unwrap()
+            })
+    }
+
+    /// Activates ability `k` of the card at `gy` in `p`'s graveyard, paying its costs.
+    pub fn activate_from_graveyard(&mut self, p: usize, gy: usize, k: usize) -> bool {
+        let Some(cost) = self.graveyard_activation_cost(p, gy, k) else {
+            return false;
+        };
+        if !self.pay(p, &cost) {
+            return false;
+        }
+        let idx = self.players[p].graveyard[gy];
+        let c: &'a SimCard = &self.players[p].cards[idx as usize];
+        let ab = &c.abilities[k];
+        let Trig::Activated {
+            sac_other,
+            discard,
+            life,
+            ..
+        } = ab.trig
+        else {
+            return false;
+        };
+        let cost_text = ab.text.split(": ").next().unwrap_or("");
+        if life > 0 {
+            self.lose_life(p, life as i32);
+        }
+        if discard {
+            self.discard(p);
+        }
+        if sac_other {
+            if let Some(f) = self.sac_fodder(p, u32::MAX, &ab.text) {
+                self.sacrifice(f);
+            }
+        }
+        if cost_text.contains("exile another creature card from your graveyard") {
+            if let Some(j) = self.other_creature_card(p, gy) {
+                let e = self.players[p].graveyard.remove(j);
+                self.players[p].exile.push(e);
+            }
+        }
+        // "Exile ~ from your graveyard: ..." - the card itself is the cost.
+        if cost_text.contains("exile ~ from your graveyard") {
+            if let Some(j) = self.players[p].graveyard.iter().position(|&x| x == idx) {
+                self.players[p].graveyard.remove(j);
+                self.players[p].exile.push(idx);
+            }
+        }
+        self.note(|| format!("P{} activates {} from the graveyard", p, c.name));
+        self.pending.push(Pending {
+            ctrl: p as u8,
+            source: None,
+            card: (p as u8, idx),
+            back: false,
+            ability: k as u16,
+            snapshot: None,
+            subject: None,
+            teamwork: false,
+            gift: false,
+            from_graveyard: true,
+            kicked: false,
+            overloaded: false,
+        });
+        self.run_pending();
+        self.sba();
+        true
+    }
+
     pub fn equip(&mut self, p: usize, equip_id: u32, target_id: u32) -> bool {
         let Some(e) = self.idx(equip_id) else {
             return false;
@@ -749,9 +935,14 @@ impl<'a> Game<'a> {
                 if let Trig::Phase {
                     phase: ph,
                     any_player,
+                    opponents_only,
                 } = ab.trig
                 {
-                    if ph == phase && (x.ctrl as usize == a || any_player) {
+                    let mine = x.ctrl as usize == a;
+                    if ph == phase
+                        && (mine && !opponents_only || !mine && any_player)
+                        && !ab.from_graveyard
+                    {
                         add.push(Pending {
                             ctrl: x.ctrl,
                             source: Some(x.id),
@@ -770,6 +961,44 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        // Cards that act from their owner's graveyard (Flamewake Phoenix, Command the Stage).
+        for (o, pl) in self.players.iter().enumerate() {
+            if !pl.alive {
+                continue;
+            }
+            let mut seen: Vec<u16> = Vec::new();
+            for &idx in &pl.graveyard {
+                if seen.contains(&idx) {
+                    continue;
+                }
+                seen.push(idx);
+                for (k, ab) in pl.cards[idx as usize].abilities.iter().enumerate() {
+                    if let Trig::Phase {
+                        phase: ph,
+                        any_player,
+                        ..
+                    } = ab.trig
+                    {
+                        if ph == phase && ab.from_graveyard && (o == a || any_player) {
+                            add.push(Pending {
+                                ctrl: o as u8,
+                                source: None,
+                                card: (o as u8, idx),
+                                back: false,
+                                ability: k as u16,
+                                snapshot: None,
+                                subject: None,
+                                teamwork: false,
+                                gift: false,
+                                from_graveyard: true,
+                                kicked: false,
+                                overloaded: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         self.pending.extend(add);
         self.run_pending();
         self.sba();
@@ -782,6 +1011,8 @@ impl<'a> Game<'a> {
         for pl in self.players.iter_mut() {
             pl.lands_played = 0;
             pl.spells_this_turn = 0;
+            pl.inst_sorc_this_turn = 0;
+            pl.copy_next.clear();
             pl.drawn_this_turn = 0;
             pl.attacked_this_turn = false;
             pl.gained_life_turn = false;
@@ -895,6 +1126,7 @@ impl<'a> Game<'a> {
                 self.play_land(a, h);
             }
         } else {
+            self.phase_triggers(a, Phase::Main);
             ai::main_phase(self, a, false);
             let combats = 1 + self.players[a].extra_combats as usize;
             for _ in 0..combats {
@@ -911,6 +1143,19 @@ impl<'a> Game<'a> {
         }
         if !self.players[a].alive || self.alive_count() <= 1 {
             return;
+        }
+        // Token copies made "with haste and 'at the beginning of the end step, sacrifice this
+        // token'" go now.
+        let doomed: Vec<u32> = self
+            .perms
+            .iter()
+            .filter(|x| x.sac_at_end)
+            .map(|x| x.id)
+            .collect();
+        for id in doomed {
+            if let Some(i) = self.idx(id) {
+                self.sacrifice(i);
+            }
         }
         self.phase_triggers(a, Phase::End);
         // Other players use instant-speed tricks at the end of the turn - mostly the next

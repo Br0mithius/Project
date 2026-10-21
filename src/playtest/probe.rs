@@ -389,8 +389,17 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     } else {
         &card.abilities[ab_index]
     };
-    // A permanent fires from the battlefield; an instant or sorcery from nowhere.
-    let src = if card.is_permanent() && !back {
+    // A permanent fires from the battlefield; an instant or sorcery from nowhere; an ability
+    // that works from the graveyard from there; a dies trigger once the card has died.
+    let mut died = None;
+    // X costs are paid with X = 3.
+    let x = card.cost.x.then_some(3);
+    g.cur_x = x;
+    g.entering_x = x.filter(|_| card.is_permanent() && !back && !ab.from_graveyard);
+    let src = if ab.from_graveyard {
+        g.players[0].graveyard.push(PROBED);
+        None
+    } else if card.is_permanent() && !back {
         let i = g.enter_card(0, PROBED, 0, false);
         let id = i.map(|i| g.perms[i].id);
         if let Some(i) = i {
@@ -401,12 +410,25 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
         }
         g.pending.clear();
         g.recalc();
-        id
+        // (Not "when enchanted/equipped creature dies": that's about another creature.)
+        if ab.trig == Trig::Dies
+            && (ab.text.starts_with("when ~") || ab.text.starts_with("whenever ~"))
+        {
+            // It has died: off the battlefield (as last seen) and in the graveyard.
+            if let Some(i) = id.and_then(|id| g.idx(id)) {
+                died = Some(g.perms.remove(i));
+                g.players[0].graveyard.push(PROBED);
+                g.recalc();
+            }
+            None
+        } else {
+            id
+        }
     } else {
         None
     };
     let before = snap(&g);
-    let snapshot = src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone());
+    let snapshot = died.or_else(|| src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone()));
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
         Some(k) if k < ab.effects.len() || ab.cond != Cond::Always => {
@@ -415,13 +437,18 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 src,
                 snap: snapshot,
                 card: Some(&prep.cards[PROBED as usize]),
+                card_ref: Some((0, PROBED)),
                 subject: Some(bear),
                 text: &ab.text,
                 until_eot: ab.until_eot,
                 overload: false,
             };
             if k < ab.effects.len() {
-                g.apply(&ctx, &ab.effects[k]);
+                // A mode: all of its effects.
+                let mode = |j: usize| ab.modes.get(j).copied().unwrap_or(j as u8) as usize;
+                for j in (0..ab.effects.len()).filter(|&j| mode(j) == k) {
+                    g.apply(&ctx, &ab.effects[j]);
+                }
             } else {
                 for e in &ab.effects {
                     g.apply(&ctx, e);
@@ -493,8 +520,9 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
             out.push("      (static: shown under \"On entering\")".into());
             continue;
         }
+        let n_modes = ab.modes.iter().map(|&m| m as usize + 1).max().unwrap_or(0);
         if ab.modal && ab.effects.len() > 1 {
-            for m in 0..ab.effects.len() {
+            for m in 0..n_modes.max(1) {
                 for line in fire(prep, k, back, Some(m)) {
                     out.push(format!("      mode {}: {}", m + 1, line));
                 }
@@ -550,6 +578,32 @@ pub fn probe(card: &Card) -> String {
     if c.enters_tapped {
         sim.push("enters tapped".into());
     }
+    if c.cost.x {
+        sim.push("X = 3".into());
+    }
+    if c.protection != 0 {
+        sim.push(format!("protection from colours {:#07b}", c.protection));
+    }
+    for (label, m) in [
+        ("flashback", c.flashback),
+        ("kicker", c.kicker),
+        ("overload", c.overload),
+        ("sneak", c.sneak),
+    ] {
+        if let Some(m) = m {
+            sim.push(format!("{} {} mana", label, m.total()));
+        }
+    }
+    for (label, on) in [
+        ("convoke", c.convoke),
+        ("improvise", c.improvise),
+        ("affinity for artifacts", c.affinity),
+        ("extort", c.extort),
+    ] {
+        if on {
+            sim.push(label.into());
+        }
+    }
     for (label, v) in [
         ("equip", c.equip),
         ("crew", c.crew),
@@ -577,6 +631,8 @@ pub fn probe(card: &Card) -> String {
         let decks = [&prep, &prep, &prep];
         let (mut g, bear) = board(&decks);
         let before = snap(&g);
+        g.entering_x = c.cost.x.then_some(3);
+        g.cur_x = g.entering_x;
         if let Some(i) = g.enter_card(0, PROBED, 0, false) {
             let id = g.perms[i].id;
             if c.is(T_EQUIPMENT) || c.is(T_AURA) {

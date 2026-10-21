@@ -159,6 +159,9 @@ fn read_target(phrase: &str, mass: bool) -> Target {
         || p.starts_with("artifact and/or enchantment")
     {
         Kind::ArtifactOrEnchantment
+    } else if p.starts_with("equipment") {
+        // "Exile up to one target Equipment attached to that creature".
+        Kind::Artifact
     } else if p.starts_with("permanent") || p.starts_with("noncreature permanent") {
         Kind::Permanent
     } else if p.starts_with("artifact") {
@@ -510,6 +513,9 @@ pub struct Ability {
     pub once: bool,
     /// "Choose one —": the effects are alternatives.
     pub modal: bool,
+    /// For a modal ability: the mode (bullet) each effect belongs to, so a mode with two
+    /// effects ("deals 4 damage to any target and you gain 4 life") stays one choice.
+    pub modes: Vec<u8>,
     pub text: String,
 }
 
@@ -796,6 +802,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         out.push(Effect::Destroy(read_target(&c[1], true)));
     }
     for c in p.exile_all.captures_iter(s) {
+        // "Then exile all other Nightmare tokens you control" (Abyssal Harvester) only tidies
+        // up the card's own tokens.
+        if c[1].starts_with("other") && c[1].contains("tokens you control") {
+            continue;
+        }
         if !c[1].starts_with("cards")
             && !c[1].starts_with("the cards")
             && !c[1].contains("graveyard")
@@ -1262,9 +1273,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             until_eot: eot,
         });
         if let Some(k) = c.get(4) {
+            // "Has double strike and trample": every keyword to the end of the sentence.
+            let rest = s[k.start()..].split(['"', '(']).next().unwrap_or("");
+            let rest = rest.split(" until ").next().unwrap_or(rest);
             let kws: Vec<String> = KEYWORDS
                 .iter()
-                .filter(|kw| k.as_str().contains(*kw))
+                .filter(|kw| rest.contains(*kw))
                 .map(|kw| kw.to_string())
                 .collect();
             if !kws.is_empty() {
@@ -1278,6 +1292,10 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     if !out.iter().any(|e| matches!(e, Effect::Grant { .. })) {
         for c in p.grant.captures_iter(s) {
+            // "A token that's a copy of it, except it has haste": describes the token.
+            if c[1].trim().starts_with("except") || c[1].contains(", except") {
+                continue;
+            }
             let to = pump_target(c[1].trim());
             let kws: Vec<String> = KEYWORDS
                 .iter()
@@ -1323,11 +1341,65 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             });
         }
     }
-    // Paying life as part of an effect ("you lose 2 life", Phyrexian Arena's drawback).
-    if let Some(i) = s.find("you lose ") {
-        let n = s[i + 9..].split_whitespace().next().unwrap_or("");
+    // Paying life as part of an effect ("you lose 2 life", Phyrexian Arena's drawback), also
+    // after a draw ("you draw a card and lose 1 life", "target player draws three cards and
+    // loses 3 life").
+    let drawer_loses = [
+        "draw a card and lose ",
+        "cards and lose ",
+        "draws a card and loses ",
+        "cards and loses ",
+    ]
+    .iter()
+    .find_map(|k| s.find(k).map(|i| i + k.len()))
+    .filter(|_| !s.contains("each opponent draws") && !s.contains("each player draws"));
+    if let Some(i) = s.find("you lose ").map(|i| i + 9).or(drawer_loses) {
+        let n = s[i..].split_whitespace().next().unwrap_or("");
         if let Some(a) = number(n).filter(|_| s[i..].contains(" life")) {
             out.push(Effect::Rule(format!("you lose {} life", a.n)));
+        }
+    }
+    // "Each opponent discards a card and loses 2 life" (Arbiter of Woe).
+    if let Some(i) = s.find("each opponent discards a card and loses ") {
+        let n = s[i + 40..].split_whitespace().next().unwrap_or("");
+        if let Some(a) = number(n) {
+            out.push(Effect::Drain {
+                amount: a,
+                each: true,
+            });
+        }
+    }
+    // "You lose life equal to that permanent's mana value" (Feed the Swarm), "its controller
+    // gains life equal to its power" (Swords to Plowshares).
+    if s.contains("you lose life equal to") {
+        out.push(Effect::Rule("you lose life equal to it".into()));
+    }
+    if s.contains("its controller gains life equal to its power") {
+        out.push(Effect::Rule(
+            "its controller gains life equal to its power".into(),
+        ));
+    }
+    // "Discard your hand, then draw ..." / "each player discards their hand": the discard
+    // comes first.
+    if s.contains("each player discards their hand")
+        || s.contains("each player may discard their hand")
+    {
+        out.insert(0, Effect::Rule("each player discards their hand".into()));
+    } else if s.contains("discard your hand") {
+        out.insert(0, Effect::Rule("discards your hand".into()));
+    }
+    // "You lose the game" as an effect (Demonic Pact's last mode).
+    if s.starts_with("you lose the game") {
+        out.push(Effect::Rule("you lose the game".into()));
+    }
+    // "Distribute three +1/+1 counters among one, two, or three target creatures".
+    if let Some(i) = s.find("distribute ") {
+        let n = s[i + 11..].split_whitespace().next().unwrap_or("");
+        if let Some(a) = number(n).filter(|_| s[i..].contains("+1/+1 counter")) {
+            out.push(Effect::PlusCounters {
+                amount: a,
+                to: read_target("creature you control", false),
+            });
         }
     }
     for c in p.add_mana.captures_iter(s) {
@@ -1499,10 +1571,22 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     if s.contains("attach ") {
         out.push(Effect::Attach);
     }
+    // "At the beginning of the end step, sacrifice ~" (Ball Lightning), "then if ..., sacrifice
+    // ~": the card goes (not a cost - costs are read before the colon).
+    if (s.starts_with("sacrifice ~")
+        || s.contains(", sacrifice ~")
+        || s.contains("then sacrifice ~"))
+        && !s.contains("then if")
+    {
+        out.push(Effect::Rule("sacrifices itself".into()));
+    }
     if s.contains("that many plus one") {
         // One extra counter or token each time (Hardened Scales), weaker than doubling.
         out.push(Effect::Doubler("plus one".into()));
-    } else if s.contains("twice that many") || s.contains("double the number of") {
+    } else if s.contains("double the number of") {
+        // A one-off doubling of the counters there now (Mossborn Hydra, Biogenic Upgrade).
+        out.push(Effect::Rule("doubles counters".into()));
+    } else if s.contains("twice that many") {
         out.push(Effect::Doubler(if s.contains("token") {
             "tokens".into()
         } else {
@@ -1549,11 +1633,17 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     if s.contains("untap ~") {
         out.push(Effect::Untap(Target::it()));
     }
+    // "... gains indestructible until end of turn. Tap it." (Immersturm Predator).
+    if s == "tap it" || s == "tap ~" {
+        out.push(Effect::Rule("taps itself".into()));
+    }
     // "Exile ... then return it to the battlefield" is a flicker (already read above), not
     // bringing something back from the graveyard.
     if (s.contains("return it to the battlefield")
         || s.contains("return that card to the battlefield")
-        || s.contains("return them to the battlefield"))
+        || s.contains("return them to the battlefield")
+        || s.contains("return her to the battlefield")
+        || s.contains("return him to the battlefield"))
         && !out.contains(&Effect::Blink)
         && !s.contains("land")
     {
@@ -1885,7 +1975,17 @@ fn body_effects(body: &str, effects: &mut Vec<Effect>) {
     {
         effects.push(Effect::Dig);
     }
-    if body.contains("graveyard") && body.contains("card") {
+    // (Cards put *into* a graveyard - "put the rest into your graveyard" - aren't coming back.)
+    let from_gy = body.contains("from your graveyard")
+        || body.contains("from a graveyard")
+        || body.contains("from graveyards")
+        || body.contains("from all graveyards")
+        || body.contains("graveyards that were put there")
+        || body.contains("in your graveyard")
+        || body.contains("from among them")
+            && body.contains("graveyard")
+            && !body.contains("into your graveyard");
+    if body.contains("graveyard") && body.contains("card") && from_gy {
         // "Search your library and/or graveyard for ... put it onto the battlefield" is a
         // tutor (already read), not a separate reanimation.
         if (body.contains("to the battlefield") || body.contains("onto the battlefield"))
@@ -1967,6 +2067,13 @@ fn pump_target(who: &str) -> Target {
         t.restricted |= narrowed || t.kind == Kind::Creature && !plain.contains(&noun);
         t.other = other;
         return t;
+    }
+    // "She loses all abilities and gains haste": the card itself.
+    if ["she ", "he ", "they ", "it "]
+        .iter()
+        .any(|w| who.starts_with(w) && who.contains("loses all abilities"))
+    {
+        return Target::it();
     }
     if who.ends_with('~')
         || who == "it"
@@ -2086,7 +2193,7 @@ fn fold_accents(s: &str) -> String {
         .collect()
 }
 
-fn self_refs(text: &str, card: &Card) -> String {
+pub fn self_refs(text: &str, card: &Card) -> String {
     let mut t = fold_accents(
         &text
             .to_lowercase()
@@ -2312,9 +2419,11 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
             let mut ability = read_line(&header_line, card, is_spell);
             if let Some(a) = ability.as_mut() {
                 a.effects.clear();
-                for m in &modes {
+                a.modes.clear();
+                for (k, m) in modes.iter().enumerate() {
                     let mut e = read_effects(m);
                     body_effects(m, &mut e);
+                    a.modes.extend(std::iter::repeat_n(k as u8, e.len()));
                     a.effects.extend(e);
                 }
                 // Modes that only pick targets ("• Target creature card.") with the effect in
@@ -2333,6 +2442,7 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                         }
                     }
                     a.modal = false;
+                    a.modes.clear();
                 } else {
                     a.modal = true;
                 }
@@ -2568,7 +2678,10 @@ fn read_trigger(trigger: &str) -> Vec<When> {
     if self_subject && t.contains(" enter") {
         w.push(When::Enters);
     }
-    if self_subject && (t.contains(" dies") || t.contains("is put into a graveyard")) {
+    // "When Tom, Bert, and William die" (a plural name).
+    if self_subject
+        && (t.contains(" dies") || t.ends_with(" die") || t.contains("is put into a graveyard"))
+    {
         w.push(When::Dies);
     }
     if self_subject && (t.contains(" attacks") || t.contains("attacks or blocks")) {
@@ -2577,9 +2690,9 @@ fn read_trigger(trigger: &str) -> Vec<When> {
     if self_subject && t.contains("deals combat damage") {
         w.push(When::CombatDamage);
     }
-    // Becoming tapped is mostly attacking (or tapping it for an ability).
+    // "Whenever ~ becomes tapped": attacking, or tapping it for an ability or a cost.
     if self_subject && t.contains("becomes tapped") && w.is_empty() {
-        w.push(When::Attacks);
+        return vec![When::Event(Event::Other(t.to_string()))];
     }
     // "Whenever ~ or another creature you control enters/dies": also every other one.
     if self_subject && t.contains("or another") {
@@ -2689,6 +2802,7 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
                     conditional: rest.starts_with("if ") || rest.contains(" if "),
                     once: false,
                     modal: false,
+                    modes: Vec::new(),
                     text: line.clone(),
                 });
             }
@@ -2707,6 +2821,7 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
             || exhaust
             || line.contains("activate only once") && !line.contains("only once each turn"),
         modal: false,
+        modes: Vec::new(),
         text: line.clone(),
     };
     let body: String;
@@ -2727,6 +2842,10 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
             || trigger.starts_with("when the ") && trigger.contains("counter is put")
         {
             ability.when = vec![When::Reflexive];
+        } else if is_spell && trigger.contains(" your next ") {
+            // "When you cast your next instant or sorcery spell this turn, copy that spell"
+            // on an instant: a delayed trigger the spell sets up as it resolves.
+            ability.when = vec![When::Spell];
         } else {
             ability.when = read_trigger(trigger);
         }

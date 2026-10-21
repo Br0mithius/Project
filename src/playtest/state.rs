@@ -71,6 +71,14 @@ pub struct Perm {
     /// Cards exiled "until ~ leaves the battlefield".
     pub holding: Vec<(u8, CardRef)>,
     pub activations: u8,
+    /// A finality counter: if it would die, it's exiled instead.
+    pub finality: bool,
+    /// Lost all its abilities (Hellcat back from the dead).
+    pub no_abilities: bool,
+    /// A token copy sacrificed at the beginning of the end step (Electroduplicate).
+    pub sac_at_end: bool,
+    /// Modes already chosen ("choose one that hasn't been chosen"), a bit per mode.
+    pub modes_used: u32,
     /// Once-each-turn triggers that already fired this turn (bit per ability).
     pub fired: u32,
     // Values after static effects (`Game::recalc`).
@@ -134,6 +142,13 @@ pub struct Player<'a> {
     pub grudge: [f32; 8],
     /// The last instant or sorcery cast (for copy effects): (card, back face).
     pub last_spell: Option<(CardRef, bool)>,
+    /// "When you next cast an instant or sorcery spell this turn, copy that spell": one
+    /// entry per copy waiting, with the highest mana value it copies.
+    pub copy_next: Vec<u8>,
+    /// Instants and sorceries cast this turn (Thousand-Year Storm).
+    pub inst_sorc_this_turn: u8,
+    /// The last activated or triggered ability of a creature this player resolved (Echo).
+    pub last_ability: Option<Pending>,
     pub mulligans: u8,
 }
 
@@ -190,6 +205,24 @@ pub struct Game<'a> {
     pub tcache: std::cell::RefCell<[(u64, f32); 8]>,
     /// Per (me, opponent): (tick, weight).
     pub wcache: std::cell::RefCell<[[(u64, f32); 8]; 8]>,
+    /// A card that just returned to the battlefield from its owner's graveyard by its own
+    /// ability: the rest of that ability ("she gains haste") is about it.
+    pub reborn: Option<u32>,
+    /// X paid for the permanent spell about to enter ("enters with X +1/+1 counters").
+    pub entering_x: Option<i32>,
+    /// X paid for the spell being cast (its own abilities and enters triggers use it).
+    pub cur_x: Option<i32>,
+    /// The spell being cast (for "copy that spell" cast triggers): (card, back face).
+    pub casting: Option<(CardRef, bool)>,
+    /// The permanent spell about to enter was kicked.
+    pub entering_kicked: bool,
+    /// The last permanent to leave the battlefield, as it last was ("that permanent's mana
+    /// value", "its controller gains life equal to its power").
+    pub last_left: Option<Perm>,
+    /// Cards the last "discard your hand" discarded ("draw that many").
+    pub last_discarded: i32,
+    /// Permanents that got +1/+1 counters during the ability resolving ("those creatures").
+    pub last_countered: Vec<u32>,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -219,6 +252,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             optional: false,
             once: false,
             modal: false,
+            modes: Vec::new(),
             effects,
             text: text.to_string(),
             until_eot: false,
@@ -226,6 +260,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             filter: Filter::default(),
             once_per_turn: false,
             second_draw: false,
+            from_graveyard: false,
         };
         let it = Target {
             kind: crate::abilities::Kind::Creature,
@@ -241,6 +276,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             optional: false,
             once: false,
             modal: false,
+            modes: Vec::new(),
             effects,
             text: String::new(),
             until_eot: false,
@@ -248,6 +284,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             filter: Filter::default(),
             once_per_turn: false,
             second_draw: false,
+            from_graveyard: false,
         };
         vec![
             (
@@ -328,6 +365,9 @@ impl<'a> Game<'a> {
 
     /// The abilities a permanent has.
     pub fn abilities_of(&self, perm: &Perm) -> &'a [SimAbility] {
+        if perm.no_abilities {
+            return &[];
+        }
         match (perm.tok, perm.card) {
             (Tok::None | Tok::Creature | Tok::Other, Some(r)) => &self.card(r).abilities,
             (t, _) => token_abilities(t),
@@ -377,6 +417,24 @@ impl<'a> Game<'a> {
         let mut mods: Vec<(usize, i16, i16, u32, bool)> = Vec::new();
         for si in 0..self.perms.len() {
             let src = &self.perms[si];
+            // Characteristic-defining power/toughness ("~'s power and toughness are each
+            // equal to the number of creatures you control").
+            if let Some(cda) = src
+                .card
+                .and_then(|r| self.card(r).cda.as_ref())
+                .filter(|_| !src.no_abilities)
+            {
+                let k = self
+                    .count_of(src.ctrl as usize, Some(src.id), &cda.phrase)
+                    .unwrap_or(0) as i16;
+                mods.push((
+                    si,
+                    if cda.power { k } else { 0 },
+                    if cda.toughness { k + cda.plus_t } else { 0 },
+                    0,
+                    false,
+                ));
+            }
             if src.card.is_none_or(|r| !self.card(r).has_static)
                 || matches!(
                     src.tok,
@@ -399,7 +457,23 @@ impl<'a> Game<'a> {
                             toughness,
                             to,
                             until_eot: false,
-                        } => (*power as i16, *toughness as i16, 0, false, Some(to)),
+                        } => {
+                            // "+1/+1 for each Forest you control": the reader's typical count
+                            // (3 per unit) becomes the real one.
+                            let per_each = a.text.split("for each ").nth(1).and_then(|rest| {
+                                self.count_of(src.ctrl as usize, Some(src.id), rest)
+                            });
+                            match per_each {
+                                Some(k) => (
+                                    (*power / 3 * k) as i16,
+                                    (*toughness / 3 * k) as i16,
+                                    0,
+                                    false,
+                                    Some(to),
+                                ),
+                                None => (*power as i16, *toughness as i16, 0, false, Some(to)),
+                            }
+                        }
                         Effect::Shrink {
                             amount,
                             to,
@@ -568,6 +642,8 @@ impl<'a> Game<'a> {
             let Some(r) = x.card else { continue };
             let c = self.card(r);
             let land = x.is(T_LAND);
+            // A land without a mana ability (Evolving Wilds) isn't a source.
+            let land = land && (c.produces != 0 || c.mana_ability);
             if land || c.mana_ability && !(x.is_creature() && x.sick && !x.has(HASTE)) {
                 out.push((
                     i,
@@ -755,6 +831,13 @@ impl<'a> Game<'a> {
     /// choice for commanders is needed: they always go to the command zone).
     pub fn leave(&mut self, i: usize, to: Zone, _sba: bool) {
         let perm = self.perms.remove(i);
+        self.last_left = Some(perm.clone());
+        // A finality counter: dying exiles it instead (no dies triggers).
+        let to = if perm.finality && matches!(to, Zone::Graveyard) {
+            Zone::Exile
+        } else {
+            to
+        };
         let id = perm.id;
         // Attachments: Auras fall off (to the graveyard), Equipment stays unattached.
         let mut fall = Vec::new();
@@ -946,6 +1029,10 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             activations: 0,
+            finality: false,
+            no_abilities: false,
+            sac_at_end: false,
+            modes_used: 0,
             fired: 0,
             p,
             t,
@@ -993,7 +1080,48 @@ impl<'a> Game<'a> {
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
         }
+        let x = self.entering_x.take();
+        let kicked = std::mem::take(&mut self.entering_kicked);
         self.after_enter(i);
+        // "Enters with N (or X) +1/+1 counters": on it as it arrives, before it could die.
+        for (kind, n, cond) in &c.enters_counters {
+            let Some(i) = self.idx(id) else { break };
+            let ok = match cond {
+                Cond::Kicked => kicked,
+                Cond::Teamwork | Cond::Gift | Cond::CastFromGraveyard => false,
+                c => self.cond_holds(c, ctrl, Some(i)),
+            };
+            if !ok {
+                continue;
+            }
+            let k = match n {
+                EntersCounters::Fixed(k) => *k as i32,
+                EntersCounters::X => x.unwrap_or(0),
+                EntersCounters::GreatestOtherPower => self
+                    .perms
+                    .iter()
+                    .filter(|o| o.ctrl as usize == ctrl && o.id != id && o.is_creature())
+                    .map(|o| o.p as i32)
+                    .max()
+                    .unwrap_or(0),
+            };
+            if k <= 0 {
+                continue;
+            }
+            match kind.as_str() {
+                "+1/+1" => {
+                    let k = if self.doubles(ctrl, "counter") {
+                        k * 2
+                    } else {
+                        k
+                    };
+                    self.perms[i].counters += k as i16;
+                }
+                "shield" => self.perms[i].shield += k as u8,
+                _ => self.perms[i].other_counters += k as i16,
+            }
+            self.recalc();
+        }
         self.idx(id)
     }
 
@@ -1087,7 +1215,7 @@ impl<'a> Game<'a> {
                 let Trig::Event(kind, f) = &a.trig else {
                     continue;
                 };
-                if *kind != ev {
+                if *kind != ev || a.from_graveyard {
                     continue;
                 }
                 if a.once_per_turn && ai < 32 && src.fired & (1 << ai) != 0 {
@@ -1177,6 +1305,51 @@ impl<'a> Game<'a> {
         for (si, ai) in fired {
             self.perms[si].fired |= 1 << ai;
         }
+        // Cards that listen from their owner's graveyard ("Landfall — ... return this card
+        // from your graveyard to your hand").
+        for (o, pl) in self.players.iter().enumerate() {
+            if !pl.alive {
+                continue;
+            }
+            let mut seen: Vec<u16> = Vec::new();
+            for &idx in &pl.graveyard {
+                let c = &pl.cards[idx as usize];
+                if c.gy_ev_mask & bit == 0 || seen.contains(&idx) {
+                    continue;
+                }
+                seen.push(idx);
+                for (ai, a) in c.abilities.iter().enumerate() {
+                    let Trig::Event(kind, f) = &a.trig else {
+                        continue;
+                    };
+                    if *kind != ev || !a.from_graveyard {
+                        continue;
+                    }
+                    if f.yours.is_some_and(|y| y != (o == p)) {
+                        continue;
+                    }
+                    if let Some(s) = subject {
+                        if f.types != 0 && s.types & f.types == 0 {
+                            continue;
+                        }
+                    }
+                    add.push(Pending {
+                        ctrl: o as u8,
+                        source: None,
+                        card: (o as u8, idx),
+                        back: false,
+                        ability: ai as u16,
+                        snapshot: None,
+                        subject: subject.map(|s| s.id),
+                        teamwork: false,
+                        gift: false,
+                        from_graveyard: true,
+                        kicked: false,
+                        overloaded: false,
+                    });
+                }
+            }
+        }
         self.pending.extend(add);
     }
 
@@ -1258,6 +1431,10 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             activations: 0,
+            finality: false,
+            no_abilities: false,
+            sac_at_end: false,
+            modes_used: 0,
             fired: 0,
             p: 0,
             t: 0,
@@ -1282,6 +1459,7 @@ impl<'a> Game<'a> {
                     && (pl.life <= 0
                         || pl.poison >= 10
                         || pl.cmd_damage.iter().any(|d| d.iter().any(|&x| x >= 21)))
+                    && !self.cant_lose(p)
                 {
                     self.players[p].alive = false;
                     changed = true;
@@ -1319,6 +1497,17 @@ impl<'a> Game<'a> {
                 break;
             }
         }
+    }
+
+    /// "You can't lose the game" (Herald of Eternal Dawn).
+    pub fn cant_lose(&self, p: usize) -> bool {
+        self.perms.iter().any(|x| {
+            x.ctrl as usize == p
+                && self
+                    .abilities_of(x)
+                    .iter()
+                    .any(|a| a.trig == Trig::Static && a.text.contains("you can't lose the game"))
+        })
     }
 
     pub fn alive_count(&self) -> usize {
