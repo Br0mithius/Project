@@ -132,10 +132,23 @@ impl<'a> Game<'a> {
             return;
         }
         self.players[a].attacked_this_turn = true;
+        let bonus = self.players[a].attack_bonus;
         for at in &attacks {
+            // Jace: attackers of this player (or their planeswalkers) get -5/-0.
+            let weaken = self
+                .def_player(at.def)
+                .map_or(0, |d| self.players[d].attacked_power);
             if let Some(i) = self.idx(at.attacker) {
-                self.perms[i].attacking = true;
-                self.perms[i].attacked_turn = true;
+                let x = &mut self.perms[i];
+                x.attacking = true;
+                x.attacked_turn = true;
+                x.temp_p += weaken;
+                // Garruk: our attackers get +2/+2 and trample.
+                if let Some((p, t, kw)) = bonus {
+                    x.temp_p += p;
+                    x.temp_t += t;
+                    x.temp_kw |= kw;
+                }
             }
         }
         self.recalc();

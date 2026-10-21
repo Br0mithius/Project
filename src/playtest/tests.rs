@@ -2459,3 +2459,40 @@ fn more_rule_statics_and_turn_cost_changes() {
     g.players[0].hand = vec![RELIC];
     assert_eq!(cost(&g, 0), 3, "only that turn");
 }
+
+#[test]
+fn attack_modifiers_until_your_next_turn() {
+    let db = db();
+    let mut cards: Vec<Card> = ["Island", "Jace, Reality Sculptor", "Garruk, Curse Breaker"]
+        .iter()
+        .map(|n| db.get(n).unwrap().clone())
+        .collect();
+    cards.push(card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("5", "5")),
+    ));
+    let d = prep(&cards);
+    // Jace: creatures attacking us get -5/-0 until our next turn.
+    let mut g = game(&[&d, &d]);
+    let jace = put(&mut g, 0, 1);
+    let k = ability(&d, 1, "attacks you");
+    fire_card(&mut g, 1, k, Some(jace));
+    put(&mut g, 1, 3);
+    g.players[0].life = 4;
+    g.active = 1;
+    g.combat(1);
+    assert_eq!(g.players[0].life, 4, "the Giant hits for 0");
+    // Garruk: our attackers get +2/+2 and trample until our next turn.
+    let mut g = game(&[&d, &d]);
+    let garruk = put(&mut g, 0, 2);
+    let k = ability(&d, 2, "one or more creatures attack");
+    fire_card(&mut g, 2, k, Some(garruk));
+    put(&mut g, 0, 3);
+    g.players[1].life = 7;
+    g.active = 0;
+    g.combat(0);
+    assert!(g.players[1].life <= 0, "a 7/7 trampler");
+}

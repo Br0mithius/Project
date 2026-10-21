@@ -86,6 +86,7 @@ pub const RULES_MODELLED: &[&str] = &[
     "gets +N/+N until your next turn",
     "becomes a creature",
     "spells cost less this turn",
+    "attacks change until your next turn",
     "the next spell this turn is free",
     // and "you lose N life" (see `rule_modelled`)
 ];
@@ -3724,6 +3725,29 @@ impl<'a> Game<'a> {
                     x.kw |= kw;
                 }
                 self.recalc();
+            }
+            "attacks change until your next turn" => {
+                let Some(pt) = text.split(" get").nth(1) else {
+                    return;
+                };
+                let pt = pt.trim_start_matches('s').trim();
+                let pt = pt.split(' ').next().unwrap_or("");
+                let Some((p, t)) = pt.split_once('/') else {
+                    return;
+                };
+                let num = |s: &str| s.trim_start_matches('+').parse::<i16>().ok();
+                let (Some(dp), Some(dt)) = (num(p), num(t)) else {
+                    return;
+                };
+                if text.contains("attacks you") {
+                    self.players[me].attacked_power += dp;
+                } else {
+                    let kw = KEYWORDS
+                        .iter()
+                        .filter(|(k, _)| text.contains(&format!("gain {}", k)))
+                        .fold(0, |m, (_, b)| m | b);
+                    self.players[me].attack_bonus = Some((dp, dt, kw));
+                }
             }
             "spells cost less this turn" => {
                 let Some(rest) = text.split(" cost {").nth(1) else {

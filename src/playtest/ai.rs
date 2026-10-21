@@ -1259,6 +1259,7 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
         }
         "ends the turn" => 0.0,
         "spells cost less this turn" | "the next spell this turn is free" => 1.0,
+        "attacks change until your next turn" => 1.5,
         // A land or artifact that becomes a creature: worth it to attack with this turn.
         "becomes a creature" => {
             let ready = me.is_some_and(|i| {
@@ -2614,7 +2615,9 @@ fn attack_gain(g: &Game, me: usize, a: usize, o: usize, taken: &[u32]) -> f32 {
         })
         .collect();
     let menace = at.has(MENACE) && blockers.len() < 2;
-    let mut worst = dmg_of(g, at) as f32 * 0.6 * w; // unblocked
+    // Unblocked (Jace: creatures attacking this player get -5/-0).
+    let through = (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
+    let mut worst = through as f32 * 0.6 * w;
     if !menace {
         for &b in &blockers {
             let (ad, bd) = fight(at, &g.perms[b]);
@@ -2664,7 +2667,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
             let evasive = at.has(FLYING | UNBLOCKABLE)
                 && !(0..g.perms.len()).any(|b| g.perms[b].ctrl as usize == o && g.can_block(b, a));
             if evasive || nb == 0 {
-                through += dmg_of(g, at);
+                through += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
             } else {
                 nb -= 1;
                 if at.has(TRAMPLE) {
@@ -2722,7 +2725,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                     .filter_map(|(b, _)| g.idx(*b))
                     .collect();
                 if bl.is_empty() {
-                    value += dmg_of(g, at) as f32 * 0.6 * w;
+                    value += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32
+                        * 0.6
+                        * w;
                     continue;
                 }
                 // Blocked: what dies on each side.

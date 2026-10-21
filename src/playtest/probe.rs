@@ -152,6 +152,7 @@ struct Snap {
     by_toughness: Vec<bool>,
     emblems: Vec<usize>,
     cheaper: Vec<usize>,
+    attacks_changed: Vec<bool>,
     free_next: Vec<bool>,
     fog: bool,
     end_turn: bool,
@@ -199,6 +200,11 @@ fn snap(g: &Game) -> Snap {
         by_toughness: g.players.iter().map(|p| p.toughness_damage_turn).collect(),
         emblems: g.players.iter().map(|p| p.emblems.len()).collect(),
         cheaper: g.players.iter().map(|p| p.turn_reduction.len()).collect(),
+        attacks_changed: g
+            .players
+            .iter()
+            .map(|p| p.attacked_power != 0 || p.attack_bonus.is_some())
+            .collect(),
         free_next: g.players.iter().map(|p| p.free_next.is_some()).collect(),
         fog: g.fog,
         end_turn: g.end_turn,
@@ -389,6 +395,9 @@ fn diff(a: &Snap, b: &Snap, skip: Option<u32>) -> Vec<String> {
         }
         if b.emblems[p] > a.emblems[p] {
             bits.push("gets an emblem".into());
+        }
+        if b.attacks_changed[p] && !a.attacks_changed[p] {
+            bits.push("attacks changed until their next turn".into());
         }
         if b.cheaper[p] > a.cheaper[p] {
             bits.push("spells cost less this turn".into());

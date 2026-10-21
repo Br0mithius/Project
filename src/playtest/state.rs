@@ -221,6 +221,10 @@ pub struct Player<'a> {
     /// "The next red or green creature spell you cast this turn can be cast without paying
     /// its mana cost": (colours, card types) it must have.
     pub free_next: Option<(u8, u16)>,
+    /// Until this player's next turn: creatures attacking them get this much power
+    /// (Jace: -5), and their own attackers get +P/+T and trample (Garruk).
+    pub attacked_power: i16,
+    pub attack_bonus: Option<(i16, i16, u32)>,
 }
 
 pub const RETURNS: u8 = 1;

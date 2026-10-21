@@ -4777,7 +4777,7 @@ ABILITIES:
   Loyalty(-3): "[-3]: create a 4/4 green beast creature token with trample."
       -> You gets 4/4 beast token 4/4 with trample
   Loyalty(-4): "[-4]: until your next turn, whenever one or more creatures attack one of your opponents, those creatures get +2/+2 and gain trample until end of turn."
-      -> Your Dragon: 6/6 -> 8/8, gains trample
+      -> You: attacks changed until their next turn
 
 Garruk, Veiled Butcher | {3}{B}{B} | Legendary Planeswalker — Garruk
 TEXT: If a creature an opponent controls would die, exile it instead. / [+2]: Up to one target creature gets -4/-1 until your next turn. / [-2]: Each player sacrifices a creature of their choice. If you sacrificed a creature this way, create a 4/4 green Beast creature token with trample. / [-3]: Each opponent discards two cards. For each opponent who didn't discard two nonland cards this way, you draw a card.
@@ -6539,14 +6539,7 @@ ABILITIES:
   Loyalty(1): "[+1]: empower ~ x, where x is the number of islands you control."
       -> You gets Jace token
   Loyalty(-3): "[-3]: until your next turn, whenever a creature attacks you or a planeswalker you control, it gets -5/-0 until end of turn."
-      -> Opp A's Bear: 2/2 -> -3/2
-      -> Opp A's Ogre: 3/3 -> -2/3
-      -> Opp A's Knight: 4/4 -> -1/4
-      -> Opp A's Dragon: 6/6 -> 1/6
-      -> Opp B's Bear: 2/2 -> -3/2
-      -> Opp B's Ogre: 3/3 -> -2/3
-      -> Opp B's Knight: 4/4 -> -1/4
-      -> Opp B's Dragon: 6/6 -> 1/6
+      -> You: attacks changed until their next turn
   Loyalty(0) [only if JaceLoyalty(25)]: "[0]: exile all but the bottom card of each opponent's library. activate only if there are twenty-five or more loyalty counters among jaces you control."
       -> (nothing changes)
       if the condition holds -> You: exile +4

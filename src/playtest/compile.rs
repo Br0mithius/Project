@@ -2159,6 +2159,18 @@ fn sim_rules(text: &str, effects: &mut Vec<Effect>) {
         effects.retain(|e| !matches!(e, Effect::FreeSpell));
         rule(effects, "the next spell this turn is free");
     }
+    // "Until your next turn, whenever a creature attacks you or a planeswalker you control,
+    // it gets -5/-0 until end of turn" (Jace), "until your next turn, whenever one or more
+    // creatures attack one of your opponents, those creatures get +2/+2 and gain trample"
+    // (Garruk): attack modifiers that last until your next turn.
+    if text.contains("until your next turn, whenever a creature attacks you")
+        || text.contains(
+            "until your next turn, whenever one or more creatures attack one of your opponents",
+        )
+    {
+        effects.clear();
+        rule(effects, "attacks change until your next turn");
+    }
     if text.contains("an opponent gains control of ~") {
         rule(effects, "gives itself to an opponent");
     }

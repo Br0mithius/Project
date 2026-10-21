@@ -174,6 +174,8 @@ impl<'a> Game<'a> {
                 equips_turn: 0,
                 turn_reduction: Vec::new(),
                 free_next: None,
+                attacked_power: 0,
+                attack_bonus: None,
             })
             .collect();
         let mut g = Game {
@@ -1653,6 +1655,9 @@ impl<'a> Game<'a> {
                 *g *= 0.8;
             }
         }
+        // "Until your next turn" attack modifiers end.
+        self.players[a].attacked_power = 0;
+        self.players[a].attack_bonus = None;
         // Goad lasts until the goading player's next turn; once-a-turn triggers reset.
         for x in self.perms.iter_mut() {
             if x.goad == Some(a as u8) {
