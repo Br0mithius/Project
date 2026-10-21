@@ -81,8 +81,13 @@ pub struct Perm {
     pub modes_used: u32,
     /// Once-each-turn triggers that already fired this turn (bit per ability).
     pub fired: u32,
-    /// Declared as an attacker in the current combat.
+    /// Mana value (of the card it is, or copies; 0 for other tokens).
+    pub mv: u8,
+    /// In combat this turn: declared as an attacker / blocking.
     pub attacking: bool,
+    pub blocking: bool,
+    /// Dealt damage this turn.
+    pub dealt_damage: bool,
     /// Attacked this turn / entered the battlefield this turn.
     pub attacked_turn: bool,
     pub entered_turn: bool,
@@ -226,6 +231,15 @@ pub struct Game<'a> {
     /// The permanent the AI has in mind for its next targeted spell (protection, tricks,
     /// removal aimed at an attacker).
     pub focus: Option<u32>,
+    /// What the resolving ability chose or made last ("it", "those creatures" refer to it).
+    pub last_targets: Vec<u32>,
+    /// Who controlled the first thing the resolving ability targeted ("its controller").
+    pub last_ctrl: Option<u8>,
+    /// The resolving ability has chosen targets ("it" is what it chose, if anything).
+    pub targeted: bool,
+    /// Whose spell or ability is acting: targeting ("becomes the target of a spell or
+    /// ability an opponent controls") or dealing noncombat damage ("a source you control").
+    pub actor: u8,
     /// Bumped whenever the board changes (`recalc`); the AI caches values per tick.
     pub tick: u64,
     /// Per permanent index: (tick, id, value).
@@ -256,8 +270,6 @@ pub struct Game<'a> {
     pub last_destroyed: i32,
     /// Cards the last draw effect drew ("the number of cards drawn this way").
     pub last_drawn: i32,
-    /// What the last targeted effect chose ("target creature ... it gains ...").
-    pub last_targets: Vec<u32>,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -288,9 +300,10 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             optional: false,
             once: false,
             modal: false,
-            mode_texts: Vec::new(),
-            effects,
             modes: Vec::new(),
+            mode_texts: Vec::new(),
+            mode_restr: Vec::new(),
+            effects,
             text: text.to_string(),
             until_eot: false,
             counter_goal: None,
@@ -298,6 +311,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             once_per_turn: false,
             second_draw: false,
             from_graveyard: false,
+            card_restr: Default::default(),
             pay: None,
             gate: None,
         };
@@ -307,6 +321,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             mass: false,
             other: false,
             restricted: false,
+            restr: Default::default(),
             count: 1,
         };
         let loyalty = |n: i8, effects: Vec<Effect>| SimAbility {
@@ -315,9 +330,10 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             optional: false,
             once: false,
             modal: false,
-            mode_texts: Vec::new(),
-            effects,
             modes: Vec::new(),
+            mode_texts: Vec::new(),
+            mode_restr: Vec::new(),
+            effects,
             text: String::new(),
             until_eot: false,
             counter_goal: None,
@@ -325,6 +341,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
             once_per_turn: false,
             second_draw: false,
             from_graveyard: false,
+            card_restr: Default::default(),
             pay: None,
             gate: None,
         };
@@ -561,8 +578,16 @@ impl<'a> Game<'a> {
                         continue;
                     }
                     let filt = &a.filter;
+                    let r = &to.restr;
+                    let d = self.dyn_values(r, None, src.ctrl as usize, Some(src.id));
                     for (ti, t) in self.perms.iter().enumerate() {
-                        if !t.is_creature() && filt.types & !T_CREATURE == 0 {
+                        if r.any_types != 0 {
+                            if !(t.is(r.any_types)
+                                || r.any_types & T_CREATURE != 0 && t.is_creature())
+                            {
+                                continue;
+                            }
+                        } else if !t.is_creature() && filt.types & !T_CREATURE == 0 {
                             continue;
                         }
                         if (to.other || filt.other) && ti == si {
@@ -577,7 +602,11 @@ impl<'a> Game<'a> {
                         if !ok_side {
                             continue;
                         }
-                        if let Some(sub) = &filt.subtype {
+                        if !r.is_empty() {
+                            if !self.perm_ok(r, t, &d) {
+                                continue;
+                            }
+                        } else if let Some(sub) = &filt.subtype {
                             if !t.subtypes.iter().any(|s| s == sub) {
                                 continue;
                             }
@@ -1129,6 +1158,7 @@ impl<'a> Game<'a> {
     ) -> usize {
         let id = self.next_id;
         self.next_id += 1;
+        let mv = card.map(|r| self.card(r).mv).unwrap_or(0);
         let (types, subtypes, colors, p, t, kw) = match card {
             Some(r) if tok == Tok::None || tok == Tok::Creature || tok == Tok::Other => {
                 let c = self.card(r);
@@ -1184,7 +1214,10 @@ impl<'a> Game<'a> {
             sac_at_end: false,
             modes_used: 0,
             fired: 0,
+            mv,
             attacking: false,
+            blocking: false,
+            dealt_damage: false,
             attacked_turn: false,
             entered_turn: true,
             hit_turn: 0,
@@ -1401,6 +1434,13 @@ impl<'a> Game<'a> {
                         continue;
                     }
                 }
+                // "Whenever a source you control deals noncombat damage to an opponent".
+                if ev == Ev::NoncombatDamage
+                    && trigger_part(&a.text).contains("you control")
+                    && self.actor != src.ctrl
+                {
+                    continue;
+                }
                 if let Some(s) = subject {
                     // Self-referential events ("whenever ~ is dealt damage", "becomes the target").
                     let about_self =
@@ -1420,7 +1460,26 @@ impl<'a> Game<'a> {
                         continue;
                     }
                     // "Whenever equipped creature ...": only the creature this is attached to.
-                    if a.text.contains("equipped creature") && src.attached != Some(s.id) {
+                    let attached_text = a.text.starts_with("whenever equipped creature")
+                        || a.text.starts_with("whenever enchanted creature");
+                    if (attached_text
+                        || a.text.contains("equipped creature") && ev != Ev::EachAttacker)
+                        && src.attached != Some(s.id)
+                    {
+                        continue;
+                    }
+                    // "Becomes the target of a spell or ability an opponent controls".
+                    if ev == Ev::Targeted
+                        && trigger_part(&a.text).contains("an opponent controls")
+                        && self.actor == src.ctrl
+                    {
+                        continue;
+                    }
+                    // "... attacks alone".
+                    if ev == Ev::EachAttacker
+                        && a.text.contains(" alone")
+                        && self.perms.iter().filter(|x| x.attacking).count() != 1
+                    {
                         continue;
                     }
                     if a.text.contains("with deathtouch") && !s.has(DEATHTOUCH) {
@@ -1444,7 +1503,12 @@ impl<'a> Game<'a> {
                     if (f.nontoken && s.is_token()) || (f.token && !s.is_token()) {
                         continue;
                     }
-                    if let Some(sub) = &f.subtype {
+                    if !f.restr.is_empty() {
+                        let d = self.dyn_values(&f.restr, None, src.ctrl as usize, Some(src.id));
+                        if !self.perm_ok(&f.restr, s, &d) {
+                            continue;
+                        }
+                    } else if let Some(sub) = &f.subtype {
                         if !s.subtypes.iter().any(|x| x == sub) {
                             continue;
                         }
@@ -1532,6 +1596,8 @@ impl<'a> Game<'a> {
         let probe = Perm {
             types: card.types,
             subtypes: card.subtypes.clone(),
+            colors: card.colors,
+            mv: card.mv,
             ..self.probe()
         };
         self.emit_about(Ev::Cast, p, &probe);
@@ -1608,7 +1674,10 @@ impl<'a> Game<'a> {
             sac_at_end: false,
             modes_used: 0,
             fired: 0,
+            mv: 0,
             attacking: false,
+            blocking: false,
+            dealt_damage: false,
             attacked_turn: false,
             entered_turn: false,
             hit_turn: 0,

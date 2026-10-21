@@ -1637,7 +1637,7 @@ fn hands_life_and_the_game() {
     // last one left loses the game.
     let pact = put(&mut g, 0, 2);
     let k = ability(&d, 2, "upkeep");
-    assert_eq!(d.cards[2].abilities[k].mode_ranges().len(), 4, "four modes");
+    assert_eq!(d.cards[2].abilities[k].mode_groups().len(), 4, "four modes");
     for _ in 0..3 {
         fire_card(&mut g, 2, k, Some(pact));
     }

@@ -5,6 +5,7 @@ use super::ai;
 use super::compile::*;
 use super::state::*;
 use crate::abilities::{Amount, Effect, Kind, Target, Whose};
+use crate::restrict;
 
 /// Where an ability is resolving from.
 #[derive(Clone)]
@@ -23,6 +24,8 @@ pub struct Ctx<'a> {
     pub until_eot: bool,
     /// Cast with overload: "target" means "each" (of the opponents' things).
     pub overload: bool,
+    /// What a returned, found or sacrificed card must be (`SimAbility::card_restr`).
+    pub card_restr: crate::restrict::Restr,
     /// The X paid for the spell or ability.
     pub x: Option<i32>,
     /// What was sacrificed to pay for it ("damage equal to that creature's power").
@@ -484,7 +487,6 @@ impl<'a> Game<'a> {
         }
         let legendary = p.contains("legendary");
         let basic = p.contains("basic ");
-        // Attackers are tapped as they attack (vigilance aside).
         let attacking = p.contains("attacking");
         let with_counter = p.contains("with a +1/+1 counter");
         let types = type_words(&words.join(" "));
@@ -517,7 +519,7 @@ impl<'a> Game<'a> {
             })
             .filter(|x| !legendary || x.is(T_LEGENDARY))
             .filter(|x| !basic || x.is(T_BASIC))
-            .filter(|x| !attacking || x.tapped)
+            .filter(|x| !attacking || x.attacking)
             .filter(|x| !with_counter || x.counters > 0)
             .filter(|x| match &sub {
                 None => x.types & types != 0 || (types & T_CREATURE != 0 && x.is_creature()),
@@ -565,23 +567,45 @@ impl<'a> Game<'a> {
         if t.kind == Kind::It {
             return self.src_idx(ctx).into_iter().collect();
         }
-        let another = t.other || text.contains("another");
+        let another = t.other || text.contains("another") && !t.mass;
+        let r = &t.restr;
+        let d = self.dyn_values(r, Some(ctx), me, src_id);
+        // "... target player controls": one player's things (an opponent's, to harm).
+        let one_player = (r.has(restrict::ONE_PLAYER) && t.mass).then(|| {
+            if harmful {
+                ai::choose_opponent(self, me, 0).unwrap_or(me)
+            } else {
+                me
+            }
+        });
         let mut out = Vec::new();
         for (i, x) in self.perms.iter().enumerate() {
             if t.kind == Kind::Artifact && text.contains("target equipment") && !x.is(T_EQUIPMENT) {
                 continue;
             }
-            if !Self::kind_ok(x, t.kind) {
+            // A list of card types ("artifact, enchantment, or creature with flying") decides
+            // the kind by itself.
+            let listed = r.any_types != 0
+                && matches!(
+                    t.kind,
+                    Kind::Creature | Kind::Permanent | Kind::NonlandPermanent | Kind::Other
+                );
+            if listed {
+                if !(x.is(r.any_types) || r.any_types & T_CREATURE != 0 && x.is_creature()) {
+                    continue;
+                }
+            } else if !Self::kind_ok(x, t.kind) {
                 // "Other" kinds that name a creature type ("target Hero")
                 if !(t.kind == Kind::Other && x.is_creature()) {
                     continue;
                 }
             }
             let mine = x.ctrl as usize == me;
-            let side = match t.whose {
-                Whose::Yours => mine,
-                Whose::Theirs => !mine,
-                Whose::Any => {
+            let side = match (one_player, t.whose) {
+                (Some(o), _) => x.ctrl as usize == o,
+                (None, Whose::Yours) => mine,
+                (None, Whose::Theirs) => !mine,
+                (None, Whose::Any) => {
                     if t.mass {
                         true
                     } else if harmful {
@@ -596,12 +620,21 @@ impl<'a> Game<'a> {
             }
             // "Put a +1/+1 counter on each other creature you control": not the source.
             let mass_other = t.other || text.contains("each other ") || text.contains("all other ");
-            if Some(x.id) == src_id && (another && !t.mass || t.mass && mass_other) {
+            if Some(x.id) == src_id && (another || t.mass && mass_other) {
                 continue;
             }
-            if t.restricted && !t.mass {
-                let mv = x.card.map(|r| self.card(r).mv).unwrap_or(0);
-                if x.p > 3 && mv > 3 {
+            // A spell's "create a Cadet, then put a counter on each other Wizard token":
+            // other than what it just made.
+            if t.other && src_id.is_none() && self.last_targets.contains(&x.id) {
+                continue;
+            }
+            if !r.is_empty() {
+                if !self.perm_ok(r, x, &d) {
+                    continue;
+                }
+            } else if t.restricted && !t.mass {
+                // A narrowing the reader doesn't model: spare the biggest threats.
+                if x.p > 3 && x.mv > 3 {
                     continue;
                 }
             }
@@ -618,6 +651,7 @@ impl<'a> Game<'a> {
             }
             out.push(i);
         }
+        self.keep_greatest(r, &mut out);
         out
     }
 
@@ -684,6 +718,71 @@ impl<'a> Game<'a> {
     /// Picks targets and handles targeting side effects (ward is paid, "becomes the target"
     /// triggers, the owner may respond with protection). Returns perm ids still valid.
     fn choose(&mut self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<u32> {
+        if let Some(ids) = self.prev_ids(ctx, t) {
+            return ids;
+        }
+        // "Each of them" with nothing named before: nothing.
+        if t.mass && t.restr.has(restrict::PREV) {
+            return Vec::new();
+        }
+        let ids = self.choose_new(ctx, t, harmful);
+        // "It" now means these (or nothing, if there was nothing to target).
+        self.targeted = true;
+        self.last_targets = ids.clone();
+        ids
+    }
+
+    /// The source itself for "~", what "it" refers to, or new targets.
+    fn pick(&mut self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<u32> {
+        if let Some(ids) = self.prev_ids(ctx, t) {
+            return ids;
+        }
+        if t.kind == Kind::It {
+            return self
+                .src_idx(ctx)
+                .map(|i| self.perms[i].id)
+                .into_iter()
+                .collect();
+        }
+        self.choose(ctx, t, harmful)
+    }
+
+    fn choose_new(&mut self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<u32> {
+        // "For each opponent, ... up to one target creature that player controls".
+        if t.restr.has(restrict::PER_OPPONENT) && !t.mass {
+            let one = Target {
+                restr: restrict::Restr {
+                    flags: t.restr.flags & !restrict::PER_OPPONENT,
+                    ..t.restr
+                },
+                ..*t
+            };
+            let mut out = Vec::new();
+            for o in self.opponents(ctx.ctrl) {
+                let cands: Vec<usize> = self
+                    .candidates(ctx, &one, harmful)
+                    .into_iter()
+                    .filter(|&i| self.perms[i].ctrl as usize == o)
+                    .collect();
+                let n = one.count.max(1) as usize;
+                let picks = if harmful {
+                    ai::choose_victims(self, ctx.ctrl, &cands, n)
+                } else {
+                    ai::choose_friends(self, ctx.ctrl, &cands, n)
+                };
+                for i in picks {
+                    let id = self.perms[i].id;
+                    self.actor = ctx.ctrl as u8;
+                    self.emit_targeted(id);
+                    out.push(id);
+                }
+            }
+            self.last_ctrl = out
+                .first()
+                .and_then(|&id| self.idx(id))
+                .map(|i| self.perms[i].ctrl);
+            return out;
+        }
         let over = Target {
             mass: true,
             whose: if harmful { Whose::Theirs } else { t.whose },
@@ -700,6 +799,9 @@ impl<'a> Game<'a> {
         } else {
             ai::choose_friends(self, ctx.ctrl, &cands, n)
         };
+        if let Some(&i) = picks.first() {
+            self.last_ctrl = Some(self.perms[i].ctrl);
+        }
         let ids: Vec<u32> = picks.iter().map(|&i| self.perms[i].id).collect();
         let mut out = Vec::new();
         for id in ids {
@@ -719,6 +821,7 @@ impl<'a> Game<'a> {
             }
             let snap = self.perms[self.idx(id).unwrap_or(i).min(self.perms.len() - 1)].clone();
             if snap.id == id {
+                self.actor = ctx.ctrl as u8;
                 self.emit_about(Ev::Targeted, snap.ctrl as usize, &snap);
             }
             out.push(id);
@@ -727,25 +830,6 @@ impl<'a> Game<'a> {
             self.last_targets = out.clone();
         }
         out
-    }
-
-    /// What "it" means in an effect: the creature targeted earlier in the text ("put a +1/+1
-    /// counter on target creature. It gains hexproof"), otherwise the source itself.
-    fn it_ids(&self, ctx: &Ctx) -> Vec<u32> {
-        let t = ctx.text;
-        let at = ["it gains", "it gets", "it has", "it becomes"]
-            .iter()
-            .filter_map(|k| t.find(k))
-            .min();
-        if let Some(at) = at {
-            if t[..at].contains("target") && !self.last_targets.is_empty() {
-                return self.last_targets.clone();
-            }
-        }
-        self.src_idx(ctx)
-            .map(|i| self.perms[i].id)
-            .into_iter()
-            .collect()
     }
 
     /// Resolves one pending trigger or spell ability.
@@ -826,6 +910,7 @@ impl<'a> Game<'a> {
             text: &ab.text,
             until_eot: ab.until_eot,
             overload: pend.overloaded,
+            card_restr: ab.card_restr,
             x: pend.x,
             paid: None,
         };
@@ -875,7 +960,12 @@ impl<'a> Game<'a> {
         } else if ab.optional && !ai::wants_optional(self, &ctx, ab) {
             return;
         }
-        let picks: Vec<usize> = if ab.modal {
+        self.last_targets.clear();
+        self.last_ctrl = None;
+        self.targeted = false;
+        // (effect, the text and card restriction it resolves with): a mode reads its own.
+        let picks: Vec<(usize, &str, crate::restrict::Restr)> = if ab.modal {
+            let groups = ab.mode_groups();
             // "Choose one that hasn't been chosen" (Demonic Pact): each mode once.
             let fresh = ab.text.contains("hasn't been chosen");
             let used = if fresh {
@@ -885,24 +975,30 @@ impl<'a> Game<'a> {
             } else {
                 0
             };
-            let picks = ai::choose_modes(self, &ctx, ab, used);
+            let modes = ai::choose_modes(self, &ctx, ab, used);
             if fresh {
                 if let Some(i) = pend.source.and_then(|id| self.idx(id)) {
-                    for &k in &picks {
-                        let m = ab.mode_of(k);
+                    for &m in &modes {
                         if m < 32 {
                             self.perms[i].modes_used |= 1 << m;
                         }
                     }
                 }
             }
-            picks
+            modes
+                .into_iter()
+                .flat_map(|m| {
+                    let (t, r) = ab.mode_text(m);
+                    groups[m].clone().map(move |k| (k, t, r))
+                })
+                .collect()
         } else {
             (0..ab.effects.len())
                 .filter(|&k| match &ab.pay {
                     Some(pc) => k < pc.skip_from as usize || paid_ok && k >= pc.first as usize,
                     None => true,
                 })
+                .map(|k| (k, ab.text.as_str(), ab.card_restr))
                 .collect()
         };
         self.note(|| {
@@ -915,14 +1011,13 @@ impl<'a> Game<'a> {
         });
         self.reborn = None;
         self.last_countered.clear();
-        self.last_targets.clear();
         // "Reveal the top card of your library. If it's an artifact card, draw a card."
         self.focus_card = ab
             .gate
             .as_ref()
             .filter(|g| g.top)
             .and_then(|_| self.players[me].library.last().map(|&c| (me as u8, c)));
-        for k in picks {
+        for (k, text, card_restr) in picks {
             if !self.players[me].alive {
                 return;
             }
@@ -938,11 +1033,12 @@ impl<'a> Game<'a> {
                     continue;
                 }
             }
-            // A mode reads its own bullet's text.
-            if ab.modal {
-                ctx.text = ab.mode_text(ab.mode_of(k));
-            }
-            self.apply(&ctx, &ab.effects[k]);
+            let inner = Ctx {
+                text,
+                card_restr,
+                ..ctx.clone()
+            };
+            self.apply(&inner, &ab.effects[k]);
             // Back from the graveyard by its own ability: the rest is about the new permanent.
             if let Some(id) = self.reborn.take() {
                 ctx.src = Some(id);
@@ -1313,6 +1409,9 @@ impl<'a> Game<'a> {
         self.last_excess = n - lethal.max(0) as i32;
         x.hurt_by = ctx.src.unwrap_or(0);
         self.damage_perm(i, n as i16, deathtouch);
+        if let Some(s) = self.src_idx(ctx) {
+            self.perms[s].dealt_damage = true;
+        }
         if src.is_some_and(|s| s.has(LIFELINK) && s.is_creature()) {
             self.gain_life(ctx.ctrl, n);
         }
@@ -1326,6 +1425,7 @@ impl<'a> Game<'a> {
         };
         self.damage_player(ctx.ctrl, o, n, 0);
         if n > 0 && o != ctx.ctrl {
+            self.actor = ctx.ctrl as u8;
             self.emit(Ev::NoncombatDamage, o, None);
         }
         if self
@@ -1334,6 +1434,65 @@ impl<'a> Game<'a> {
         {
             self.gain_life(ctx.ctrl, n);
         }
+    }
+
+    /// The card a "return ~" / "return it" / "return that card" means, when the text names
+    /// one: `Some(Some((player, graveyard index)))` if it's in a graveyard, `Some(None)` if
+    /// it isn't (nothing returns), `None` if the text lets the player choose.
+    fn returned_card(&self, ctx: &Ctx) -> Option<Option<(usize, usize)>> {
+        let t = ctx.text;
+        let itself = self.returns_itself(ctx);
+        let that = t.contains("return it ")
+            || t.contains("return it.")
+            || t.contains("return that card")
+            || t.contains("return that creature");
+        if itself {
+            let r = ctx
+                .snap
+                .as_ref()
+                .and_then(|s| s.card)
+                .or_else(|| self.src_idx(ctx).and_then(|i| self.perms[i].card));
+            let Some(r) = r else {
+                // Activated from the graveyard (no permanent): the card of that name there.
+                let c = ctx.card?;
+                let me = ctx.ctrl;
+                let pl = &self.players[me];
+                return Some(
+                    pl.graveyard
+                        .iter()
+                        .rposition(|&g| pl.cards[g as usize].name == c.name)
+                        .map(|k| (me, k)),
+                );
+            };
+            let o = r.0 as usize;
+            return Some(
+                self.players
+                    .get(o)
+                    .and_then(|p| p.graveyard.iter().rposition(|&c| c == r.1))
+                    .map(|k| (o, k)),
+            );
+        }
+        if that && !t.contains("exile") {
+            // The creature that just died went to the top of its owner's graveyard.
+            let me = ctx.ctrl;
+            let pl = &self.players[me];
+            let creature = t.contains("creature");
+            return Some(
+                pl.graveyard
+                    .iter()
+                    .rposition(|&c| {
+                        let card = &pl.cards[c as usize];
+                        if creature {
+                            card.is(T_CREATURE)
+                        } else {
+                            card.is_permanent()
+                        }
+                    })
+                    .filter(|&k| k + 2 >= pl.graveyard.len())
+                    .map(|k| (me, k)),
+            );
+        }
+        None
     }
 
     /// Applies one effect.
@@ -1448,6 +1607,13 @@ impl<'a> Game<'a> {
                         return;
                     }
                 }
+                // "... deals damage equal to its power to that permanent / to it".
+                if let Some(ids) = self.prev_ids(ctx, to) {
+                    for id in ids {
+                        self.hurt(ctx, id, n);
+                    }
+                    return;
+                }
                 if to.mass {
                     for id in self.choose(ctx, to, true) {
                         self.hurt(ctx, id, n);
@@ -1473,6 +1639,7 @@ impl<'a> Game<'a> {
                                     _ => true,
                                 };
                                 if paid {
+                                    self.actor = ctx.ctrl as u8;
                                     self.emit_targeted(id);
                                     self.hurt(ctx, id, n);
                                 }
@@ -1487,13 +1654,52 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Fight(t) => {
-                let mine = self
-                    .src_idx(ctx)
-                    .filter(|&i| self.perms[i].is_creature())
-                    .or_else(|| ai::best_fighter(self, me));
+                // Pumps earlier in the ability count ("gets +2/+2, then fights").
+                self.recalc();
+                // "Another target creature you control fights ...": not the source.
+                let other_fighter = text.contains("another target creature you control fight")
+                    || text.contains("target creature you control fight");
+                let mine = if other_fighter {
+                    ai::best_fighter_except(self, me, ctx.src)
+                } else {
+                    self.src_idx(ctx)
+                        .filter(|&i| self.perms[i].is_creature())
+                        .or_else(|| ai::best_fighter(self, me))
+                };
                 let Some(mi) = mine else { return };
                 let my_id = self.perms[mi].id;
-                let targets = self.choose(ctx, t, true);
+                // "Up to one target": only a fight it wins.
+                let targets = if text.contains("fights up to one") {
+                    let (power, tough) =
+                        (self.perms[mi].p, self.perms[mi].t - self.perms[mi].damage);
+                    let mine_value = ai::perm_value(self, mi);
+                    let kills: Vec<usize> = self
+                        .candidates(ctx, t, true)
+                        .into_iter()
+                        .filter(|&i| {
+                            let x = &self.perms[i];
+                            x.t - x.damage <= power && !x.has(INDESTRUCTIBLE)
+                        })
+                        .collect();
+                    // Rather a fight it survives; a trade only for something worth as much.
+                    let safe: Vec<usize> = kills
+                        .iter()
+                        .copied()
+                        .filter(|&i| self.perms[i].p < tough)
+                        .collect();
+                    let trades: Vec<usize> = kills
+                        .iter()
+                        .copied()
+                        .filter(|&i| ai::perm_value(self, i) >= mine_value)
+                        .collect();
+                    let pool = if safe.is_empty() { trades } else { safe };
+                    ai::choose_victims(self, me, &pool, 1)
+                        .into_iter()
+                        .map(|i| self.perms[i].id)
+                        .collect()
+                } else {
+                    self.choose(ctx, t, true)
+                };
                 for id in targets {
                     let (Some(a), Some(b)) = (self.idx(my_id), self.idx(id)) else {
                         continue;
@@ -1570,11 +1776,26 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Edict { each_opponent } => {
-                let victims: Vec<usize> = if *each_opponent {
+                let mut victims: Vec<usize> = if *each_opponent {
                     self.opponents(me)
                 } else {
                     ai::choose_opponent(self, me, 0).into_iter().collect()
                 };
+                // "Each player sacrifices": you too.
+                if text.contains("each player sacrifices") {
+                    victims.insert(0, me);
+                }
+                // "Sacrifices two creatures".
+                let n = text
+                    .split("sacrifices ")
+                    .nth(1)
+                    .and_then(|r| r.split_whitespace().next())
+                    .map(|w| match w {
+                        "two" => 2,
+                        "three" => 3,
+                        _ => 1,
+                    })
+                    .unwrap_or(1);
                 for o in victims {
                     let types = if text.contains("creature or planeswalker") {
                         T_CREATURE | T_PLANESWALKER
@@ -1583,14 +1804,8 @@ impl<'a> Game<'a> {
                     } else {
                         T_CREATURE
                     };
-                    // "Sacrifices two creatures".
-                    let n = if text.contains("sacrifices two") {
-                        2
-                    } else {
-                        1
-                    };
                     for _ in 0..n {
-                        if let Some(i) = ai::sacrifice_choice(self, o, types) {
+                        if let Some(i) = ai::sacrifice_choice_r(self, o, types, &ctx.card_restr) {
                             self.sacrifice(i);
                         }
                     }
@@ -1620,7 +1835,21 @@ impl<'a> Game<'a> {
             Effect::Draw { amount, you } => {
                 let n = self.x_value(ctx, amount).max(0) as u32;
                 self.last_drawn = n as i32;
-                if !*you
+                // "Destroy target creature. Its controller draws a card": the player whose
+                // permanent the ability just hit.
+                let theirs = [
+                    "its controller draws",
+                    "that player draws",
+                    "their controller draws",
+                ]
+                .iter()
+                .any(|w| text.contains(w));
+                if !*you && theirs && self.last_ctrl.is_some_and(|o| o as usize != me) {
+                    let o = self.last_ctrl.unwrap_or(0) as usize;
+                    if self.players[o].alive {
+                        self.draw(o, n);
+                    }
+                } else if !*you
                     && (text.contains("each opponent draws")
                         || text.contains("target opponent draws"))
                 {
@@ -1633,9 +1862,9 @@ impl<'a> Game<'a> {
                     for o in who {
                         self.draw(o, n);
                     }
-                } else if text.contains("each player discards their hand, then draws")
-                    || text.contains("each player may discard their hand and draw")
-                {
+                } else if text.contains("each player may discard their hand and draw") {
+                    // "Each player may discard their hand and draw seven cards" (the parser
+                    // reads "draw" there as yours).
                     for p in 0..self.players.len() {
                         if self.players[p].alive {
                             self.draw(p, n);
@@ -1645,6 +1874,7 @@ impl<'a> Game<'a> {
                     && text.contains("that player draws")
                     && text.starts_with("at the beginning of each player's")
                 {
+                    // Dictate of Kruphix: the player whose draw step it is.
                     let a = self.active;
                     self.draw(a, n);
                 } else if *you || !text.contains("target player") && !text.contains("each player") {
@@ -1685,16 +1915,20 @@ impl<'a> Game<'a> {
                     || text.contains("each player may discard their hand") => {}
             Effect::Discard { opponents } => {
                 if *opponents {
-                    let victims: Vec<usize> =
+                    let mut victims: Vec<usize> =
                         if text.contains("each opponent") || text.contains("each player") {
                             self.opponents(me)
                         } else {
                             ai::choose_opponent(self, me, 0).into_iter().collect()
                         };
-                    // "Discards two cards", "discards their hand".
-                    let times = if text.contains("discards their hand") {
-                        usize::MAX
-                    } else if text.contains("discards two") {
+                    // "Each player discards ...": you too.
+                    if text.contains("each player discards") {
+                        victims.insert(0, me);
+                    }
+                    let whole_hand =
+                        text.contains("discards their hand") || text.contains("discard their hand");
+                    // "Discards two cards".
+                    let times = if text.contains("discards two") {
                         2
                     } else if text.contains("discards three") {
                         3
@@ -1702,13 +1936,18 @@ impl<'a> Game<'a> {
                         1
                     };
                     for o in victims {
-                        if times > 1 {
+                        if whole_hand {
+                            let hand = std::mem::take(&mut self.players[o].hand);
+                            let had = !hand.is_empty();
+                            self.players[o].graveyard.extend(hand);
+                            if had {
+                                self.emit(Ev::Discard, o, None);
+                            }
+                        } else if times > 1 {
                             for _ in 0..times.min(self.players[o].hand.len()) {
                                 self.discard(o);
                             }
-                            continue;
-                        }
-                        if text.contains("reveal") || text.contains("you choose") {
+                        } else if text.contains("reveal") || text.contains("you choose") {
                             // You pick their best nonland card.
                             if let Some(h) = ai::best_card_in_hand(self, o) {
                                 let c = self.players[o].hand.remove(h);
@@ -1729,7 +1968,11 @@ impl<'a> Game<'a> {
                     || text.contains("target player")
                     || text.contains("each player");
                 if theirs {
-                    let victims: Vec<usize> = if text.contains("each") {
+                    let victims: Vec<usize> = if text.contains("each player mills") {
+                        (0..self.players.len())
+                            .filter(|&o| self.players[o].alive)
+                            .collect()
+                    } else if text.contains("each opponent mills") {
                         self.opponents(me)
                     } else {
                         ai::choose_opponent(self, me, 0).into_iter().collect()
@@ -1759,8 +2002,10 @@ impl<'a> Game<'a> {
                 }
                 let kw = keyword_bits(keywords);
                 let subs = token_subtypes(text);
+                let mut made = Vec::new();
                 for _ in 0..n.min(20) {
                     let i = self.make_token(me, *power, *toughness, kw, subs.clone());
+                    made.push(self.perms[i].id);
                     if text.contains("tapped and attacking")
                         || text.contains("tapped")
                             && text.contains("token")
@@ -1768,7 +2013,14 @@ impl<'a> Game<'a> {
                     {
                         self.perms[i].tapped = true;
                     }
+                    if text.contains("tapped and attacking") && self.in_combat {
+                        self.perms[i].attacking = true;
+                    }
                     self.after_enter(i);
+                }
+                // "Create two Goblins. They gain haste."
+                if !made.is_empty() {
+                    self.last_targets = made;
                 }
             }
             Effect::ItemTokens { amount, kind } if kind == "copy" => {
@@ -1805,15 +2057,7 @@ impl<'a> Game<'a> {
                         }
                     }
                 } else {
-                    let ids = if to.kind == Kind::It {
-                        self.src_idx(ctx)
-                            .map(|i| self.perms[i].id)
-                            .into_iter()
-                            .collect()
-                    } else {
-                        self.choose(ctx, to, false)
-                    };
-                    for id in ids {
+                    for id in self.pick(ctx, to, false) {
                         if let Some(i) = self.idx(id) {
                             self.add_counters(i, n);
                         }
@@ -1827,11 +2071,7 @@ impl<'a> Game<'a> {
                 until_eot,
             } => {
                 let harmful = *power < 0 && to.whose != Whose::Yours;
-                let ids = if to.kind == Kind::It {
-                    self.it_ids(ctx)
-                } else {
-                    self.choose(ctx, to, harmful)
-                };
+                let ids = self.pick(ctx, to, harmful);
                 // "+X/+0 where X is ...", "+1/+1 for each ..." (the reader's typical 3 per
                 // unit becomes the real count).
                 let (mut power, mut toughness) = (*power, *toughness);
@@ -1893,11 +2133,7 @@ impl<'a> Game<'a> {
                 } else {
                     keyword_bits(keywords)
                 };
-                let ids = if to.kind == Kind::It {
-                    self.it_ids(ctx)
-                } else {
-                    self.choose(ctx, to, false)
-                };
+                let ids = self.pick(ctx, to, false);
                 for id in ids {
                     let Some(i) = self.idx(id) else { continue };
                     if *until_eot || ctx.until_eot {
@@ -1923,13 +2159,20 @@ impl<'a> Game<'a> {
             }
             Effect::Drain { amount, each } => {
                 let n = self.x_value(ctx, amount);
-                let victims: Vec<usize> = if *each {
+                let mut victims: Vec<usize> = if *each {
                     self.opponents(me)
                 } else if let Some(o) = self.exact_life_target(me, text) {
                     o.into_iter().collect()
                 } else {
                     ai::choose_opponent(self, me, n).into_iter().collect()
                 };
+                // "Deals 2 damage to each player", "each player loses 1 life": you too.
+                if *each
+                    && (text.contains("damage to each player")
+                        || text.contains("each player loses"))
+                {
+                    victims.insert(0, me);
+                }
                 let mut total = 0;
                 for o in victims {
                     // "... loses 3 life unless that player sacrifices a nonland permanent or
@@ -1991,81 +2234,93 @@ impl<'a> Game<'a> {
                     self.fetch_land(me, *battlefield && (!split || k == 0), tapped, basic);
                 }
             }
-            Effect::Reanimate if self.returns_itself(ctx) => self.return_itself(ctx, true),
-            Effect::Regrowth if self.returns_itself(ctx) => self.return_itself(ctx, false),
-            Effect::Reanimate
-                if text.contains("dies, return it to the battlefield")
-                    || text.contains("dies, return that card to the battlefield") =>
-            {
-                // "Whenever a Villain you control dies, return it to the battlefield": the
-                // card that just died.
-                let k = self.players[me]
-                    .graveyard
-                    .iter()
-                    .rposition(|&c| self.players[me].cards[c as usize].is(T_CREATURE));
-                if let Some(k) = k {
-                    let c = self.players[me].graveyard.remove(k);
-                    self.emit(Ev::LeavesGraveyard, me, None);
-                    if let Some(i) = self.enter_card(me, c, me, false) {
-                        let id = self.perms[i].id;
-                        self.reborn_details(ctx, i);
-                        self.reborn = Some(id);
-                    }
-                }
-            }
-            // "Return this card from your graveyard to the battlefield tapped" (Gallia).
-            Effect::Reanimate if text.contains("return ~ from your graveyard") => {
-                let Some(c) = ctx.card else { return };
-                let pl = &self.players[me];
-                let Some(k) = (0..pl.graveyard.len())
-                    .rev()
-                    .find(|&k| pl.cards[pl.graveyard[k] as usize].name == c.name)
-                else {
-                    return;
-                };
-                let card = self.players[me].graveyard.remove(k);
-                self.emit(Ev::LeavesGraveyard, me, None);
-                if let Some(i) = self.enter_card(me, card, me, false) {
-                    if text.contains("tapped") {
-                        self.perms[i].tapped = true;
-                    }
-                    if text.contains("+1/+1 counter") {
-                        self.perms[i].counters += 1;
-                    }
-                }
-            }
             Effect::Reanimate => {
                 let any = text.contains("a graveyard")
                     || text.contains("any graveyard")
                     || text.contains("all graveyards");
-                if let Some((o, k)) = ai::reanimate_choice(self, me, any) {
+                let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
+                // "Return all creature cards with mana value 2 or less": every one that fits.
+                let all = text.contains("return all")
+                    || text.contains("return each")
+                    || text.contains("put all");
+                self.last_targets.clear();
+                // "Return ~ / this card from your graveyard", "when ~ dies, return it": the
+                // card itself; "whenever a creature you control dies, return that card": the
+                // card that just died. Only that card, and only if it's there.
+                let fixed = self.returned_card(ctx);
+                for _ in 0..if all { 20 } else { 1 } {
+                    let pick = match fixed {
+                        Some(f) => f,
+                        None => ai::reanimate_choice(self, me, any, &ctx.card_restr, &d),
+                    };
+                    let Some((o, k)) = pick else {
+                        break;
+                    };
+                    let itself = fixed.is_some() && self.returns_itself(ctx);
+                    if itself && self.reborn_blocked(ctx) {
+                        break;
+                    }
+                    // An Aura comes back attached to a creature it can enchant ("target
+                    // creature you control with power 1 or less"), or not at all.
+                    let host = if self.players[o].cards[self.players[o].graveyard[k] as usize]
+                        .is(T_AURA)
+                    {
+                        let small = text.contains("power 1 or less");
+                        let pick = self
+                            .perms
+                            .iter()
+                            .filter(|x| x.ctrl as usize == me && x.is_creature())
+                            .filter(|x| !small || x.p <= 1)
+                            .max_by_key(|x| x.p + x.t)
+                            .map(|x| x.id);
+                        if pick.is_none() {
+                            break;
+                        }
+                        pick
+                    } else {
+                        None
+                    };
                     let c = self.players[o].graveyard.remove(k);
                     self.emit(Ev::LeavesGraveyard, o, None);
+                    if itself {
+                        let name = &self.players[o].cards[c as usize].name;
+                        self.note(|| format!("  {} returns from the graveyard", name));
+                    }
                     if let Some(i) = self.enter_card(o, c, me, false) {
                         if text.contains("tapped") {
                             self.perms[i].tapped = true;
                         }
+                        if host.is_some() {
+                            self.perms[i].attached = host;
+                        }
                         // "With an additional +1/+1 counter", "with a finality counter".
                         self.reborn_details(ctx, i);
+                        let id = self.perms[i].id;
+                        self.last_targets.push(id);
+                        // Back by its own ability: the rest of it ("she gains haste") is
+                        // about the returned permanent.
+                        if itself {
+                            self.reborn = Some(id);
+                            self.recalc();
+                        }
                     }
                 }
             }
             Effect::Regrowth => {
                 let creature = text.contains("creature card");
-                let own = ctx
-                    .card
-                    .filter(|_| text.contains("return ~ from your graveyard"));
-                let pick = if let Some(c) = own {
-                    // "Return this card from your graveyard to your hand".
-                    let pl = &self.players[me];
-                    (0..pl.graveyard.len())
-                        .rev()
-                        .find(|&k| pl.cards[pl.graveyard[k] as usize].name == c.name)
+                let itself = self.returns_itself(ctx);
+                let pick = if itself {
+                    // "Return ~ from your graveyard to your hand": only the card itself.
+                    match self.returned_card(ctx) {
+                        Some(Some((o, k))) if o == me && !self.reborn_blocked(ctx) => Some(k),
+                        _ => None,
+                    }
                 } else if text.contains("return that card") || text.contains("return it") {
                     // The card that just went there (e.g. the creature that died).
                     self.players[me].graveyard.len().checked_sub(1)
                 } else {
-                    ai::regrowth_choice(self, me, creature)
+                    let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
+                    ai::regrowth_choice(self, me, creature, &ctx.card_restr, &d)
                 };
                 if let Some(k) = pick {
                     let c = self.players[me].graveyard.remove(k);
@@ -2074,7 +2329,10 @@ impl<'a> Game<'a> {
                     self.emit(Ev::LeavesGraveyard, me, None);
                     // "Up to two target creature cards".
                     if text.contains("up to two target") || text.contains("two target") {
-                        if let Some(k) = ai::regrowth_choice(self, me, creature) {
+                        let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
+                        if let Some(k) =
+                            ai::regrowth_choice(self, me, creature, &ctx.card_restr, &d)
+                        {
                             let c = self.players[me].graveyard.remove(k);
                             self.players[me].hand.push(c);
                             self.emit(Ev::LeavesGraveyard, me, None);
@@ -2083,11 +2341,22 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Untap(t) => {
-                let ids: Vec<u32> = if t.kind == Kind::It {
-                    self.src_idx(ctx)
-                        .map(|i| self.perms[i].id)
-                        .into_iter()
-                        .collect()
+                let ids: Vec<u32> = if t.kind == Kind::It || t.restr.has(restrict::PREV) {
+                    self.pick(ctx, t, false)
+                } else if text.contains("untap target") || text.contains("untap another target") {
+                    // A target ("untap another target creature you control. If it's a Bear,
+                    // put a counter on it"): remembered, even if it wasn't tapped.
+                    let t2 = Target {
+                        whose: Whose::Yours,
+                        ..*t
+                    };
+                    let cands = self.candidates(ctx, &t2, false);
+                    let pick = ai::untap_choice(self, me, &cands)
+                        .or_else(|| ai::choose_friends(self, me, &cands, 1).first().copied());
+                    let ids: Vec<u32> = pick.map(|i| self.perms[i].id).into_iter().collect();
+                    self.targeted = true;
+                    self.last_targets = ids.clone();
+                    ids
                 } else {
                     let t2 = Target {
                         whose: Whose::Yours,
@@ -2235,6 +2504,7 @@ impl<'a> Game<'a> {
                     }
                 };
                 if i < self.perms.len() {
+                    self.last_targets = vec![self.perms[i].id];
                     self.add_counters(i, k);
                 }
             }
@@ -2245,6 +2515,7 @@ impl<'a> Game<'a> {
                     mass: text.contains("each creature"),
                     other: false,
                     restricted: false,
+                    restr: Default::default(),
                     count: 1,
                 };
                 for id in self.choose(ctx, &t, true) {
@@ -2289,7 +2560,9 @@ impl<'a> Game<'a> {
                 let target = if text.contains("~") && !text.contains("target") {
                     self.src_idx(ctx)
                 } else {
-                    ai::blink_choice(self, me)
+                    // "Exile (another / up to one) target creature you control": not itself.
+                    let src = ctx.src.filter(|_| text.contains("target"));
+                    ai::blink_choice(self, me, src)
                 };
                 let Some(i) = target else { return };
                 let x = self.perms[i].clone();
@@ -2310,7 +2583,7 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Tutor => {
-                if let Some(k) = ai::tutor_choice(self, me, text) {
+                if let Some(k) = ai::tutor_choice(self, me, text, &ctx.card_restr) {
                     let c = self.players[me].library.remove(k);
                     let mut lib = std::mem::take(&mut self.players[me].library);
                     self.rng.shuffle(&mut lib);
@@ -2387,9 +2660,47 @@ impl<'a> Game<'a> {
                 let equipment = src
                     .filter(|&i| self.perms[i].is(T_EQUIPMENT | T_AURA))
                     .or_else(|| ai::unattached_equipment(self, me));
+                // "Create a Dwarf token, then attach this Equipment to it", "attach it to the
+                // amassed Army": the creature just made.
+                let to_new = [
+                    " to it",
+                    " to that creature",
+                    " to the amassed army",
+                    " to the token",
+                ]
+                .iter()
+                .any(|w| text.contains(w));
+                let made = self
+                    .last_targets
+                    .iter()
+                    .rev()
+                    .find_map(|&id| self.idx(id))
+                    .filter(|_| to_new);
+                // "Attach it to target Dwarf you control": only one of those.
+                let named = text
+                    .split(" to target ")
+                    .nth(1)
+                    .filter(|_| text.contains("attach") && made.is_none())
+                    .map(|p| p.split(['.', ';']).next().unwrap_or(p));
+                if let Some(p) = named {
+                    let t = crate::abilities::target_of(p, false);
+                    let t = Target {
+                        whose: Whose::Yours,
+                        ..t
+                    };
+                    let cands = self.candidates(ctx, &t, false);
+                    let Some(&c) = ai::choose_friends(self, me, &cands, 1).first() else {
+                        return;
+                    };
+                    if let Some(e) = equipment {
+                        let cid = self.perms[c].id;
+                        self.perms[e].attached = Some(cid);
+                    }
+                    return;
+                }
                 if let Some(e) = equipment {
                     let eid = self.perms[e].id;
-                    if let Some(c) = ai::equip_target(self, me, eid) {
+                    if let Some(c) = made.or_else(|| ai::equip_target(self, me, eid)) {
                         let cid = self.perms[c].id;
                         if let Some(e) = self.idx(eid) {
                             self.perms[e].attached = Some(cid);
@@ -2400,63 +2711,6 @@ impl<'a> Game<'a> {
             // Doublers work while the permanent is in play (`doubles`).
             Effect::Doubler(_) => {}
             Effect::Fog => self.fog = true,
-            Effect::Dig if text.contains("mill") && text.contains("from among them") => {
-                // "Mill four cards. You may put a permanent card from among them into your
-                // hand" - the milled cards, not the library.
-                let n = text
-                    .split("mill ")
-                    .nth(1)
-                    .and_then(|r| r.split_whitespace().next())
-                    .and_then(|w| match w {
-                        "two" => Some(2),
-                        "three" => Some(3),
-                        "four" => Some(4),
-                        "five" => Some(5),
-                        _ => w.parse().ok(),
-                    })
-                    .unwrap_or(3usize);
-                let all = text.contains("put all ");
-                let types = if text.contains("permanent card") {
-                    !(T_INSTANT | T_SORCERY)
-                } else if text.contains("creature card") {
-                    T_CREATURE
-                } else if text.contains("instant or sorcery") {
-                    T_INSTANT | T_SORCERY
-                } else if text.contains("land card") {
-                    T_LAND
-                } else {
-                    0xFFFF
-                };
-                let sub = ["elf", "hero", "dwarf", "goblin"]
-                    .into_iter()
-                    .find(|s| text.contains(&format!("{} card", s)));
-                let gy_len = self.players[me].graveyard.len();
-                let from = gy_len.saturating_sub(n);
-                let mut picks: Vec<usize> = (from..gy_len)
-                    .filter(|&k| {
-                        let c = &self.players[me].cards[self.players[me].graveyard[k] as usize];
-                        c.types & types != 0 && sub.is_none_or(|s| c.has_subtype(s))
-                    })
-                    .collect();
-                if !all && picks.len() > 1 {
-                    let best = picks
-                        .iter()
-                        .copied()
-                        .max_by(|&a, &b| {
-                            let va = self.players[me].cards[self.players[me].graveyard[a] as usize]
-                                .value;
-                            let vb = self.players[me].cards[self.players[me].graveyard[b] as usize]
-                                .value;
-                            va.partial_cmp(&vb).unwrap()
-                        })
-                        .unwrap_or(from);
-                    picks = vec![best];
-                }
-                for k in picks.into_iter().rev() {
-                    let c = self.players[me].graveyard.remove(k);
-                    self.players[me].hand.push(c);
-                }
-            }
             Effect::Dig => {
                 let n = text
                     .split("top ")
@@ -2472,6 +2726,51 @@ impl<'a> Game<'a> {
                         _ => w.parse().ok(),
                     })
                     .unwrap_or(3usize);
+                // "Mill four cards, then put all Elf cards from among them into your hand":
+                // the milled cards, only the kind named.
+                if text.contains("mill") && text.contains("from among them") {
+                    let milled = text
+                        .split("mill ")
+                        .nth(1)
+                        .and_then(|r| r.split_whitespace().next())
+                        .and_then(|w| match w {
+                            "two" => Some(2),
+                            "three" => Some(3),
+                            "four" => Some(4),
+                            "five" => Some(5),
+                            "six" => Some(6),
+                            _ => w.parse().ok(),
+                        })
+                        .unwrap_or(3usize);
+                    let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
+                    let all = text.contains("put all");
+                    let gy = &self.players[me].graveyard;
+                    let from = gy.len().saturating_sub(milled);
+                    let mut picks: Vec<usize> = (from..gy.len())
+                        .filter(|&k| {
+                            Game::card_ok(
+                                &ctx.card_restr,
+                                &self.players[me].cards[gy[k] as usize],
+                                &d,
+                            )
+                        })
+                        .collect();
+                    // "You may put a permanent card from among them into your hand": the best.
+                    if !all && picks.len() > 1 {
+                        let value = |k: usize| self.players[me].cards[gy[k] as usize].value;
+                        let best = picks.iter().copied().max_by(|&a, &b| {
+                            value(a)
+                                .partial_cmp(&value(b))
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        picks = best.into_iter().collect();
+                    }
+                    for k in picks.into_iter().rev() {
+                        let c = self.players[me].graveyard.remove(k);
+                        self.players[me].hand.push(c);
+                    }
+                    return;
+                }
                 // Two piles, an opponent picks which one you keep: about half the cards.
                 let keep = if text.contains("pile") {
                     (n / 2).max(1)
@@ -2494,9 +2793,55 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::OtherCounters(kind) => {
-                let target_self = !text.contains("target");
-                let i = if target_self {
-                    self.src_idx(ctx)
+                // Where the counters go: "on ~", "on each Equipment you control", "on it" /
+                // "on each of those creatures", "on target creature".
+                let on = text
+                    .find(&format!("{} counter", kind))
+                    .and_then(|i| text[i..].split_once(" on "))
+                    .map(|x| x.1)
+                    .unwrap_or("~");
+                let on = on.split(['.', ';', ',']).next().unwrap_or(on).trim();
+                let on = on.trim_start_matches("each of ");
+                let src_ids = || -> Vec<u32> {
+                    ctx.src
+                        .filter(|&id| self.idx(id).is_some())
+                        .into_iter()
+                        .collect()
+                };
+                let ids: Vec<u32> = if on.starts_with('~') || on.starts_with("this ") {
+                    src_ids()
+                } else if restrict::refers_back(on) {
+                    let alive: Vec<u32> = self
+                        .last_targets
+                        .iter()
+                        .copied()
+                        .filter(|&id| self.idx(id).is_some())
+                        .collect();
+                    let about_other = text.starts_with("whenever ")
+                        && !crate::playtest::compile::trigger_part(text).contains('~');
+                    if !alive.is_empty() || self.targeted {
+                        alive
+                    } else if let Some(s) = ctx
+                        .subject
+                        .filter(|&s| about_other && Some(s) != ctx.src && self.idx(s).is_some())
+                    {
+                        vec![s]
+                    } else {
+                        src_ids()
+                    }
+                } else if on.starts_with("each ") || on.starts_with("all ") {
+                    let t = crate::abilities::target_of(
+                        on.trim_start_matches("each ").trim_start_matches("all "),
+                        true,
+                    );
+                    self.choose(ctx, &t, kind == "stun")
+                } else if !on.contains("target") {
+                    src_ids()
+                } else {
+                    Vec::new()
+                };
+                let ids = if !ids.is_empty() || !on.contains("target") {
+                    ids
                 } else {
                     let t = Target {
                         kind: Kind::Creature,
@@ -2508,24 +2853,25 @@ impl<'a> Game<'a> {
                         mass: false,
                         other: false,
                         restricted: false,
+                        restr: Default::default(),
                         count: 1,
                     };
                     let harmful = kind == "stun";
                     self.choose(ctx, &t, harmful)
-                        .first()
-                        .and_then(|&id| self.idx(id))
                 };
-                let Some(i) = i else { return };
-                match kind.as_str() {
-                    // Put on a returning card as it comes back (`reborn_details`).
-                    "finality" => {}
-                    "loyalty" => self.perms[i].loyalty += 1,
-                    "shield" => self.perms[i].shield += 1,
-                    "stun" => self.perms[i].stun += 1,
-                    k if KEYWORDS.iter().any(|(w, _)| *w == k) => {
-                        self.perms[i].kw |= keyword_bits(&[k.to_string()]);
+                for id in ids {
+                    let Some(i) = self.idx(id) else { continue };
+                    match kind.as_str() {
+                        // Put on a returning card as it comes back (`reborn_details`).
+                        "finality" => {}
+                        "loyalty" => self.perms[i].loyalty += 1,
+                        "shield" => self.perms[i].shield += 1,
+                        "stun" => self.perms[i].stun += 1,
+                        k if KEYWORDS.iter().any(|(w, _)| *w == k) => {
+                            self.perms[i].kw |= keyword_bits(&[k.to_string()]);
+                        }
+                        _ => self.add_other_counters(i, 1),
                     }
-                    _ => self.add_other_counters(i, 1),
                 }
             }
             Effect::Recast => {
@@ -2549,85 +2895,37 @@ impl<'a> Game<'a> {
     /// the card brings back itself, not the best card there.
     fn returns_itself(&self, ctx: &Ctx) -> bool {
         let t = ctx.text;
-        if ctx.card_ref.is_none() {
-            return false;
-        }
-        t.contains("return ~ from your graveyard")
-            || t.contains("return ~ to the battlefield")
-            || (t.starts_with("when ~ die") || t.starts_with("whenever ~ die"))
+        t.contains("return ~")
+            || t.contains("return this card")
+            || (t.starts_with("when ~ die")
+                || t.starts_with("whenever ~ die")
+                || t.starts_with("when ~ is put into"))
                 && [
-                    "return it to",
-                    "return her to",
-                    "return him to",
-                    "return them to",
+                    "return it",
+                    "return her",
+                    "return him",
+                    "return them",
+                    "return that card",
                 ]
                 .iter()
                 .any(|r| t.contains(r))
     }
 
-    /// The card returns itself from its owner's graveyard to the battlefield or to hand.
-    fn return_itself(&mut self, ctx: &Ctx, battlefield: bool) {
-        let Some((list, idx)) = ctx.card_ref else {
-            return;
-        };
-        let owner = list as usize;
+    /// "If it wasn't a Demon" / "if they were a creature": checked on what died; the card
+    /// stays in the graveyard otherwise.
+    fn reborn_blocked(&self, ctx: &Ctx) -> bool {
         let t = ctx.text;
-        // "If it wasn't a Demon" / "if they were a creature": checked on what died.
-        if let Some(s) = &ctx.snap {
-            if let Some(rest) = t.split("if it wasn't a ").nth(1) {
-                let what = rest.split([',', ' ']).next().unwrap_or("");
-                if s.subtypes.iter().any(|x| x == what) {
-                    return;
-                }
-            }
-            if (t.contains("if they were a creature") || t.contains("if it was a creature"))
-                && !s.is_creature()
-            {
-                return;
-            }
-        }
-        let Some(k) = self.players[owner]
-            .graveyard
-            .iter()
-            .rposition(|&c| c == idx)
-        else {
-            return;
+        let Some(s) = &ctx.snap else {
+            return false;
         };
-        // An Aura comes back attached to a creature it can enchant ("target creature you
-        // control with power 1 or less"), or not at all.
-        let host = if battlefield && self.card((list, idx)).is(T_AURA) {
-            let small = t.contains("power 1 or less");
-            let pick = self
-                .perms
-                .iter()
-                .filter(|x| x.ctrl as usize == ctx.ctrl && x.is_creature())
-                .filter(|x| !small || x.p <= 1)
-                .max_by_key(|x| x.p + x.t)
-                .map(|x| x.id);
-            if pick.is_none() {
-                return;
+        if let Some(rest) = t.split("if it wasn't a ").nth(1) {
+            let what = rest.split([',', ' ']).next().unwrap_or("");
+            if s.subtypes.iter().any(|x| x == what) {
+                return true;
             }
-            pick
-        } else {
-            None
-        };
-        let c = self.players[owner].graveyard.remove(k);
-        self.emit(Ev::LeavesGraveyard, owner, None);
-        if !battlefield {
-            self.players[owner].hand.push(c);
-            return;
         }
-        let name = &self.card((list, idx)).name;
-        self.note(|| format!("  {} returns from the graveyard", name));
-        if let Some(i) = self.enter_card(owner, c, ctx.ctrl, false) {
-            let id = self.perms[i].id;
-            if host.is_some() {
-                self.perms[i].attached = host;
-            }
-            self.reborn_details(ctx, i);
-            self.reborn = Some(id);
-            self.recalc();
-        }
+        (t.contains("if they were a creature") || t.contains("if it was a creature"))
+            && !s.is_creature()
     }
 
     /// How a returned card comes back: "tapped", "with two +1/+1 counters", "with a finality
@@ -3037,9 +3335,11 @@ impl<'a> Game<'a> {
                 let t = Target {
                     kind: Kind::Creature,
                     whose: Whose::Theirs,
-                    mass: label == "weakens attackers",
+                    // "Target creature gets -5/-0" is one creature.
+                    mass: label == "weakens attackers" && !text.contains("target creature"),
                     other: false,
                     restricted: false,
+                    restr: Default::default(),
                     count: 1,
                 };
                 for id in self.choose(ctx, &t, true) {
@@ -3075,6 +3375,7 @@ impl<'a> Game<'a> {
                             mass: false,
                             other: false,
                             restricted: false,
+                            restr: Default::default(),
                             count: 1,
                         },
                         true,
@@ -3275,15 +3576,24 @@ impl<'a> Game<'a> {
                 self.players[me].library = lib;
             }
             "returns to the top of the library" => {
-                if let Some(i) = self.src_idx(ctx) {
-                    self.leave(i, Zone::Library(true), false);
-                } else if let Some((list, idx)) = ctx.card_ref {
-                    // "Put ~ from your graveyard on top of your library" (Gate Colossus).
-                    let pl = &mut self.players[list as usize];
-                    if let Some(k) = pl.graveyard.iter().rposition(|&c| c == idx) {
-                        pl.graveyard.remove(k);
-                        pl.library.push(idx);
+                // "Put ~ from your graveyard on top of your library": only from there.
+                if text.contains("from your graveyard") {
+                    let r = ctx
+                        .snap
+                        .as_ref()
+                        .and_then(|s| s.card)
+                        .or_else(|| self.src_idx(ctx).and_then(|i| self.perms[i].card))
+                        .or(ctx.card_ref);
+                    let on_battlefield = self.src_idx(ctx).is_some();
+                    if let (Some(r), false) = (r, on_battlefield) {
+                        let o = r.0 as usize;
+                        if let Some(k) = self.players[o].graveyard.iter().rposition(|&c| c == r.1) {
+                            let c = self.players[o].graveyard.remove(k);
+                            self.players[o].library.push(c);
+                        }
                     }
+                } else if let Some(i) = self.src_idx(ctx) {
+                    self.leave(i, Zone::Library(true), false);
                 }
             }
             "untaps your creatures" => {

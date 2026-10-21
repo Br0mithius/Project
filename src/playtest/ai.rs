@@ -11,6 +11,7 @@ use super::resolve::Ctx;
 use super::state::*;
 use super::{CastOpts, ExtraPay, Src};
 use crate::abilities::{Effect, Kind, Whose};
+use crate::restrict::{Dyn, Restr};
 
 // ------------------------------------------------------------ values
 
@@ -354,6 +355,15 @@ pub fn damage_target(g: &Game, ctx: &Ctx, to: &crate::abilities::Target, n: i32)
     }
 }
 
+/// The biggest creature `me` controls other than `not`.
+pub fn best_fighter_except(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
+    (0..g.perms.len())
+        .filter(|&i| {
+            g.perms[i].ctrl as usize == me && g.perms[i].is_creature() && Some(g.perms[i].id) != not
+        })
+        .max_by_key(|&i| g.perms[i].p * 2 + g.perms[i].t)
+}
+
 pub fn best_fighter(g: &Game, me: usize) -> Option<usize> {
     (0..g.perms.len())
         .filter(|&i| g.perms[i].ctrl as usize == me && g.perms[i].is_creature())
@@ -361,12 +371,24 @@ pub fn best_fighter(g: &Game, me: usize) -> Option<usize> {
 }
 
 pub fn sacrifice_choice(g: &Game, o: usize, types: u16) -> Option<usize> {
-    (0..g.perms.len())
+    sacrifice_choice_r(g, o, types, &Restr::default())
+}
+
+/// The permanent player `o` sacrifices when it must also meet `r` ("a creature with the
+/// greatest mana value among creatures they control").
+pub fn sacrifice_choice_r(g: &Game, o: usize, types: u16, r: &Restr) -> Option<usize> {
+    let d = g.dyn_values(r, None, o, None);
+    let mut cands: Vec<usize> = (0..g.perms.len())
         .filter(|&i| {
             g.perms[i].ctrl as usize == o
                 && (g.perms[i].types & types != 0
                     || (types & T_CREATURE != 0 && g.perms[i].is_creature()))
+                && g.perm_ok(r, &g.perms[i], &d)
         })
+        .collect();
+    g.keep_greatest(r, &mut cands);
+    cands
+        .into_iter()
         .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap())
 }
 
@@ -436,11 +458,15 @@ fn arrival_value(c: &SimCard) -> f32 {
         .sum()
 }
 
-pub fn blink_choice(g: &Game, me: usize) -> Option<usize> {
+pub fn blink_choice(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
     (0..g.perms.len())
         .filter(|&i| {
             let x = &g.perms[i];
-            x.ctrl as usize == me && x.tok == Tok::None && x.commander == 0 && x.card.is_some()
+            x.ctrl as usize == me
+                && x.tok == Tok::None
+                && x.commander == 0
+                && x.card.is_some()
+                && Some(x.id) != not
         })
         .map(|i| (arrival_value(g.card(g.perms[i].card.unwrap())), i))
         .filter(|(v, _)| *v > 0.0)
@@ -693,7 +719,7 @@ pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool) {
     }
 }
 
-pub fn tutor_choice(g: &Game, p: usize, text: &str) -> Option<usize> {
+pub fn tutor_choice(g: &Game, p: usize, text: &str, r: &Restr) -> Option<usize> {
     let pl = &g.players[p];
     let want = |c: &SimCard| {
         if text.contains("creature card") {
@@ -715,8 +741,10 @@ pub fn tutor_choice(g: &Game, p: usize, text: &str) -> Option<usize> {
     if (text.contains("land card") || text.contains("basic land")) && !text.contains("creature") {
         return land_to_fetch(g, p, text.contains("basic"));
     }
+    let d = g.dyn_values(r, None, p, None);
     (0..pl.library.len())
         .filter(|&k| want(&pl.cards[pl.library[k] as usize]))
+        .filter(|&k| Game::card_ok(r, &pl.cards[pl.library[k] as usize], &d))
         .max_by(|&a, &b| {
             card_worth(g, p, &pl.cards[pl.library[a] as usize])
                 .partial_cmp(&card_worth(g, p, &pl.cards[pl.library[b] as usize]))
@@ -724,8 +752,16 @@ pub fn tutor_choice(g: &Game, p: usize, text: &str) -> Option<usize> {
         })
 }
 
-pub fn reanimate_choice(g: &Game, me: usize, any: bool) -> Option<(usize, usize)> {
+pub fn reanimate_choice(
+    g: &Game,
+    me: usize,
+    any: bool,
+    r: &Restr,
+    d: &Dyn,
+) -> Option<(usize, usize)> {
     let mut best: Option<(f32, usize, usize)> = None;
+    // "Return target creature card" unless the text names other cards ("permanent card").
+    let creature = r.any_types == 0 && r.not_types & T_LAND == 0;
     for o in 0..g.players.len() {
         if !any && o != me {
             continue;
@@ -733,7 +769,12 @@ pub fn reanimate_choice(g: &Game, me: usize, any: bool) -> Option<(usize, usize)
         let pl = &g.players[o];
         for (k, &c) in pl.graveyard.iter().enumerate() {
             let card = &pl.cards[c as usize];
-            if card.is(T_CREATURE) && best.is_none_or(|b| card.value > b.0) {
+            let fits = if creature {
+                card.is(T_CREATURE)
+            } else {
+                card.is_permanent()
+            };
+            if fits && Game::card_ok(r, card, d) && best.is_none_or(|b| card.value > b.0) {
                 best = Some((card.value, o, k));
             }
         }
@@ -741,10 +782,11 @@ pub fn reanimate_choice(g: &Game, me: usize, any: bool) -> Option<(usize, usize)
     best.map(|(_, o, k)| (o, k))
 }
 
-pub fn regrowth_choice(g: &Game, me: usize, creature: bool) -> Option<usize> {
+pub fn regrowth_choice(g: &Game, me: usize, creature: bool, r: &Restr, d: &Dyn) -> Option<usize> {
     let pl = &g.players[me];
     (0..pl.graveyard.len())
         .filter(|&k| !creature || pl.cards[pl.graveyard[k] as usize].is(T_CREATURE))
+        .filter(|&k| Game::card_ok(r, &pl.cards[pl.graveyard[k] as usize], d))
         .max_by(|&a, &b| {
             pl.cards[pl.graveyard[a] as usize]
                 .value
@@ -925,7 +967,14 @@ fn is_reactive_only(c: &SimCard) -> bool {
 }
 
 /// What an effect would do for player `p` right now (card points).
-fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f32 {
+fn effect_now(
+    g: &Game,
+    p: usize,
+    e: &Effect,
+    text: &str,
+    src: Option<u32>,
+    card_restr: Restr,
+) -> f32 {
     let ctx = Ctx {
         ctrl: p,
         src,
@@ -936,9 +985,11 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         text,
         until_eot: false,
         overload: false,
+        card_restr,
         x: None,
         paid: None,
     };
+    let d = g.dyn_values(&card_restr, Some(&ctx), p, src);
     let opp_value = |t: &crate::abilities::Target, kill: &dyn Fn(&Perm) -> bool| -> f32 {
         let cands = g.candidates(&ctx, t, true);
         if t.mass {
@@ -1007,7 +1058,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         Effect::Edict { .. } => g
             .opponents(p)
             .iter()
-            .filter_map(|&o| sacrifice_choice(g, o, T_CREATURE))
+            .filter_map(|&o| sacrifice_choice_r(g, o, T_CREATURE, &card_restr))
             .map(|i| perm_value(g, i) * 0.8)
             .sum(),
         Effect::CounterSpell | Effect::Fog => 0.0,
@@ -1077,10 +1128,10 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
                 0.3
             }
         }
-        Effect::Reanimate => reanimate_choice(g, p, text.contains("a graveyard"))
+        Effect::Reanimate => reanimate_choice(g, p, text.contains("a graveyard"), &card_restr, &d)
             .map(|(o, k)| g.players[o].cards[g.players[o].graveyard[k] as usize].value)
             .unwrap_or(0.0),
-        Effect::Regrowth => regrowth_choice(g, p, text.contains("creature card"))
+        Effect::Regrowth => regrowth_choice(g, p, text.contains("creature card"), &card_restr, &d)
             .map(|k| g.players[p].cards[g.players[p].graveyard[k] as usize].value * 0.6)
             .unwrap_or(0.0),
         Effect::GainControl(t) => {
@@ -1092,7 +1143,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
                 }
         }
         Effect::AddMana(n) => n.n as f32 * 0.3,
-        Effect::Blink => blink_choice(g, p)
+        Effect::Blink => blink_choice(g, p, src.filter(|_| text.contains("target")))
             .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
             .unwrap_or(0.0),
         Effect::Copy => best_to_copy(g, p, true)
@@ -1106,6 +1157,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
                     mass: false,
                     other: false,
                     restricted: false,
+                    restr: Default::default(),
                     count: 1,
                 },
                 &|x| x.is_creature(),
@@ -1113,7 +1165,7 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
         }
         Effect::Untap(_) => 0.4,
         // Nothing to find, nothing gained.
-        Effect::Tutor if tutor_choice(g, p, text).is_none() => 0.0,
+        Effect::Tutor if tutor_choice(g, p, text, &card_restr).is_none() => 0.0,
         Effect::Attach => {
             if equip_target(g, p, 0).is_some() {
                 0.8
@@ -1127,51 +1179,55 @@ fn effect_now(g: &Game, p: usize, e: &Effect, text: &str, src: Option<u32>) -> f
 
 /// Value of an ability's effects for `p` now (modal: the best mode).
 fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
-    let vals: Vec<f32> = a
-        .effects
-        .iter()
-        .map(|e| effect_now(g, p, e, &a.text, src))
-        .collect();
     if a.modal {
         let two = a.text.contains("choose two");
         let mut v: Vec<f32> = a
-            .mode_ranges()
+            .mode_groups()
             .into_iter()
-            .map(|r| vals[r].iter().sum())
+            .enumerate()
+            .map(|(m, r)| {
+                let (text, cr) = a.mode_text(m);
+                a.effects[r]
+                    .iter()
+                    .map(|e| effect_now(g, p, e, text, src, cr))
+                    .sum()
+            })
             .collect();
         v.sort_by(|a, b| b.partial_cmp(a).unwrap());
         v.iter().take(if two { 2 } else { 1 }).sum()
     } else {
-        vals.iter().sum()
+        a.effects
+            .iter()
+            .map(|e| effect_now(g, p, e, &a.text, src, a.card_restr))
+            .sum()
     }
 }
 
-/// The effects of the best mode (or two) of a modal ability (`used`: a bit per mode already
+/// The modes a modal ability picks: the best one, or two (`used`: a bit per mode already
 /// chosen, for "choose one that hasn't been chosen").
 pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usize> {
     let two = ab.text.contains("choose two");
-    let mut v: Vec<(f32, std::ops::Range<usize>)> = ab
-        .mode_ranges()
-        .into_iter()
+    let groups = ab.mode_groups();
+    let mut v: Vec<(f32, usize)> = groups
+        .iter()
         .enumerate()
         .filter(|(m, _)| *m >= 32 || used & (1 << m) == 0)
         .map(|(m, r)| {
-            // A mode reads its own bullet's text.
-            let text = ab.mode_text(m);
+            let (text, cr) = ab.mode_text(m);
             let val = ab.effects[r.clone()]
                 .iter()
-                .map(|e| effect_now(g, ctx.ctrl, e, text, ctx.src))
+                .map(|e| effect_now(g, ctx.ctrl, e, text, ctx.src, cr))
                 .sum();
-            (val, r)
+            (val, m)
         })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     let chosen: Vec<usize> = v
         .into_iter()
         .take(if two { 2 } else { 1 })
-        .flat_map(|(_, r)| r)
+        .map(|(_, m)| m)
         .collect();
-    chosen.into_iter().collect()
+    chosen
 }
 
 pub fn wants_optional(g: &Game, ctx: &Ctx, ab: &SimAbility) -> bool {
@@ -1196,7 +1252,7 @@ pub fn wants_to_pay(g: &Game, ctx: &Ctx, ab: &SimAbility, pc: &PayCost) -> bool 
         .effects
         .iter()
         .skip(pc.first as usize)
-        .map(|e| effect_now(g, p, e, &ab.text, ctx.src))
+        .map(|e| effect_now(g, p, e, &ab.text, ctx.src, ab.card_restr))
         .sum();
     let src = ctx.src.unwrap_or(u32::MAX);
     let pl = &g.players[p];

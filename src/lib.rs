@@ -15,6 +15,7 @@ pub mod paths;
 pub mod playtest;
 pub mod ranking;
 pub mod ratings;
+pub mod restrict;
 pub mod setdata;
 pub mod tags;
 pub mod ui;

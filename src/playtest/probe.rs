@@ -523,27 +523,30 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
     };
     let before = snap(&g);
     let snapshot = died.or_else(|| src.and_then(|id| g.idx(id)).map(|i| g.perms[i].clone()));
+    let groups = ab.mode_groups();
     match mode {
         // One mode of a modal ability, or forcing an ability past its condition.
-        Some(k) if k < ab.mode_ranges().len() || ab.cond != Cond::Always || ab.pay.is_some() => {
-            let mut ctx = Ctx {
+        Some(k) if k < groups.len() || ab.cond != Cond::Always || ab.pay.is_some() => {
+            let (text, card_restr) = if k < groups.len() && ab.modal {
+                ab.mode_text(k)
+            } else {
+                (ab.text.as_str(), ab.card_restr)
+            };
+            let ctx = Ctx {
                 ctrl: 0,
                 src,
                 snap: snapshot,
                 card: Some(&prep.cards[PROBED as usize]),
                 card_ref: Some((0, PROBED)),
                 subject: Some(bear),
-                text: &ab.text,
+                text,
                 until_eot: ab.until_eot,
                 overload: false,
+                card_restr,
                 x: None,
                 paid: None,
             };
-            if let Some(r) = ab.mode_ranges().get(k) {
-                // A mode reads its own bullet's text.
-                if ab.modal {
-                    ctx.text = ab.mode_text(k);
-                }
+            if let Some(r) = groups.get(k) {
                 for e in &ab.effects[r.clone()] {
                     g.apply(&ctx, e);
                 }
@@ -635,8 +638,8 @@ fn describe_abilities(prep: &Prepared, back: bool, out: &mut Vec<String>) {
             out.push("      (static: shown under \"On entering\")".into());
             continue;
         }
-        if ab.modal && ab.mode_ranges().len() > 1 {
-            for m in 0..ab.mode_ranges().len() {
+        if ab.modal && ab.mode_groups().len() > 1 {
+            for m in 0..ab.mode_groups().len() {
                 for line in fire(prep, k, back, Some(m)) {
                     out.push(format!("      mode {}: {}", m + 1, line));
                 }
