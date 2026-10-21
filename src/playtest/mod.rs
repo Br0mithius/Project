@@ -1059,7 +1059,7 @@ pub fn effect_handling(e: &crate::abilities::Effect) -> (&'static str, &'static 
             "the best instant/sorcery in your graveyard may be cast again (then exiled)",
         ),
         E::Rule(label) => {
-            if resolve::RULES_MODELLED.contains(&label.as_str()) {
+            if resolve::rule_modelled(label) {
                 ("approximated", "special rule acted on")
             } else {
                 (

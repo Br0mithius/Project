@@ -51,7 +51,14 @@ pub const RULES_MODELLED: &[&str] = &[
     "untaps your creatures",
     "steals the enchanted permanent",
     "fetches a card from outside the game",
+    "damage to you",
+    // and "you lose N life" (see `rule_modelled`)
 ];
+
+/// Is this `Effect::Rule` label one the simulator acts on?
+pub fn rule_modelled(label: &str) -> bool {
+    RULES_MODELLED.contains(&label) || label.starts_with("you lose ") && label.ends_with(" life")
+}
 
 impl<'a> Game<'a> {
     pub fn src_idx(&self, ctx: &Ctx) -> Option<usize> {
@@ -1560,6 +1567,21 @@ impl<'a> Game<'a> {
             // simply don't come back; the simulator's recursion only uses what's left there.
             "can't stay in a graveyard" | "exiles cards instead of the graveyard" => {}
             "stops all life gain" => {} // static, checked in `gain_life`
+            // Pain lands, Ancient Tomb, Sulfuric Vortex hitting its own controller.
+            "damage to you" => {
+                let n = text
+                    .split(" damage to you")
+                    .next()
+                    .and_then(|h| h.rsplit(' ').next())
+                    .and_then(|d| d.parse().ok())
+                    .unwrap_or(1);
+                self.lose_life(me, n);
+            }
+            l if l.starts_with("you lose ") => {
+                if let Some(n) = l.split_whitespace().nth(2).and_then(|d| d.parse().ok()) {
+                    self.lose_life(me, n);
+                }
+            }
             _ => {}
         }
     }
