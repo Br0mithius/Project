@@ -531,12 +531,27 @@ pub fn equip_target(g: &Game, me: usize, equip_id: u32) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-pub fn aura_target(g: &Game, p: usize, idx: u16) -> Option<usize> {
-    let c = &g.players[p].cards[idx as usize];
+pub fn aura_target(g: &Game, p: usize, card: CardRef) -> Option<usize> {
+    let c = g.card(card);
+    // "Enchanted permanent is a Construct creature with base power and toughness 5/5"
+    // (Puppet Crafting): one of our artifacts or enchantments that isn't a creature yet.
+    if c.attached_sets.is_some_and(|s| s.creature && !s.blank) {
+        return (0..g.perms.len())
+            .filter(|&i| {
+                let x = &g.perms[i];
+                x.ctrl as usize == p
+                    && x.is(T_ARTIFACT | T_ENCHANTMENT)
+                    && !x.is(T_AURA)
+                    && !x.is_creature()
+            })
+            .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap());
+    }
     let creatures: Vec<usize> = (0..g.perms.len())
         .filter(|&i| {
-            g.perms[i].is_creature()
-                && !(g.perms[i].ctrl as usize != p && g.perms[i].has(HEXPROOF | SHROUD))
+            let x = &g.perms[i];
+            x.is_creature()
+                && !(x.ctrl as usize != p
+                    && (x.has(HEXPROOF | SHROUD) || x.hexproof_from & c.colors != 0))
         })
         .collect();
     if c.harmful_aura {
@@ -904,7 +919,24 @@ fn is_counter(c: &SimCard) -> bool {
 }
 
 fn is_fog(c: &SimCard) -> bool {
-    c.is(T_INSTANT) && effects_of(c, false).any(|e| *e == Effect::Fog)
+    // (Time Stop ends the turn: no combat damage either.)
+    c.is(T_INSTANT)
+        && effects_of(c, false)
+            .any(|e| *e == Effect::Fog || matches!(e, Effect::Rule(l) if l == "ends the turn"))
+}
+
+/// Can `p` cast card `c` at instant speed right now: flash, or a rule that gives it (High
+/// Fae Trickster, Captain Mar-Vell after an opponent's spell, Radagast's first creature).
+pub fn has_flash(g: &Game, p: usize, c: &SimCard) -> bool {
+    if c.kw & FLASH != 0 {
+        return true;
+    }
+    let r = g.rules[p % 8];
+    r & R_FLASH_SPELLS != 0
+        || r & R_FLASH_AFTER_OPPONENT != 0 && g.cond_holds(&Cond::OpponentCastSpell, p, None)
+        || r & R_FIRST_CREATURE_FLASH != 0
+            && c.is(T_CREATURE)
+            && g.players[p].creature_spells_turn == 0
 }
 
 fn is_protection(c: &SimCard) -> bool {
@@ -1175,6 +1207,7 @@ fn effect_now(
         Effect::Untap(_) => 0.4,
         // Nothing to find, nothing gained.
         Effect::Tutor if tutor_choice(g, p, text, &card_restr).is_none() => 0.0,
+        Effect::Rule(l) => rule_now(g, p, l, src),
         Effect::Attach => {
             if equip_target(g, p, 0).is_some() {
                 0.8
@@ -1183,6 +1216,86 @@ fn effect_now(
             }
         }
         _ => effect_value(e),
+    }
+}
+
+/// What a special rule (`Effect::Rule`) the simulator plays is worth to `p` now.
+fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
+    let me = src.and_then(|id| g.idx(id));
+    match label {
+        // The back face's body and abilities against what it is now.
+        "transforms" => {
+            let Some(i) = me else { return 0.0 };
+            let x = &g.perms[i];
+            let Some(b) = x
+                .card
+                .and_then(|r| g.card(r).back.as_ref())
+                .filter(|_| !x.transformed)
+            else {
+                return 0.0;
+            };
+            let now = x.p.max(0) as f32
+                + 0.6 * x.t.max(0) as f32
+                + kw_value(x.eff_kw, x.p.max(0) as f32)
+                + engine_value(g.abilities_of(x));
+            let p2 = (b.power + x.counters).max(0) as f32;
+            let then = p2
+                + 0.6 * (b.toughness + x.counters).max(0) as f32
+                + kw_value(b.kw, p2)
+                + engine_value(&b.abilities);
+            then - now
+        }
+        "extra turn" => 6.0,
+        // Worth it before our attack, when an opponent has a blocker to stop.
+        "can't block this turn" => {
+            let attackers = g
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == p && x.is_creature() && !x.tapped && !x.sick)
+                .count();
+            let blockers = g
+                .perms
+                .iter()
+                .any(|x| x.ctrl as usize != p && x.is_creature() && !x.tapped);
+            if g.active == p && !g.in_combat && attackers > 0 && blockers {
+                0.8
+            } else {
+                0.0
+            }
+        }
+        "shuffles itself into its library" | "gives itself to an opponent" => {
+            -me.map_or(1.0, |i| perm_value(g, i) * 0.6)
+        }
+        "ends the turn" => 0.0,
+        "spells cost less this turn" | "the next spell this turn is free" => 1.0,
+        "attacks change until your next turn" => 1.5,
+        // A land or artifact that becomes a creature: worth it to attack with this turn.
+        "becomes a creature" => {
+            let ready = me.is_some_and(|i| {
+                let x = &g.perms[i];
+                !x.is_creature() && !x.tapped && !x.sick
+            });
+            if ready && g.active == p && !g.in_combat {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        // An ultimate: lasts the rest of the game.
+        "you get an emblem" => 6.0,
+        "gets +N/+N until your next turn" => 1.2,
+        // The Kingpin of Crime: the extra damage from creatures tougher than they're strong.
+        "assigns combat damage by toughness" => {
+            let combat = g.in_combat;
+            g.perms
+                .iter()
+                .filter(|x| x.ctrl as usize == p && x.is_creature() && (!combat || x.attacking))
+                .map(|x| (x.t - x.p.max(0)).max(0) as f32 * 0.3)
+                .sum()
+        }
+        // A 5/5 flier for an opponent.
+        "an opponent creates a creature token" => -3.0,
+        _ => effect_value(&Effect::Rule(label.to_string())),
     }
 }
 
@@ -1374,11 +1487,11 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
             v += if has_creature { 1.0 } else { 0.3 };
         }
         if c.is(T_AURA) {
-            if aura_target(g, p, idx).is_none() {
+            if aura_target(g, p, (p as u8, idx)).is_none() {
                 return 0.0;
             }
             if c.harmful_aura {
-                if let Some(t) = aura_target(g, p, idx) {
+                if let Some(t) = aura_target(g, p, (p as u8, idx)) {
                     v += perm_value(g, t) * 0.8;
                 }
             }
@@ -1463,7 +1576,7 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
         } else {
             1.0
         }
-    } else if c.is(T_CREATURE) && c.kw & FLASH != 0 {
+    } else if c.is(T_CREATURE) && has_flash(g, p, c) {
         c.value * 0.8
     } else if is_protection(c) {
         2.0
@@ -1513,6 +1626,28 @@ fn choose_land(g: &Game, p: usize) -> Option<usize> {
         })
 }
 
+/// A land `p` may play from outside the hand: (true, graveyard slot) with Mole Man or
+/// Muldrotha, (false, playable slot) from exile.
+fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
+    let pl = &g.players[p];
+    if g.rules[p % 8] & R_LANDS_FROM_GY != 0 && g.active == p {
+        let best = (0..pl.graveyard.len())
+            .filter(|&k| pl.cards[pl.graveyard[k] as usize].is(T_LAND))
+            .max_by_key(|&k| pl.cards[pl.graveyard[k] as usize].produces.count_ones());
+        if let Some(k) = best {
+            return Some((true, k));
+        }
+    }
+    (0..pl.playable.len())
+        .find(|&k| {
+            let x = &pl.playable[k];
+            x.card.0 as usize == p
+                && pl.cards[x.card.1 as usize].is(T_LAND)
+                && (!x.own_turn || g.active == p)
+        })
+        .map(|k| (false, k))
+}
+
 fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     let c = &g.players[p].cards[idx as usize];
     let teamwork = c
@@ -1529,7 +1664,7 @@ fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     {
         o.offspring = true;
     }
-    if (c.convoke || c.improvise) && post {
+    if (c.convoke || g.improvises(p, c)) && post {
         o.convoke = true;
     }
     let mana = g.mana_available(p);
@@ -1596,7 +1731,10 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             continue;
         }
         push_cast(&mut out, Src::Hand(h), idx, false, false);
-        if c.back.as_ref().is_some_and(|b| b.kind != BackKind::Prepare) {
+        if c.back
+            .as_ref()
+            .is_some_and(|b| b.kind != BackKind::Prepare && b.kind != BackKind::Transform)
+        {
             push_cast(&mut out, Src::Hand(h), idx, true, false);
         }
         // Cycling a dead card.
@@ -1622,8 +1760,34 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     for (k, &idx) in pl.adventure.iter().enumerate() {
         push_cast(&mut out, Src::Adventure(k), idx, false, false);
     }
+    // Cards in exile we may play (Thor's card, impulse draws, stashed cards).
+    for (k, x) in pl.playable.iter().enumerate() {
+        let (list, idx) = (x.card.0 as usize, x.card.1);
+        let c = &g.players[list].cards[idx as usize];
+        if list == p {
+            if c.is(T_LAND) {
+                continue;
+            }
+            push_cast(&mut out, Src::Exile(k), idx, false, false);
+        } else if !c.is(T_LAND) {
+            // An opponent's card: worth about what it is.
+            if let Some(cost) = g.cast_cost(p, Src::Exile(k), CastOpts::default()) {
+                if g.can_pay(p, &cost) {
+                    out.push((
+                        c.value,
+                        cost.total(),
+                        Act::Cast(Src::Exile(k), CastOpts::default()),
+                    ));
+                }
+            }
+        }
+    }
     for (k, &idx) in pl.graveyard.iter().enumerate() {
-        if pl.recast.contains(&idx) || pl.cards[idx as usize].flashback.is_some() {
+        let c = &pl.cards[idx as usize];
+        if pl.recast.contains(&idx)
+            || c.flashback.is_some()
+            || g.graveyard_type_free(p, c).is_some()
+        {
             push_cast(&mut out, Src::Graveyard(k), idx, false, false);
         }
         // Abilities that work from the graveyard ("{3}{B}, Exile this card from your
@@ -1749,17 +1913,18 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         // Equip: move gear to the best attacker.
         if x.is(T_EQUIPMENT) && (!post || x.attached.is_none()) {
             // Where it can go and what that costs ("Equip worthy {1}" only on a worthy one).
+            let fits = |t: usize| g.equip_cost(p, x.id, g.perms[t].id);
             let target = equip_target(g, p, x.id)
-                .filter(|&t| g.equip_cost(i, t).is_some())
+                .filter(|&t| fits(t).is_some())
                 .or_else(|| {
                     (0..g.perms.len())
                         .filter(|&t| {
                             let y = &g.perms[t];
-                            y.ctrl as usize == p && y.is_creature() && g.equip_cost(i, t).is_some()
+                            y.ctrl as usize == p && y.is_creature() && fits(t).is_some()
                         })
                         .max_by_key(|&t| g.perms[t].p)
                 });
-            let gear = target.and_then(|t| g.equip_cost(i, t).map(|(m, l)| (m, l, x.card, t)));
+            let gear = target.and_then(|t| fits(t).map(|(m, l)| (m, l, x.card, t)));
             if let Some((cost, life, r, t)) = gear {
                 let tid = g.perms[t].id;
                 if x.attached != Some(tid)
@@ -1798,7 +1963,7 @@ fn waits_for_combat(g: &Game, p: usize, act: &Act) -> bool {
     let Some((idx, back)) = g.spell_card(p, *src, *opts) else {
         return false;
     };
-    let c = &g.players[p].cards[idx as usize];
+    let c = &g.players[g.spell_list(p, *src)].cards[idx as usize];
     if back || !c.is(T_CREATURE) || c.kw & HASTE != 0 || matches!(src, Src::Command(_)) {
         return false;
     }
@@ -1876,7 +2041,7 @@ fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
         .hand
         .iter()
         .map(|&c| &pl.cards[c as usize])
-        .filter(|c| c.is(T_INSTANT) || c.kw & FLASH != 0)
+        .filter(|c| c.is(T_INSTANT) || has_flash(g, p, c))
         .map(|c| (reactive_value(g, p, c), c.cost.total()))
         .filter(|(v, _)| *v >= 1.5)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -1897,6 +2062,12 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
             return;
         }
         if g.players[p].lands_played < g.land_drops(p) {
+            // Lands from the graveyard (Mole Man, Muldrotha) or exile first: they're free
+            // cards; the hand's lands wait.
+            if let Some(k) = other_zone_land(g, p) {
+                g.play_land_from(p, k);
+                continue;
+            }
             if let Some(h) = choose_land(g, p) {
                 g.play_land(p, h);
                 continue;
@@ -1970,8 +2141,8 @@ fn hand_find(g: &Game, p: usize, f: impl Fn(&SimCard) -> bool) -> Option<usize> 
 }
 
 /// How bad it would be for `o` if the spell resolves.
-fn spell_threat(g: &Game, o: usize, caster: usize, idx: u16, back: bool) -> f32 {
-    let c = &g.players[caster].cards[idx as usize];
+fn spell_threat(g: &Game, o: usize, caster: usize, card: CardRef, back: bool) -> f32 {
+    let c = g.card(card);
     let w = weight(g, o, caster);
     if !back && c.is_permanent() {
         return c.value * w * 0.8;
@@ -2006,9 +2177,10 @@ fn spell_threat(g: &Game, o: usize, caster: usize, idx: u16, back: bool) -> f32 
 }
 
 /// Opponents may counter a spell `caster` just cast. True if it was countered.
-pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bool {
+/// Opponents may counter the spell `card` (whose card list it's in, index) `caster` cast.
+pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) -> bool {
     let n = g.players.len();
-    let spell = &g.players[caster].cards[idx as usize];
+    let spell = g.card(card);
     let spell_types = if back {
         spell.back.as_ref().map(|b| b.types).unwrap_or(T_SORCERY)
     } else {
@@ -2052,7 +2224,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, idx: u16, back: bool) -> bo
             .filter(|&&c| is_counter(&g.players[o].cards[c as usize]))
             .count();
         let threshold = if counters_in_hand > 1 { 3.5 } else { 4.5 };
-        if spell_threat(g, o, caster, idx, back) < threshold {
+        if spell_threat(g, o, caster, card, back) < threshold {
             continue;
         }
         let counter_idx = g.players[o].hand[h];
@@ -2175,7 +2347,7 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
         }
     }
     // Flash creatures as surprise blockers.
-    if let Some(h) = hand_find(g, d, |c| c.is(T_CREATURE) && c.kw & FLASH != 0) {
+    if let Some(h) = hand_find(g, d, |c| c.is(T_CREATURE) && has_flash(g, d, c)) {
         g.cast(d, Src::Hand(h), CastOpts::default());
     }
 }
@@ -2191,7 +2363,7 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
             .hand
             .iter()
             .map(|&c| &pl.cards[c as usize])
-            .filter(|c| c.is(T_INSTANT) || c.kw & FLASH != 0)
+            .filter(|c| c.is(T_INSTANT) || has_flash(g, p, c))
             .map(|c| c.name.clone())
             .collect();
         let mana = g.mana_available(p);
@@ -2210,7 +2382,7 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
         let mut best: Option<(f32, usize)> = None;
         for h in 0..pl.hand.len() {
             let c = &pl.cards[pl.hand[h] as usize];
-            let instant_speed = c.is(T_INSTANT) || c.kw & FLASH != 0;
+            let instant_speed = c.is(T_INSTANT) || has_flash(g, p, c);
             if !instant_speed || is_reactive_only(c) {
                 continue;
             }
@@ -2344,7 +2516,9 @@ pub(crate) fn fight(a: &Perm, b: &Perm) -> (bool, bool) {
     let a_first = a.has(FIRST_STRIKE | DOUBLE_STRIKE) && !b.has(FIRST_STRIKE | DOUBLE_STRIKE);
     let b_first = b.has(FIRST_STRIKE | DOUBLE_STRIKE) && !a.has(FIRST_STRIKE | DOUBLE_STRIKE);
     let kills = |s: &Perm, t: &Perm| {
-        s.p > 0 && !t.has(INDESTRUCTIBLE) && (s.has(DEATHTOUCH) || s.p >= t.t - t.damage)
+        s.p > 0
+            && !t.has(INDESTRUCTIBLE | NO_DAMAGE)
+            && (s.has(DEATHTOUCH) || s.p >= t.t - t.damage)
     };
     let a_kills = kills(a, b);
     let b_kills = kills(b, a);
@@ -2353,8 +2527,8 @@ pub(crate) fn fight(a: &Perm, b: &Perm) -> (bool, bool) {
     (attacker_dies, blocker_dies)
 }
 
-fn dmg_of(x: &Perm) -> i32 {
-    x.p.max(0) as i32 * if x.has(DOUBLE_STRIKE) { 2 } else { 1 }
+fn dmg_of(g: &Game, x: &Perm) -> i32 {
+    g.combat_power(x).max(0) as i32 * if x.has(DOUBLE_STRIKE) { 2 } else { 1 }
 }
 
 /// How `d` blocks: kill-and-survive first, good trades, double blocks on big threats,
@@ -2440,7 +2614,7 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
     // 4. Chump only if the unblocked damage would kill us (life, commander damage, poison).
     let pl = &g.players[d];
     let lethal = |un: &[usize]| {
-        let dmg: i32 = un.iter().map(|&a| dmg_of(&g.perms[a])).sum();
+        let dmg: i32 = un.iter().map(|&a| dmg_of(g, &g.perms[a])).sum();
         let poison: i32 = un
             .iter()
             .filter_map(|&a| g.perms[a].card.map(|r| g.card(r).toxic as i32))
@@ -2448,11 +2622,11 @@ pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)>
         let cmd = un.iter().any(|&a| {
             let x = &g.perms[a];
             x.commander > 0
-                && pl.cmd_damage[x.ctrl as usize][x.commander as usize % 3] + dmg_of(x) >= 21
+                && pl.cmd_damage[x.ctrl as usize][x.commander as usize % 3] + dmg_of(g, x) >= 21
         });
         dmg >= pl.life || pl.poison as i32 + poison >= 10 || cmd
     };
-    unblocked.sort_by_key(|&a| -dmg_of(&g.perms[a]));
+    unblocked.sort_by_key(|&a| -dmg_of(g, &g.perms[a]));
     let mut k = 0;
     while lethal(&unblocked[k..]) && k < unblocked.len() {
         let a = unblocked[k];
@@ -2485,7 +2659,9 @@ fn attack_gain(g: &Game, me: usize, a: usize, o: usize, taken: &[u32]) -> f32 {
         })
         .collect();
     let menace = at.has(MENACE) && blockers.len() < 2;
-    let mut worst = dmg_of(at) as f32 * 0.6 * w; // unblocked
+    // Unblocked (Jace: creatures attacking this player get -5/-0).
+    let through = (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
+    let mut worst = through as f32 * 0.6 * w;
     if !menace {
         for &b in &blockers {
             let (ad, bd) = fight(at, &g.perms[b]);
@@ -2535,7 +2711,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
             let evasive = at.has(FLYING | UNBLOCKABLE)
                 && !(0..g.perms.len()).any(|b| g.perms[b].ctrl as usize == o && g.can_block(b, a));
             if evasive || nb == 0 {
-                through += dmg_of(at);
+                through += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
             } else {
                 nb -= 1;
                 if at.has(TRAMPLE) {
@@ -2557,9 +2733,17 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
     // Group plan: send a group at one opponent, predict their blocks with the blocking AI,
     // drop attackers that would just die, and keep the best opponent's plan.
     let mut best_plan: Option<(f32, usize, Vec<usize>)> = None;
+    // Attack taxes (Propaganda): only as many attackers as the mana pays for, and the mana
+    // isn't free.
+    let mana = g.mana_available(me);
+    let tax_of = |o: usize| g.attack_tax(o);
     for &o in &opps {
         let w = weight(g, me, o);
         let mut group: Vec<usize> = ready.iter().copied().filter(|&a| goad_ok(a, o)).collect();
+        let tax = tax_of(o);
+        if tax > 0 {
+            group.truncate((mana / tax) as usize);
+        }
         for _ in 0..4 {
             if group.is_empty() {
                 break;
@@ -2585,7 +2769,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                     .filter_map(|(b, _)| g.idx(*b))
                     .collect();
                 if bl.is_empty() {
-                    value += dmg_of(at) as f32 * 0.6 * w;
+                    value += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32
+                        * 0.6
+                        * w;
                     continue;
                 }
                 // Blocked: what dies on each side.
@@ -2611,6 +2797,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                 }
                 value += net;
             }
+            value -= tax as f32 * 0.35 * group.len() as f32;
             if bad.is_empty() {
                 if value > 0.2 && best_plan.as_ref().is_none_or(|b| value > b.0) {
                     best_plan = Some((value, o, group.clone()));
@@ -2630,6 +2817,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
         }
     }
     // Everyone else: one at a time, at another player or a planeswalker.
+    let mut spent: u32 = best_plan
+        .as_ref()
+        .map_or(0, |(_, o, group)| tax_of(*o) * group.len() as u32);
     for &a in &ready {
         if out.iter().any(|(id, _)| *id == g.perms[a].id) {
             continue;
@@ -2638,8 +2828,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
         let choices: Vec<usize> = opps.iter().copied().filter(|&o| goad_ok(a, o)).collect();
         let mut best: Option<(f32, Def)> = None;
         for &o in &choices {
-            let v = attack_gain(g, me, a, o, &[]);
-            if best.is_none_or(|b| v > b.0) {
+            let tax = tax_of(o);
+            let v = attack_gain(g, me, a, o, &[]) - tax as f32 * 0.35;
+            if (tax == 0 || spent + tax <= mana) && best.is_none_or(|b| v > b.0) {
                 best = Some((v, Def::Player(o)));
             }
             // Their planeswalkers.
@@ -2662,6 +2853,9 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
         }
         if let Some((v, d)) = best {
             if v > 0.2 || g.must_attack(a) {
+                if let Def::Player(o) = d {
+                    spent += tax_of(o);
+                }
                 out.push((at.id, d));
                 gains.push((v, a));
             }
@@ -2677,7 +2871,7 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
                 .perms
                 .iter()
                 .filter(|x| x.ctrl as usize == o && x.is_creature() && !x.has(DEFENDER))
-                .map(|x| dmg_of(x))
+                .map(|x| dmg_of(g, x))
                 .sum();
             // They may pick us; the biggest threat to us counts in full.
             (power as f32 * (0.5 + 0.5 / others)) as i32
@@ -2773,7 +2967,7 @@ pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
                     .iter()
                     .filter(|x| x.blockers.is_empty() && g.def_player(x.def) == Some(d))
                     .filter_map(|x| g.idx(x.attacker))
-                    .map(|i| dmg_of(&g.perms[i]))
+                    .map(|i| dmg_of(g, &g.perms[i]))
                     .sum();
                 if total < g.players[d].life && total + dp as i32 >= g.players[d].life {
                     let id = g.perms[a].id;

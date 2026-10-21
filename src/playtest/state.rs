@@ -111,6 +111,28 @@ pub struct Perm {
     pub eff_kw: u32,
     pub ward: u8,
     pub protection: u8,
+    /// Hexproof from these colours (bits 0-4) or instants (bit 5), from its card.
+    pub hexproof_from: u8,
+    /// A transforming double-faced card showing its back face.
+    pub transformed: bool,
+    /// Lost all its abilities to an Aura ("enchanted creature loses all abilities"), worked
+    /// out by `recalc`.
+    pub blank: bool,
+    /// Made a creature by an Aura ("enchanted permanent is a Construct creature"), by `recalc`.
+    pub animated: bool,
+    /// A creature until end of turn ("this land becomes a 0/0 Elemental creature until end of
+    /// turn").
+    pub temp_creature: bool,
+    /// "Has base power and toughness 4/5 until end of turn".
+    pub temp_base: Option<(i16, i16)>,
+    /// "When this creature dies, return it to the battlefield tapped" until end of turn:
+    /// `RETURNS` plus `RETURNS_COUNTER` (Undying Malice: with a +1/+1 counter) or
+    /// `RETURNS_TREASURE` (Fake Your Own Death: and you create a Treasure).
+    pub returns_on_death: u8,
+    /// The card named as it entered (Sorcerous Spyglass).
+    pub named: Option<CardRef>,
+    /// "+N/+M until your next turn": (power, toughness, whose next turn ends it).
+    pub till: Option<(i16, i16, u8)>,
 }
 
 impl Perm {
@@ -119,7 +141,7 @@ impl Perm {
     }
 
     pub fn is_creature(&self) -> bool {
-        self.is(T_CREATURE) || self.crewed
+        self.is(T_CREATURE) || self.crewed || self.animated || self.temp_creature
     }
 
     pub fn has(&self, kw: u32) -> bool {
@@ -184,6 +206,53 @@ pub struct Player<'a> {
     pub last_ability: Option<Pending>,
     pub mulligans: u8,
     pub px: PlayerExtra,
+    /// Extra turns to take after this one (Kang).
+    pub extra_turns: u8,
+    /// This is an extra turn in which power-up abilities can't be activated.
+    pub no_powerups: bool,
+    /// Creature and noncreature spells cast this turn.
+    pub creature_spells_turn: u8,
+    pub noncreature_spells_turn: u8,
+    /// Permanent types already cast from the graveyard this turn (Muldrotha), and whether
+    /// a land was played from there.
+    pub gy_types_used: u16,
+    /// Cards in exile this player may play: Thor's exiled card, impulse draws, stashed cards.
+    pub playable: Vec<Playable>,
+    /// "Creatures you control with toughness greater than their power assign combat damage
+    /// equal to their toughness" this turn (The Kingpin of Crime).
+    pub toughness_damage_turn: bool,
+    /// Emblems: (the card that gave it, index into its `SimCard::emblems`).
+    pub emblems: Vec<(CardRef, u16)>,
+    /// Equip abilities activated this turn (Kíli: the first may cost {0}).
+    pub equips_turn: u8,
+    /// "Artifact spells you cast this turn cost {1} less": (amount, card types).
+    pub turn_reduction: Vec<(u8, u16)>,
+    /// "The next red or green creature spell you cast this turn can be cast without paying
+    /// its mana cost": (colours, card types) it must have.
+    pub free_next: Option<(u8, u16)>,
+    /// Until this player's next turn: creatures attacking them get this much power
+    /// (Jace: -5), and their own attackers get +P/+T and trample (Garruk).
+    pub attacked_power: i16,
+    pub attack_bonus: Option<(i16, i16, u32)>,
+}
+
+pub const RETURNS: u8 = 1;
+pub const RETURNS_COUNTER: u8 = 2;
+pub const RETURNS_TREASURE: u8 = 4;
+
+/// `Pending::ability` values from here on are emblem abilities (`SimCard::emblems`).
+pub const EMBLEM_BASE: u16 = 0x4000;
+
+/// A card in exile its holder may play: (whose list, index), until the end of the turn of
+/// player `until.1` in round `until.0`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Playable {
+    pub card: CardRef,
+    pub until: (u32, u8),
+    /// "Only during your turn" (stash counters).
+    pub own_turn: bool,
+    /// "Pay life equal to its mana value rather than pay its mana cost" (Inside Information).
+    pub pay_life: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -280,6 +349,10 @@ pub struct Game<'a> {
     /// Cards the last draw effect drew ("the number of cards drawn this way").
     pub last_drawn: i32,
     pub ext: GameExtra,
+    /// Rule-changing statics (`R_*`) each player has from their permanents (`recalc`).
+    pub rules: [u32; 8],
+    /// "End the turn" (Time Stop): the rest of the turn is skipped.
+    pub end_turn: bool,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -365,9 +438,6 @@ pub struct PlayerExtra {
     pub noncombat_damaged_turn: bool,
     /// Cards milled from this player's library this turn.
     pub milled_turn: u16,
-    /// Cards in hand that may only be played until a turn ends ("exile the top card; you
-    /// may play it this turn"): (card, last turn number), exiled afterwards.
-    pub impulse: Vec<(u16, u32)>,
     /// The creature type chosen "as ~ enters" (the deck's most common one).
     pub chosen_type: Option<String>,
     /// The graveyard as the turn began (what's new in it was put there this turn).
@@ -526,13 +596,60 @@ impl<'a> Game<'a> {
 
     /// The abilities a permanent has.
     pub fn abilities_of(&self, perm: &Perm) -> &'a [SimAbility] {
-        if perm.no_abilities {
+        if perm.no_abilities || perm.blank {
             return &[];
         }
         match (perm.tok, perm.card) {
-            (Tok::None | Tok::Creature | Tok::Other, Some(r)) => &self.card(r).abilities,
+            (Tok::None | Tok::Creature | Tok::Other, Some(r)) => {
+                let c = self.card(r);
+                match (&c.back, perm.transformed) {
+                    (Some(b), true) => &b.abilities,
+                    _ => &c.abilities,
+                }
+            }
             (t, _) => token_abilities(t),
         }
+    }
+
+    /// The rule-changing statics (`R_*`) a permanent has.
+    pub fn perm_rules(&self, perm: &Perm) -> u32 {
+        if perm.no_abilities || perm.blank {
+            return 0;
+        }
+        match (perm.tok, perm.card) {
+            (Tok::None | Tok::Creature | Tok::Other, Some(r)) => {
+                let c = self.card(r);
+                match (&c.back, perm.transformed) {
+                    (Some(b), true) => b.rules,
+                    _ => c.rules,
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// Does any player's permanent have this rule (`R_*`)?
+    pub fn rule_anywhere(&self, bit: u32) -> bool {
+        self.rules.iter().any(|r| r & bit != 0)
+    }
+
+    /// The combat damage creature `x` assigns: its power, or its toughness under Ghalta the
+    /// Immovable / The Kingpin of Crime, or its negative power as positive (Loot).
+    pub fn combat_power(&self, x: &Perm) -> i16 {
+        let c = x.ctrl as usize;
+        if x.t > x.p
+            && (self
+                .rules
+                .get(c)
+                .is_some_and(|r| r & R_TOUGHNESS_DAMAGE != 0)
+                || self.players[c].toughness_damage_turn)
+        {
+            return x.t;
+        }
+        if x.p < 0 && self.perm_rules(x) & R_NEGATIVE_POWER != 0 {
+            return -x.p;
+        }
+        x.p
     }
 
     pub fn idx(&self, id: u32) -> Option<usize> {
@@ -564,14 +681,46 @@ impl<'a> Game<'a> {
     pub fn recalc(&mut self) {
         self.tick += 1;
         for x in self.perms.iter_mut() {
-            x.p = x.base_p + x.counters + x.temp_p;
-            x.t = x.base_t + x.counters + x.temp_t;
+            let (bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+            let (tp, tt) = x.till.map_or((0, 0), |t| (t.0, t.1));
+            x.p = bp + x.counters + x.temp_p + tp;
+            x.t = bt + x.counters + x.temp_t + tt;
             x.eff_kw = x.kw | x.temp_kw;
             x.locked = x.lock_effect;
+            x.blank = false;
+            x.animated = false;
             if let Some(r) = x.card {
                 let c = &self.players[r.0 as usize].cards[r.1 as usize];
                 x.ward = c.ward;
                 x.protection = c.protection;
+                x.hexproof_from = c.hexproof_from;
+            }
+        }
+        // Auras that make their permanent something else ("loses all abilities and is a 1/1
+        // Skeleton", "is a 5/5 Construct creature"): before other statics, which a blanked
+        // creature no longer has.
+        let mut sets = Vec::new();
+        for x in &self.perms {
+            if let (Some(r), Some(a)) = (x.card, x.attached) {
+                if let Some(s) = self.card(r).attached_sets.filter(|_| !x.no_abilities) {
+                    sets.push((a, s));
+                }
+            }
+        }
+        for (a, s) in sets {
+            let Some(i) = self.idx(a) else { continue };
+            let x = &mut self.perms[i];
+            x.p = s.power + x.counters + x.temp_p;
+            x.t = s.toughness + x.counters + x.temp_t;
+            if s.creature && !x.is(T_CREATURE) {
+                x.animated = true;
+            }
+            if s.blank {
+                x.blank = true;
+                x.eff_kw = x.temp_kw;
+                x.ward = 0;
+                x.protection = 0;
+                x.hexproof_from = 0;
             }
         }
         // Collect static effects first (they read the board), then apply.
@@ -583,7 +732,7 @@ impl<'a> Game<'a> {
             if let Some(cda) = src
                 .card
                 .and_then(|r| self.card(r).cda.as_ref())
-                .filter(|_| !src.no_abilities)
+                .filter(|_| !src.no_abilities && !src.blank)
             {
                 let k = self
                     .count_of(src.ctrl as usize, Some(src.id), &cda.phrase)
@@ -765,6 +914,31 @@ impl<'a> Game<'a> {
         for (t, n) in wards {
             self.perms[t].ward = self.perms[t].ward.max(n);
         }
+        // Emblems' static abilities ("creatures you control get +2/+2").
+        for p in 0..self.players.len() {
+            for &(r, k) in &self.players[p].emblems {
+                let Some((_, a)) = self.card(r).emblems.get(k as usize) else {
+                    continue;
+                };
+                if a.trig != Trig::Static {
+                    continue;
+                }
+                for e in &a.effects {
+                    let (dp, dt, kw) = match e {
+                        Effect::Pump {
+                            power, toughness, ..
+                        } => (*power as i16, *toughness as i16, 0),
+                        Effect::Grant { keywords, .. } => (0, 0, keyword_bits(keywords)),
+                        _ => continue,
+                    };
+                    for (i, x) in self.perms.iter().enumerate() {
+                        if x.ctrl as usize == p && x.is_creature() {
+                            mods.push((i, dp, dt, kw, false));
+                        }
+                    }
+                }
+            }
+        }
         for (i, dp, dt, kw, lock) in mods {
             let x = &mut self.perms[i];
             x.p += dp;
@@ -775,6 +949,16 @@ impl<'a> Game<'a> {
                 x.locked = true;
             }
         }
+        // Rule-changing statics, per controller.
+        let mut rules = [0u32; 8];
+        for x in &self.perms {
+            if x.card
+                .is_some_and(|r| self.card(r).rules != 0 || self.card(r).back.is_some())
+            {
+                rules[x.ctrl as usize % 8] |= self.perm_rules(x);
+            }
+        }
+        self.rules = rules;
         // Enduring story (Storied): three or more artifacts, legendaries and/or Sagas.
         for p in 0..self.players.len() {
             if !self.players[p].enduring_story {
@@ -988,6 +1172,16 @@ impl<'a> Game<'a> {
                             && !(other && src.is_some_and(|s| self.perms[s].id == x.id))
                     })
             }
+            Cond::TappedCreatureToTarget => self
+                .perms
+                .iter()
+                .any(|x| x.ctrl as usize != p && x.is_creature() && x.tapped),
+            Cond::AttackingCreatureToTarget(nontoken) => self
+                .perms
+                .iter()
+                .any(|x| x.ctrl as usize != p && x.attacking && !(*nontoken && x.is_token())),
+            Cond::GainedLifeAtLeast(n) => pl.life_gained_turn >= *n,
+            Cond::CastNoncreatureThisTurn => pl.noncreature_spells_turn > 0,
             // Can't be checked: decided once per check, deterministically from the round.
             Cond::Chance(f) => {
                 ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f
@@ -1095,6 +1289,7 @@ impl<'a> Game<'a> {
                 let c = self.card(card);
                 so.spell_types != 0
                     && (so.spell_types == ANY_TYPE || c.is(so.spell_types))
+                    && !c.is(so.spell_not)
                     && chosen(&so.spell_sub).is_none_or(|s| c.has_subtype(&s))
                     && !(so.not_from_hand && from_hand)
             }
@@ -1264,7 +1459,9 @@ impl<'a> Game<'a> {
                     self.emit(Ev::Draw, p, None);
                 }
                 None => {
-                    self.players[p].alive = false;
+                    if !self.cant_lose(p) {
+                        self.players[p].alive = false;
+                    }
                     return;
                 }
             }
@@ -1320,15 +1517,13 @@ impl<'a> Game<'a> {
     pub fn leave(&mut self, i: usize, to: Zone, _sba: bool) {
         let perm = self.perms.remove(i);
         self.last_left = Some(perm.clone());
-        // A finality counter: dying exiles it instead (no dies triggers); so does "if a
-        // creature an opponent controls would die, exile it instead" (Garruk, Veiled Butcher).
-        let exiled_instead = perm.is_creature()
-            && self.opponents(perm.ctrl as usize).into_iter().any(|o| {
-                self.controls_static(o, None, |t| {
-                    t.contains("if a creature an opponent controls would die, exile it instead")
-                })
-            });
-        let to = if (perm.finality || exiled_instead) && matches!(to, Zone::Graveyard) {
+        // A finality counter, or Garruk ("if a creature an opponent controls would die,
+        // exile it instead"): dying exiles it instead (no dies triggers).
+        let garruk = perm.is_creature()
+            && self.rule_anywhere(R_OPP_DIE_EXILE)
+            && (0..self.players.len())
+                .any(|o| o != perm.ctrl as usize && self.rules[o % 8] & R_OPP_DIE_EXILE != 0);
+        let to = if (perm.finality || garruk) && matches!(to, Zone::Graveyard) {
             Zone::Exile
         } else {
             to
@@ -1361,15 +1556,15 @@ impl<'a> Game<'a> {
         }
         // Dies / leaves triggers of the permanent itself.
         if let Some(r) = perm.card {
-            if to_gy && perm.tok == Tok::None && !perm.no_abilities {
-                let abilities = &self.card(r).abilities;
+            if to_gy && perm.tok == Tok::None {
+                let abilities = self.abilities_of(&perm);
                 for (ai, a) in abilities.iter().enumerate() {
                     if a.trig == Trig::Dies {
                         self.pending.push(Pending {
                             ctrl: perm.ctrl,
                             source: None,
                             card: r,
-                            back: false,
+                            back: perm.transformed,
                             ability: ai as u16,
                             snapshot: Some(perm.clone()),
                             subject: None,
@@ -1420,6 +1615,30 @@ impl<'a> Game<'a> {
                 self.leave(fi, Zone::Graveyard, true);
             }
         }
+        // "When this creature dies, return it to the battlefield tapped under its owner's
+        // control with a +1/+1 counter on it" (Undying Malice).
+        if let (true, true, Some(r), Tok::None) = (
+            perm.returns_on_death != 0,
+            creature && to_gy,
+            perm.card,
+            perm.tok,
+        ) {
+            let owner = perm.owner as usize;
+            let pl = &mut self.players[owner];
+            if let Some(k) = pl.graveyard.iter().rposition(|&c| c == r.1) {
+                pl.graveyard.remove(k);
+                if let Some(i) = self.enter_card(r.0 as usize, r.1, owner, false) {
+                    self.perms[i].tapped = true;
+                    if perm.returns_on_death & RETURNS_COUNTER != 0 {
+                        self.perms[i].counters += 1;
+                    }
+                    self.recalc();
+                }
+                if perm.returns_on_death & RETURNS_TREASURE != 0 {
+                    self.make_item(perm.ctrl as usize, "treasure");
+                }
+            }
+        }
     }
 
     /// Destroys a permanent (indestructible and shield counters stop it). True if it left.
@@ -1450,6 +1669,10 @@ impl<'a> Game<'a> {
             return;
         }
         let x = &mut self.perms[i];
+        // "Prevent all damage that would be dealt to ~" (Black Panther).
+        if x.has(NO_DAMAGE) {
+            return;
+        }
         if x.is(T_PLANESWALKER) && !x.is_creature() {
             x.loyalty -= n;
             return;
@@ -1547,6 +1770,15 @@ impl<'a> Game<'a> {
             eff_kw: kw,
             ward: 0,
             protection: 0,
+            hexproof_from: 0,
+            transformed: false,
+            blank: false,
+            animated: false,
+            temp_creature: false,
+            temp_base: None,
+            returns_on_death: 0,
+            named: None,
+            till: None,
         };
         match tok {
             Tok::Jace => {
@@ -1592,6 +1824,14 @@ impl<'a> Game<'a> {
             if !self.cond_holds(cond, ctrl, Some(i)) {
                 self.perms[i].tapped = true;
             }
+        }
+        // "Creatures your opponents control enter tapped" (Authority of the Consuls).
+        if c.is(T_CREATURE)
+            && self.rule_anywhere(R_OPP_CREATURES_TAPPED)
+            && (0..self.players.len())
+                .any(|o| o != ctrl && self.rules[o % 8] & R_OPP_CREATURES_TAPPED != 0)
+        {
+            self.perms[i].tapped = true;
         }
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
@@ -1656,7 +1896,7 @@ impl<'a> Game<'a> {
                     } else {
                         k
                     };
-                    let k = k + self.counter_bonus(ctrl, i);
+                    let k = k + i32::from(self.rules[ctrl % 8] & R_EXTRA_COUNTER != 0);
                     self.perms[i].counters += k as i16;
                 }
                 "shield" => self.perms[i].shield += k as u8,
@@ -1671,17 +1911,12 @@ impl<'a> Game<'a> {
     pub fn after_enter(&mut self, i: usize) {
         let id = self.perms[i].id;
         let ctrl = self.perms[i].ctrl as usize;
-        // "Creatures your opponents control enter tapped" (Authority of the Consuls).
-        if self.perms[i].is_creature()
-            && self.opponents(ctrl).into_iter().any(|o| {
-                self.controls_static(o, None, |t| {
-                    t.contains("creatures your opponents control enter tapped")
-                })
-            })
-        {
-            self.perms[i].tapped = true;
-        }
         let snap = self.perms[i].clone();
+        // "Artifacts and creatures entering the battlefield don't cause abilities to
+        // trigger" (Karn, Argent Defender; it counts as it enters itself).
+        let hushed = snap.is(T_ARTIFACT | T_CREATURE)
+            && (self.rule_anywhere(R_NO_ETB_TRIGGERS)
+                || self.perm_rules(&snap) & R_NO_ETB_TRIGGERS != 0);
         if let Some(r) = snap.card.filter(|_| snap.tok == Tok::None) {
             let c = self.card(r);
             // Legend rule: keep the newer one.
@@ -1700,7 +1935,8 @@ impl<'a> Game<'a> {
                 }
             }
             for (ai, a) in c.abilities.iter().enumerate() {
-                let fire = a.trig == Trig::Enters || (a.trig == Trig::Chapter(1) && c.is(T_SAGA));
+                let fire = a.trig == Trig::Enters && !hushed
+                    || (a.trig == Trig::Chapter(1) && c.is(T_SAGA));
                 if fire {
                     self.pending.push(Pending {
                         ctrl: ctrl as u8,
@@ -1724,13 +1960,41 @@ impl<'a> Game<'a> {
                     self.perms[e].other_counters = 1;
                 }
             }
+            // "As ~ enters, look at an opponent's hand, then choose any card name"
+            // (Sorcerous Spyglass): the opponents' most valuable permanent with activated
+            // abilities.
+            if c.rules & R_NAMES_CARD != 0 {
+                let named = (0..self.perms.len())
+                    .filter(|&j| {
+                        let y = &self.perms[j];
+                        y.ctrl as usize != ctrl
+                            && y.card.is_some()
+                            && self.abilities_of(y).iter().any(|a| {
+                                matches!(
+                                    a.trig,
+                                    Trig::Activated { .. } | Trig::Loyalty(_) | Trig::PowerUp(_)
+                                ) && !a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))
+                            })
+                    })
+                    .max_by(|&a, &b| {
+                        super::ai::perm_value(self, a)
+                            .partial_cmp(&super::ai::perm_value(self, b))
+                            .unwrap()
+                    })
+                    .and_then(|j| self.perms[j].card);
+                if let Some(e) = self.idx(id) {
+                    self.perms[e].named = named;
+                }
+            }
         }
-        if snap.is(T_LAND) {
+        if snap.is(T_LAND) && !hushed {
             self.emit(Ev::Landfall, ctrl, Some(id));
         }
-        self.emit_about(Ev::OtherEnters, ctrl, &snap);
-        if snap.is_token() {
-            self.emit(Ev::Tokens, ctrl, Some(id));
+        if !hushed {
+            self.emit_about(Ev::OtherEnters, ctrl, &snap);
+            if snap.is_token() {
+                self.emit(Ev::Tokens, ctrl, Some(id));
+            }
         }
         self.recalc();
     }
@@ -1741,6 +2005,29 @@ impl<'a> Game<'a> {
     pub fn emit(&mut self, ev: Ev, p: usize, subject: Option<u32>) {
         if ev == Ev::Discard {
             self.players[p].discarded_turn = self.players[p].discarded_turn.saturating_add(1);
+            // Tinybones: "whenever an opponent discards a card, exile it from their graveyard
+            // with a stash counter on it" - the card just discarded.
+            if self.rule_anywhere(R_STASH) {
+                let thief = (0..self.players.len()).find(|&q| {
+                    q != p
+                        && self.players[q].alive
+                        && self
+                            .perms
+                            .iter()
+                            .any(|x| x.ctrl as usize == q && self.perm_rules(x) & R_STASH != 0)
+                });
+                if let Some(q) = thief {
+                    if let Some(c) = self.players[p].graveyard.pop() {
+                        self.players[p].exile.push(c);
+                        self.players[q].playable.push(Playable {
+                            card: (p as u8, c),
+                            until: (u32::MAX, q as u8),
+                            own_turn: true,
+                            pay_life: false,
+                        });
+                    }
+                }
+            }
         }
         let snap = subject
             .and_then(|id| self.idx(id))
@@ -1909,6 +2196,38 @@ impl<'a> Game<'a> {
         for (si, ai) in fired {
             self.perms[si].fired |= 1 << ai;
         }
+        // Emblems ("whenever you cast a spell, draw a card").
+        for (o, pl) in self.players.iter().enumerate() {
+            if !pl.alive {
+                continue;
+            }
+            for &(r, k) in &pl.emblems {
+                let Some((_, a)) = self.card(r).emblems.get(k as usize) else {
+                    continue;
+                };
+                let Trig::Event(kind, f) = &a.trig else {
+                    continue;
+                };
+                if *kind != ev || f.yours.is_some_and(|y| y != (o == p)) {
+                    continue;
+                }
+                add.push(Pending {
+                    ctrl: o as u8,
+                    source: None,
+                    card: r,
+                    back: false,
+                    ability: EMBLEM_BASE + k,
+                    snapshot: None,
+                    subject: subject.map(|s| s.id),
+                    teamwork: false,
+                    gift: false,
+                    from_graveyard: false,
+                    kicked: false,
+                    overloaded: false,
+                    x: None,
+                });
+            }
+        }
         // Cards that work from the graveyard ("whenever a land you control enters, you may
         // pay {1}{G}{U}. If you do, return ~ from your graveyard to your hand").
         for (o, pl) in self.players.iter().enumerate() {
@@ -1960,6 +2279,11 @@ impl<'a> Game<'a> {
     /// Fires the spell-cast triggers: "whenever you cast", prowess, extort.
     pub fn on_cast(&mut self, p: usize, card: &SimCard) {
         self.players[p].spells_this_turn += 1;
+        if card.is(T_CREATURE) {
+            self.players[p].creature_spells_turn += 1;
+        } else {
+            self.players[p].noncreature_spells_turn += 1;
+        }
         // Build a stand-in permanent to match filters against the spell.
         let probe = Perm {
             ctrl: p as u8,
@@ -2067,6 +2391,15 @@ impl<'a> Game<'a> {
             eff_kw: 0,
             ward: 0,
             protection: 0,
+            hexproof_from: 0,
+            transformed: false,
+            blank: false,
+            animated: false,
+            temp_creature: false,
+            temp_base: None,
+            returns_on_death: 0,
+            named: None,
+            till: None,
         }
     }
 
@@ -2106,11 +2439,7 @@ impl<'a> Game<'a> {
                     || (x.is(T_PLANESWALKER)
                         && !x.is_creature()
                         && x.loyalty <= 0
-                        // "Planeswalkers you control aren't put into their owners' graveyards
-                        // for having 0 loyalty" (Sanctum Lurker).
-                        && !self.controls_static(x.ctrl as usize, None, |t| {
-                            t.contains("aren't put into their owners' graveyards for having 0 loyalty")
-                        }))
+                        && self.rules[x.ctrl as usize % 8] & R_WALKERS_STAY == 0)
                     || (x.is(T_AURA)
                         && x.attached
                             .is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))
@@ -2154,13 +2483,9 @@ impl<'a> Game<'a> {
 
     /// "You can't lose the game" (Herald of Eternal Dawn).
     pub fn cant_lose(&self, p: usize) -> bool {
-        self.perms.iter().any(|x| {
-            x.ctrl as usize == p
-                && self
-                    .abilities_of(x)
-                    .iter()
-                    .any(|a| a.trig == Trig::Static && a.text.contains("you can't lose the game"))
-        })
+        self.perms
+            .iter()
+            .any(|x| x.ctrl as usize == p && self.perm_rules(x) & R_CANT_LOSE != 0)
     }
 
     /// Does player `p` control a permanent (other than `not`) with a static ability of this
@@ -2203,39 +2528,6 @@ impl<'a> Game<'a> {
             }
         }
         out
-    }
-
-    /// At cleanup: impulse-drawn cards whose time is up go to exile.
-    pub fn end_turn_extra(&mut self) {
-        let now = self.ext.turn_no;
-        for pl in self.players.iter_mut() {
-            let (done, keep): (Vec<(u16, u32)>, Vec<(u16, u32)>) =
-                pl.px.impulse.iter().partition(|e| e.1 <= now);
-            pl.px.impulse = keep;
-            for (c, _) in done {
-                if let Some(h) = pl.hand.iter().position(|&x| x == c) {
-                    pl.hand.remove(h);
-                    pl.exile.push(c);
-                }
-            }
-        }
-    }
-
-    /// The last turn number of "until the end of your next turn" for player `p`.
-    pub fn next_turn_end(&self, p: usize) -> u32 {
-        if self.active == p {
-            return self.ext.turn_no + self.alive_count() as u32;
-        }
-        let n = self.players.len();
-        let mut k = 0;
-        let mut o = self.active;
-        while o != p && k < n {
-            o = (o + 1) % n;
-            if self.players[o].alive {
-                k += 1;
-            }
-        }
-        self.ext.turn_no + k as u32
     }
 
     pub fn alive_count(&self) -> usize {
