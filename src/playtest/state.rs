@@ -357,6 +357,9 @@ pub struct Game<'a> {
 
 pub const NO_CARD: u16 = u16::MAX;
 
+/// `Perm::fired` bit: Ramos-style counter mana was used this turn.
+pub const COUNTER_MANA_USED: u32 = 1 << 31;
+
 /// Something set up to happen later ("at the beginning of the next end step, return it").
 #[derive(Debug, Clone)]
 pub enum Delayed {
@@ -1195,7 +1198,16 @@ impl<'a> Game<'a> {
     pub fn sources(&self, p: usize) -> Vec<(usize, u8, u8, bool)> {
         let mut out = Vec::new();
         for (i, x) in self.perms.iter().enumerate() {
-            if x.ctrl as usize != p || x.tapped {
+            if x.ctrl as usize != p {
+                continue;
+            }
+            // Ramos: removing counters needs no tap, once each turn.
+            if let Some((need, colors, amount)) = x.card.and_then(|r| self.card(r).counter_mana) {
+                if x.counters >= need && x.fired & COUNTER_MANA_USED == 0 {
+                    out.push((i, colors, amount, false));
+                }
+            }
+            if x.tapped {
                 continue;
             }
             match x.tok {
@@ -1352,6 +1364,19 @@ impl<'a> Game<'a> {
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8)> {
         let srcs = self.sources(p);
         let mut used = vec![false; srcs.len()];
+        // Ramos' ten mana of mixed colours can pay several coloured pips at once.
+        let is_multi = |s: &(usize, u8, u8, bool)| {
+            self.perms[s.0]
+                .card
+                .is_some_and(|r| self.card(r).counter_mana.is_some())
+        };
+        // Only allocated when such a source exists (payment planning is hot).
+        let multi: Vec<bool> = if srcs.iter().any(is_multi) {
+            srcs.iter().map(is_multi).collect()
+        } else {
+            vec![false; srcs.len()]
+        };
+        let mut left: Vec<u32> = srcs.iter().map(|s| s.2 as u32).collect();
         let mut pips = cost.pips;
         // Most constrained colour first.
         let mut order: Vec<usize> = (0..5).filter(|&c| pips[c] > 0).collect();
@@ -1362,10 +1387,17 @@ impl<'a> Game<'a> {
                 let pick = srcs
                     .iter()
                     .enumerate()
-                    .filter(|(i, s)| !used[*i] && s.1 & (1 << c) != 0)
+                    .filter(|(i, s)| {
+                        (!used[*i] || multi[*i] && left[*i] > 0) && s.1 & (1 << c) != 0
+                    })
                     .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
                     .map(|(i, _)| i);
                 match pick {
+                    Some(i) if multi[i] => {
+                        used[i] = true;
+                        pips[c] -= 1;
+                        left[i] -= 1;
+                    }
                     Some(i) => {
                         used[i] = true;
                         pips[c] -= 1;
@@ -1394,6 +1426,11 @@ impl<'a> Game<'a> {
                 None => return None,
             }
         }
+        // What's left of a multi-pip source already in use pays generic.
+        extra_generic += (0..srcs.len())
+            .filter(|&i| multi[i] && used[i])
+            .map(|i| left[i])
+            .sum::<u32>();
         let mut need = (cost.generic as u32).saturating_sub(extra_generic);
         let mut pool = self.players[p].pool;
         while need > 0 && pool > 0 {
@@ -1436,6 +1473,14 @@ impl<'a> Game<'a> {
         for i in idxs {
             if matches!(self.perms[i].tok, Tok::Treasure | Tok::Lotus) {
                 sac.push(self.perms[i].id);
+            } else if let Some((need, ..)) = self.perms[i]
+                .card
+                .and_then(|r| self.card(r).counter_mana)
+                .filter(|_| self.perms[i].fired & COUNTER_MANA_USED == 0)
+                .filter(|(need, ..)| self.perms[i].counters >= *need)
+            {
+                self.perms[i].counters -= need;
+                self.perms[i].fired |= COUNTER_MANA_USED;
             } else {
                 self.perms[i].tapped = true;
             }

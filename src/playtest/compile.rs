@@ -1075,6 +1075,9 @@ pub struct SimCard {
     pub mana_ability: bool,
     /// What its mana ability counts ("Elf you control", "~'s power"), if it does.
     pub mana_count: Option<String>,
+    /// "Remove N +1/+1 counters from ~: Add {W}{W}{U}{U}..." once each turn (Ramos):
+    /// (counters needed, colours, mana made).
+    pub counter_mana: Option<(i16, u8, u8)>,
     pub abilities: Vec<SimAbility>,
     pub back: Option<BackFace>,
     /// Rough worth of the card on its own (for the AI's quick estimates).
@@ -1212,6 +1215,27 @@ fn types_of(type_line: &str) -> u16 {
         }
     }
     bits
+}
+
+/// "Remove five +1/+1 counters from ~: add {w}{w}{u}{u}..." as a mana source.
+fn counter_mana_of(abilities: &[SimAbility]) -> Option<(i16, u8, u8)> {
+    abilities.iter().find_map(|a| {
+        let t = &a.text;
+        let rest = t.strip_prefix("remove ")?;
+        let (n, rest) = rest.split_once(" +1/+1 counters from ~: add ")?;
+        let need = number_word(n)? as i16;
+        let syms = crate::card::symbols_in(rest.split('.').next().unwrap_or(""));
+        let mut colors = 0u8;
+        for s in &syms {
+            if let Some(k) = crate::card::COLORS
+                .iter()
+                .position(|c| s.len() == 1 && s.eq_ignore_ascii_case(&c.to_string()))
+            {
+                colors |= 1 << k;
+            }
+        }
+        (colors != 0).then_some((need, colors, syms.len().min(255) as u8))
+    })
 }
 
 fn number_word(w: &str) -> Option<u8> {
@@ -3509,6 +3533,7 @@ pub fn compile(card: &Card) -> SimCard {
         extra_cost: extra_cost_of(&abilities),
         mana_ability,
         mana_count,
+        counter_mana: counter_mana_of(&abilities),
         abilities,
         back: back_face(card, parsed),
         value: 0.0,

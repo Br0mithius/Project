@@ -2749,3 +2749,25 @@ fn attack_modifiers_until_your_next_turn() {
     g.combat(0);
     assert!(g.players[1].life <= 0, "a 7/7 trampler");
 }
+
+#[test]
+fn ramos_counters_pay_for_spells_once_each_turn() {
+    let db = db();
+    let d = prep_db(&db, &["Ramos, Dragon Engine"]);
+    let mut g = game(&[&d, &d]);
+    let ramos = put(&mut g, 0, 0);
+    let ten = Mana::parse("{W}{W}{U}{U}{B}{B}{R}{R}{G}{G}");
+    assert!(!g.can_pay(0, &ten), "no counters, no mana");
+    let i = g.idx(ramos).unwrap();
+    g.perms[i].counters = 6;
+    g.perms[i].tapped = true;
+    assert!(
+        g.can_pay(0, &ten),
+        "five counters make ten mana, even while tapped"
+    );
+    assert!(g.pay(0, &ten));
+    assert_eq!(perm(&g, ramos).counters, 1, "five counters removed");
+    let i = g.idx(ramos).unwrap();
+    g.perms[i].counters = 6;
+    assert!(!g.can_pay(0, &Mana::parse("{W}")), "only once each turn");
+}
