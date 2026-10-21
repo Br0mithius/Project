@@ -713,8 +713,8 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         When::Activated(c) => Trig::Activated {
             mana: c.mana.min(255) as u8,
             tap: c.tap,
-            sac_self: c.sacrifice && (t.contains("sacrifice ~") || t.contains("sacrifice this")),
-            sac_other: c.sacrifice && !(t.contains("sacrifice ~") || t.contains("sacrifice this")),
+            sac_self: c.sacrifice && !c.discard,
+            sac_other: c.sacrifice_other,
             discard: c.discard,
             life: if c.life {
                 number_after(t, "pay").unwrap_or(2)

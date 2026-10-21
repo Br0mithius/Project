@@ -743,7 +743,7 @@ const MECHANICS: &[Mechanic] = &[
             let outlet = p.abilities.iter().any(|a| {
                 a.when
                     .iter()
-                    .any(|w| matches!(w, When::Activated(cost) if cost.sacrifice))
+                    .any(|w| matches!(w, When::Activated(cost) if cost.sacrifice_other))
             });
             let dies = p.abilities.iter().any(|a| a.is(&When::Dies));
             (yes(outlet) + 0.7 * yes(p.makes_creature_tokens()) + 0.6 * yes(dies)).min(1.0)

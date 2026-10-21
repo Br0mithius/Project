@@ -142,6 +142,10 @@ fn read_target(phrase: &str, mass: bool) -> Target {
     } else if p.starts_with("nonland permanent") || p.starts_with("noncreature, nonland permanent")
     {
         Kind::NonlandPermanent
+    } else if p.starts_with("noncreature artifact") {
+        Kind::Artifact
+    } else if p.starts_with("noncreature enchantment") {
+        Kind::Enchantment
     } else if p.contains(" or creature")
         || p.contains(", or creature")
         || p.contains("or creature with")
@@ -166,7 +170,7 @@ fn read_target(phrase: &str, mass: bool) -> Target {
         Kind::Player
     } else if p.contains("spell") && !p.contains("creature") {
         Kind::Spell
-    } else if p.contains("creature") {
+    } else if p.replace("noncreature", "").contains("creature") {
         Kind::Creature
     } else if p.starts_with('~') || p.starts_with("it ") || p == "it" {
         Kind::It
@@ -437,7 +441,10 @@ pub struct Cost {
     /// Total mana.
     pub mana: u32,
     pub tap: bool,
+    /// Sacrifices (or discards) the card itself: the ability is one-shot.
     pub sacrifice: bool,
+    /// Sacrifices something else (a sacrifice outlet).
+    pub sacrifice_other: bool,
     pub discard: bool,
     pub life: bool,
     /// Exile cards, remove counters, return to hand...
@@ -460,8 +467,11 @@ impl Cost {
         }
         let t = text.to_lowercase();
         // Sacrificing or discarding the card itself makes the ability one-shot.
-        c.sacrifice =
-            t.contains("sacrifice") || t.contains("discard ~") || t.contains("discard this card");
+        c.sacrifice = t.contains("sacrifice ~")
+            || t.contains("sacrifice this")
+            || t.contains("discard ~")
+            || t.contains("discard this card");
+        c.sacrifice_other = t.contains("sacrifice") && !c.sacrifice;
         c.discard = t.contains("discard");
         c.life = t.contains("life");
         c.other = c.other || t.contains("exile") || t.contains("remove") || t.contains("return");
@@ -683,7 +693,7 @@ fn patterns() -> &'static Patterns {
             shrink_all: re(r"(?:all |each )?((?:other )?creatures(?: [a-z' ]*?)?(?:your opponents control|you don't control|an opponent controls)?|(?:all|each) [^.;]*?) gets? -(\d+|x)/-(\d+|x)"),
             bounce: re(r"return (?:up to {N} |one or two )?(?:(other|another) )?target ([^.;]*?) to (?:its|their) owners?(?:'s|s'|')? hands?"),
             bounce_all: re(r"return (?:all|each) ([^.;]*?) to (?:its|their) owners?(?:'s|s'|')? hands?"),
-            tap_lock: re(r"(?:tap (?:up to {N} )?(?:target ([^.;]*?)|(enchanted creature))(?:\.|$|,| and )|(enchanted creature|target creature[^.;]*?) (?:can't attack or block|can't block|can't attack|loses all abilities|doesn't untap))"),
+            tap_lock: re(r"(?:\btap (?:up to {N} )?(?:target ([^.;]*?)|(enchanted creature))(?:\.|$|,| and )|(enchanted creature|target creature[^.;]*?) (?:can't attack or block|can't block|can't attack|loses all abilities|doesn't untap))"),
             edict: re(r"(each opponent|target opponent|target player|each player|each other player) sacrifices? (?:[a-z]+|\d+) (?:nontoken )?(creatures?|nonland permanents?|permanents?|creature or planeswalker)"),
             draw: re(r"(?:(target player|each player|that player|its controller) )?draws? (?:{N} cards?|cards equal to|a card for each|x cards)"),
             tokens: re(r"creates? (?:([a-z' ]+?), a (?:legendary )?|{N} (?:tapped )?)(\d+|x)/(\d+|x) ([^.;]*?)tokens?(?: with ([^.;]*))?"),
@@ -695,7 +705,7 @@ fn patterns() -> &'static Patterns {
             item_tokens: re(r"creates? {N} (?:tapped )?(?:colorless )?(treasure|food|clue|map|blood|powerstone|junk|gold|incubator|heartwood|equipment)"),
             counters: re(r"put {N} \+1/\+1 counters?(?: and [^.;]*?)? on (?:up to (?:a|an|one|two|three|four|x|\d+) )?([^.;]*)"),
             pump: re(r"([^.;,]*?) gets? \+(\d+|x)/([+-](?:\d+|x))(?: and (?:gains?|has|have) ([^.;]*?))?( until end of turn)?(?:\.|$|,| for | as long| and )"),
-            grant: re(r#"([^.;,]*?) (?:gains?|has|have) ([a-z ,{}0-9]*?(?:flying|indestructible|hexproof|first strike|double strike|trample|menace|lifelink|deathtouch|vigilance|haste|reach|ward|prowess|protection from [a-z]+)[a-z ,{}0-9]*?)( until end of turn)?(?:\.|$| as long| and ")"#),
+            grant: re(r#"([^.;,]*?) (?:gains?|has|have) ([a-z ,{}0-9]*?(?:flying|indestructible|hexproof|first strike|double strike|trample|menace|lifelink|deathtouch|vigilance|haste|reach|ward|prowess|protection from [a-z]+)[a-z ,{}0-9]*?)( until end of turn)?(?:\.|$| as long| and "| and can't)"#),
             gain_life: re(r"(?:you |and )gains? (\d+|x|that much) life|you gain life equal to"),
             drain: re(r"(each opponent|target opponent|target player|each player|that player|defending player|its controller) loses? (\d+|x|that much) life|deals? (\d+|x) damage to (each opponent|target opponent|target player or planeswalker|each player)"),
             add_mana: re(r"add (\{[^}]+\}(?:(?:, | or |)\{[^}]+\})*|[a-z]+ mana|mana)"),
@@ -718,14 +728,40 @@ fn amount(s: &str, line: &str) -> Amount {
 /// Reads one effect sentence into effects. Returns None if nothing in it was recognised.
 fn read_effects(sentence: &str) -> Vec<Effect> {
     let p = patterns();
-    let s = sentence;
+    let full = sentence;
+    let mut core = sentence.to_string();
+    // "becomes a copy of ..., except he has vigilance": the exceptions describe the copy.
+    if let Some(i) = core.find("becomes a copy of") {
+        if let Some(j) = core[i..].find(", except") {
+            core.truncate(i + j);
+        }
+    }
+    // Abilities in quotes on a token ("with \"Landfall - put a +1/+1 counter on ~\"")
+    // belong to the token, not this card.
+    if core.contains("token") && core.contains('"') {
+        let mut kept = String::new();
+        let mut inside = false;
+        for ch in core.chars() {
+            if ch == '"' {
+                inside = !inside;
+            } else if !inside {
+                kept.push(ch);
+            }
+        }
+        core = kept;
+    }
+    let s = core.as_str();
     let mut out = Vec::new();
     // Mass removal first, so "destroy all creatures" isn't also read as single-target.
     for c in p.destroy_all.captures_iter(s) {
         out.push(Effect::Destroy(read_target(&c[1], true)));
     }
     for c in p.exile_all.captures_iter(s) {
-        if !c[1].starts_with("cards") && !c[1].contains("graveyard") {
+        if !c[1].starts_with("cards")
+            && !c[1].starts_with("the cards")
+            && !c[1].contains("graveyard")
+            && !c[1].contains("from your hand")
+        {
             out.push(Effect::Exile {
                 target: read_target(&c[1], true),
                 until: false,
@@ -772,12 +808,25 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         }
     }
     for c in p.damage.captures_iter(s) {
-        let amt = if c[1].starts_with("damage equal") || c[1] == *"that much" || c[1] == *"damage" {
+        let amt = if c[1].contains("number of +1/+1 counters") {
+            // Grows over the game from small numbers.
+            Amount { n: 2, x: true }
+        } else if c[1].starts_with("damage equal") || c[1] == *"that much" || c[1] == *"damage" {
             Amount { n: 3, x: true }
         } else {
             amount(&c[1], s)
         };
         let to = &c[2];
+        if to.starts_with("that creature's controller")
+            || to.starts_with("its controller")
+            || to.starts_with("that player")
+        {
+            out.push(Effect::Drain {
+                amount: amt,
+                each: false,
+            });
+            continue;
+        }
         if to.contains("and each opponent") {
             out.push(Effect::Drain {
                 amount: amt,
@@ -900,6 +949,13 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     if loot {
         out.push(Effect::Loot);
     }
+    // Conniving also grows the creature when a nonland card is discarded.
+    if s.contains("connive") {
+        out.push(Effect::PlusCounters {
+            amount: Amount::fixed(1),
+            to: Target::it(),
+        });
+    }
     for c in p.draw.captures_iter(s) {
         if loot && c.get(0).is_some_and(|m| m.as_str().contains("a card")) {
             continue;
@@ -937,12 +993,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     let before = out.len();
     // "Its controller creates a 3/3 Beast" (Beast Within, Pongify) gives the token away.
     let given_away = |start: usize| {
-        let head = &s[..start];
+        let head = &full[..start];
         head.ends_with("its controller ")
             || head.ends_with("that player ")
             || head.ends_with("their controller ")
     };
-    for c in p.tokens.captures_iter(s) {
+    for c in p.tokens.captures_iter(full) {
         if given_away(c.get(0).unwrap().start()) {
             continue;
         }
@@ -970,7 +1026,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         });
     }
     if out.len() == before {
-        for c in p.tokens_plain.captures_iter(s) {
+        for c in p.tokens_plain.captures_iter(full) {
             if given_away(c.get(0).unwrap().start()) {
                 continue;
             }
@@ -992,13 +1048,19 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             });
         }
     }
-    for c in p.item_tokens.captures_iter(s) {
+    for c in p.item_tokens.captures_iter(full) {
         if given_away(c.get(0).unwrap().start()) {
             continue;
         }
+        // "a Food token or a Treasure token": a choice - the Treasure is the better one.
+        let kind = if full.contains("food token or a treasure token") {
+            "treasure".to_string()
+        } else {
+            c[2].to_string()
+        };
         out.push(Effect::ItemTokens {
             amount: amount(&c[1], s),
-            kind: c[2].to_string(),
+            kind,
         });
     }
     for c in p.counters.captures_iter(s) {
@@ -1022,7 +1084,8 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     for c in p.pump.captures_iter(s) {
         let who = c[1].trim();
         let to = pump_target(who);
-        let pw = amount(&c[2], s).n;
+        // "+1/+0 for each other artifact you control": counts something on the board.
+        let pw = amount(&c[2], s).n * if s.contains("for each") { 2 } else { 1 };
         let t = if c[3].starts_with('-') {
             -amount(&c[3][1..], s).n
         } else {
@@ -1102,7 +1165,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         };
         out.push(Effect::AddMana(Amount::fixed(n)));
     }
-    if s.contains("search your library for") {
+    if s.contains("search your library") {
         if s.contains("land card")
             || s.contains("basic land")
             || s.contains("forest")
@@ -1131,10 +1194,17 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         out.push(Effect::Regrowth);
     }
     if s.contains("untap target") || s.contains("untap up to") || s.contains("untap all") {
-        out.push(Effect::Untap(read_target(
-            "creature",
-            s.contains("untap all"),
-        )));
+        let phrase = s
+            .split("untap ")
+            .nth(1)
+            .unwrap_or("creature")
+            .trim_start_matches("all ")
+            .trim_start_matches("up to one ")
+            .trim_start_matches("up to two ")
+            .trim_start_matches("target ");
+        out.push(Effect::Untap(read_target(phrase, s.contains("untap all"))));
+    } else if s.contains("untap that creature") || s.starts_with("untap it") {
+        out.push(Effect::Untap(read_target("creature you control", false)));
     }
     if s.contains("gain control of") {
         out.push(Effect::GainControl(read_target(
@@ -1145,11 +1215,14 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             false,
         )));
     }
-    if s.contains("copy target")
-        || s.contains("copy that spell")
-        || s.contains("copy it")
-        || s.contains("create a token that's a copy")
-        || s.contains("copy of")
+    let token_copy = s.contains("token that's a copy")
+        || s.contains("tokens that are copies")
+        || s.contains("token copy");
+    if !token_copy
+        && (s.contains("copy target")
+            || s.contains("copy that spell")
+            || s.contains("copy it")
+            || s.contains("copy of"))
     {
         out.push(Effect::Copy);
     }
@@ -1171,7 +1244,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     if s.contains("goad") {
         out.push(Effect::Goad);
     }
-    if s.contains("proliferate") {
+    if s.contains("proliferate") || s.contains("another counter of that kind") {
         out.push(Effect::Proliferate);
     }
     if s.contains("additional combat phase") {
@@ -1194,7 +1267,11 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     for c in p.other_counters.captures_iter(s) {
         let kind = c[1].trim().to_string();
-        if kind.contains("+1/+1") || kind.ends_with("+1") {
+        if kind.contains("+1/+1")
+            || kind.ends_with("+1")
+            || kind.starts_with("or ")
+            || kind.starts_with("more")
+        {
             continue;
         }
         // Keyword counters (CR 122.1b) give the keyword.
@@ -1226,18 +1303,25 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             .or(c.get(2))
             .map(|m| m.as_str())
             .unwrap_or("creature");
-        out.push(Effect::Exile {
-            target: read_target(phrase, false),
-            until: false,
-        });
+        let target = read_target(phrase, false);
+        // "Second from the top or on the bottom": the owner picks, and redraws it soon -
+        // closer to bouncing it than to exiling it.
+        if s.contains("from the top") {
+            out.push(Effect::Bounce(target));
+        } else {
+            out.push(Effect::Exile {
+                target,
+                until: false,
+            });
+        }
     }
     if s.contains("attach ") {
         out.push(Effect::Attach);
     }
-    if s.contains("twice that many")
-        || s.contains("that many plus one")
-        || s.contains("double the number of")
-    {
+    if s.contains("that many plus one") {
+        // One extra counter or token each time (Hardened Scales), weaker than doubling.
+        out.push(Effect::Doubler("plus one".into()));
+    } else if s.contains("twice that many") || s.contains("double the number of") {
         out.push(Effect::Doubler(if s.contains("token") {
             "tokens".into()
         } else {
@@ -1256,7 +1340,8 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     if (s.contains("look at the top")
         || s.contains("reveal the top")
-        || s.contains("reveal cards from the top"))
+        || s.contains("reveal cards from the top")
+        || s.contains("from among the milled cards"))
         && (s.contains("into your hand") || s.contains("in your hand"))
     {
         out.push(Effect::Dig);
@@ -1277,12 +1362,18 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     {
         out.push(Effect::Dig);
     }
+    if s.contains("play lands from the top of your library") {
+        out.push(Effect::Dig);
+    }
     if s.contains("untap ~") {
         out.push(Effect::Untap(Target::it()));
     }
-    if s.contains("return it to the battlefield")
+    // "Exile ... then return it to the battlefield" is a flicker (already read above), not
+    // bringing something back from the graveyard.
+    if (s.contains("return it to the battlefield")
         || s.contains("return that card to the battlefield")
-        || s.contains("return them to the battlefield")
+        || s.contains("return them to the battlefield"))
+        && !out.contains(&Effect::Blink)
     {
         out.push(Effect::Reanimate);
     }
@@ -1297,6 +1388,7 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     if s.contains("can't be blocked")
         && !s.contains("can't be blocked except")
+        && !s.contains("by more than")
         && !s.contains("as long as")
     {
         let to = if let Some(i) = s.find("target ") {
@@ -1360,6 +1452,10 @@ const RULES: &[(&str, &str)] = &[
     ("poison counter", "gives poison counters"),
     ("base power and toughness", "sets base power/toughness"),
     ("players can't gain life", "stops all life gain"),
+    (
+        "creatures with flying can't attack you or block",
+        "flyers can't attack you or block your creatures",
+    ),
     ("put its counters on", "moves its counters"),
     (
         "gains control of target permanent you control",
@@ -1550,6 +1646,16 @@ fn pump_target(who: &str) -> Target {
     }
     if who.contains("equipped creature") || who.contains("enchanted creature") {
         return read_target("creature you control", false);
+    }
+    // "Other Villains you control", "Heroes you control": a team boost for that type.
+    if let Some(head) = who.strip_suffix(" you control") {
+        let head = head.trim();
+        if head.ends_with('s') && !head.ends_with("creatures") {
+            let mut t = read_target("creature you control", true);
+            t.other = head.contains("other");
+            t.restricted = true;
+            return t;
+        }
     }
     if who.contains("all creatures") || who.contains("each creature") {
         return read_target("creature", true);
@@ -1789,10 +1895,11 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
             out.keywords.extend(kws);
             continue;
         }
-        // "Choose one —" (or "When ~ enters, choose two —") with bullet modes after it.
+        // "Choose one —" (or "When ~ enters, choose two —", "Choose one. If ..., choose both
+        // instead.", "When you do, choose up to that many.") with bullet modes after it.
         let choose_at = line.find("choose ");
         if let Some(choose_at) = choose_at
-            && (line.ends_with('—') || line.ends_with('-'))
+            && (line.ends_with('—') || line.ends_with('-') || line.ends_with('.'))
             && i < lines.len()
             && lines[i].starts_with('•')
         {
@@ -1816,7 +1923,29 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                     body_effects(m, &mut e);
                     a.effects.extend(e);
                 }
-                a.modal = true;
+                // Modes that only pick targets ("• Target creature card.") with the effect in
+                // the header ("Choose up to two. Return those cards ... to your hand.").
+                if a.effects.is_empty() {
+                    if let Some((_, rest)) = line[choose_at..].split_once(". ") {
+                        let times = if line.contains("choose two") || line.contains("up to two") {
+                            2
+                        } else {
+                            1
+                        };
+                        let mut e = read_effects(rest);
+                        body_effects(rest, &mut e);
+                        for _ in 0..times {
+                            a.effects.extend(e.iter().cloned());
+                        }
+                    }
+                    a.modal = false;
+                } else {
+                    a.modal = true;
+                }
+                // A mode with a cost of its own ("Remove a counter ... If you do, draw a card").
+                if modes.iter().any(|m| m.contains("if you do")) {
+                    a.conditional = true;
+                }
                 if a.when.is_empty() {
                     a.when = vec![if is_spell { When::Spell } else { When::Static }];
                 }
@@ -1836,6 +1965,11 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
                 if let Some(base) =
                     read_line(&line, card, is_spell).filter(|a| !a.effects.is_empty())
                 {
+                    let mut base = base;
+                    // "X if <condition>. Otherwise, Y": X needs the condition too.
+                    if lines[i - 1].contains(". otherwise, ") {
+                        base.conditional = true;
+                    }
                     out.abilities.push(base);
                     let mut alt = alt;
                     alt.conditional = true;
@@ -1869,24 +2003,42 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
 /// instead")). Replacement effects ("if ... would ..., ... instead") are left alone: they
 /// aren't alternatives to an earlier sentence.
 fn split_instead(line: &str) -> (String, Option<String>) {
+    // "X if <condition>. Otherwise, Y." - two alternatives (HYDRA Troopers).
+    if let Some(i) = line.find(". otherwise, ") {
+        let sentence = line[i + 2..].trim().trim_end_matches('.');
+        let alt_body = sentence.trim_start_matches("otherwise, ");
+        if !sentence.contains(". ") {
+            let base = format!("{}.", &line[..i]);
+            return (
+                base.clone(),
+                Some(with_same_start(&base, &format!("if not, {}", alt_body))),
+            );
+        }
+    }
     let Some(i) = line.find(". if ") else {
         return (line.to_string(), None);
     };
     let sentence = line[i + 2..].trim().trim_end_matches('.');
-    if !sentence.ends_with("instead") || sentence.contains(" would ") || sentence.contains(". ") {
+    // "If <condition>, Y instead." and "If <condition>, instead Y." (Cruel Alliance).
+    let instead_form = sentence.ends_with("instead") || sentence.contains(", instead ");
+    if !instead_form || sentence.contains(" would ") || sentence.contains(". ") {
         return (line.to_string(), None);
     }
+    let sentence = sentence.replace(", instead ", ", ");
     let base = format!("{}.", &line[..i]);
-    let alt =
-        if base.starts_with("when ") || base.starts_with("whenever ") || base.starts_with("at ") {
-            let (trigger, _) = split_trigger(&base);
-            format!("{}, {}", trigger, sentence)
-        } else if let Some((cost, _)) = activated_split(&base) {
-            format!("{}: {}", cost, sentence)
-        } else {
-            sentence.to_string()
-        };
-    (base, Some(alt))
+    (base.clone(), Some(with_same_start(&base, &sentence)))
+}
+
+/// Puts `sentence` behind the same trigger or cost as `base` ("When ~ enters, " / "{2}: ").
+fn with_same_start(base: &str, sentence: &str) -> String {
+    if base.starts_with("when ") || base.starts_with("whenever ") || base.starts_with("at ") {
+        let (trigger, _) = split_trigger(base);
+        format!("{}, {}", trigger, sentence)
+    } else if let Some((cost, _)) = activated_split(base) {
+        format!("{}: {}", cost, sentence)
+    } else {
+        sentence.to_string()
+    }
 }
 
 /// Splits a triggered ability into (trigger, rest) at the first comma outside the trigger
@@ -1921,8 +2073,19 @@ fn read_trigger(trigger: &str) -> Vec<When> {
     if self_subject && t.contains("deals combat damage") {
         w.push(When::CombatDamage);
     }
+    // Becoming tapped is mostly attacking (or tapping it for an ability).
+    if self_subject && t.contains("becomes tapped") && w.is_empty() {
+        w.push(When::Attacks);
+    }
+    // "When you cast this spell, copy it": part of casting the spell, not an engine.
+    if t.contains("you cast ~") || t.contains("you cast this spell") {
+        return vec![When::Spell];
+    }
     if !w.is_empty() {
         return w;
+    }
+    if t.contains("become tapped") || t.contains("becomes tapped") {
+        return vec![When::Event(Event::OthersAttack)];
     }
     let event = if t.contains("you cast") || t.contains("you copy") {
         let what = t.split("you cast").nth(1).unwrap_or("").trim().to_string();
@@ -1967,8 +2130,11 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
     // Ability words ("Landfall — Whenever ...") only label the ability (CR 207.2c); MSH also
     // uses flavour labels ("Radar Sense — ...").
     let mut power_up = false;
+    // Infinity Stones' "∞ —" abilities only work once the stone is harnessed.
+    let mut harness = false;
     if let Some((label, rest)) = line.split_once(" — ") {
         let label = label.trim();
+        harness = label == "∞";
         if label == "power-up" {
             power_up = true;
             line = rest.to_string();
@@ -2074,6 +2240,35 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
     // Self-referential "enters prepared" lines are statics on the face.
     if ability.effects.is_empty() && line.contains("prepared") {
         ability.effects.push(Effect::Prepared);
+    }
+    if harness || line.contains("activate only if") {
+        ability.conditional = true;
+    }
+    // Drawing that costs a card first ("{T}, Discard a card: Draw a card..."; "You may
+    // sacrifice an artifact or discard a card. If you do, draw two cards") nets one card
+    // fewer: the first draw only replaces what was paid.
+    let costs_a_card = matches!(ability.when.first(), Some(When::Activated(c)) if c.discard)
+        || (body.contains("discard a card") || body.contains("sacrifice an artifact"))
+            && body.contains("if you do, draw");
+    if costs_a_card && !ability.effects.contains(&Effect::Loot) {
+        if let Some(pos) = ability
+            .effects
+            .iter()
+            .position(|e| matches!(e, Effect::Draw { you: true, .. }))
+        {
+            let n = match &ability.effects[pos] {
+                Effect::Draw { amount, .. } => amount.n,
+                _ => 1,
+            };
+            ability.effects[pos] = if n <= 1 {
+                Effect::Loot
+            } else {
+                Effect::Draw {
+                    amount: Amount::fixed(n - 1),
+                    you: true,
+                }
+            };
+        }
     }
     let _ = card;
     Some(ability)
@@ -2563,8 +2758,13 @@ impl Parsed {
     pub fn ramps(&self) -> bool {
         self.effects().any(|(a, e)| {
             matches!(e, Effect::FetchLand { battlefield: true })
-                || matches!(e, Effect::AddMana(_)) && !a.text.contains("spend this mana only")
+                || matches!(e, Effect::AddMana(_))
+                    && !a.text.contains("spend this mana only")
+                    && !a.text.contains("can't be spent")
+                // A Treasure bought with mana ("{2}, {T}: create a Treasure") stores mana
+                // rather than adding it.
                 || matches!(e, Effect::ItemTokens { kind, .. } if kind == "treasure")
+                    && !a.when.iter().any(|w| matches!(w, When::Activated(c) if c.mana > 0))
         })
     }
 
