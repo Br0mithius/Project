@@ -14,6 +14,7 @@
 pub mod ai;
 pub mod combat;
 pub mod compile;
+pub mod lab;
 pub mod probe;
 pub mod resolve;
 #[cfg(test)]

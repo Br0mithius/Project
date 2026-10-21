@@ -9,6 +9,7 @@ pub mod db;
 pub mod deck;
 pub mod edhrec;
 pub mod gui;
+pub mod lab;
 pub mod league;
 pub mod packs;
 pub mod paths;

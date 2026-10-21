@@ -83,6 +83,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "[commander]",
         "Auto-build a complete legal deck (uses current commander if none given)",
     ),
+    (
+        "lab",
+        "[quick|thorough] | show | apply",
+        "Playtest lab: measure each card, additions and colour sets by playtests; `apply` makes the best combination",
+    ),
     ("lands", "", "Recommended land count and basic land split"),
     (
         "fill",
@@ -204,6 +209,8 @@ pub struct App {
     pub names_changed: bool,
     /// Commander ranking, kept until the pool or rules change (it takes a few seconds).
     ranking: std::cell::RefCell<Option<(String, crate::ranking::Rankings)>>,
+    /// The last playtest lab report.
+    lab: Option<crate::lab::LabReport>,
 }
 
 impl App {
@@ -239,6 +246,7 @@ impl App {
             style,
             names_changed: false,
             ranking: std::cell::RefCell::new(None),
+            lab: None,
         })
     }
 
@@ -302,6 +310,7 @@ impl App {
             "suggest" => self.suggest(rest),
             "cut" | "weak" => self.cut(rest),
             "auto" | "build" => self.auto(rest),
+            "lab" | "playtest" => self.lab(rest),
             "lands" => self.lands(),
             "fill" => self.fill(),
             "hand" => self.hand(),
@@ -1514,6 +1523,131 @@ impl App {
                     shortfall
                 ))
             );
+        }
+        println!(
+            "{}",
+            self.style.dim(
+                "The builder picks cards by score. To check it with playtests - what each card is worth, \
+                 better additions from your pool, other colour sets - run `lab` (about a minute) or \
+                 `lab thorough` (about five)."
+            )
+        );
+    }
+
+    fn lab(&mut self, arg: &str) {
+        let arg = arg.trim().to_lowercase();
+        match arg.as_str() {
+            "show" => {
+                match &self.lab {
+                    Some(r) => print!("{}", r.text()),
+                    None => println!("No lab report yet: run `lab` or `lab thorough`."),
+                }
+                return;
+            }
+            "apply" => {
+                let Some(r) = &self.lab else {
+                    println!("No lab report yet: run `lab` or `lab thorough`.");
+                    return;
+                };
+                let Some(best) = &r.best else {
+                    println!("The lab found no change that beats the tested deck.");
+                    return;
+                };
+                if !r.fits(&self.deck) {
+                    println!("The deck has changed since the lab ran; run `lab` again.");
+                    return;
+                }
+                let mut d = best.deck.clone();
+                d.name = self.deck.name.clone();
+                self.deck = d;
+                for (s, _) in &best.swaps {
+                    println!("  cut {}  ->  add {}", s.cut, s.add);
+                }
+                println!(
+                    "Applied the lab's best combination ({} win-rate points). `undo` to go back.",
+                    crate::lab::pts_se(&best.gain)
+                );
+                return;
+            }
+            _ => {}
+        }
+        let Some(effort) = crate::lab::Effort::parse(&arg) else {
+            println!("Usage: lab [quick|thorough]  |  lab show  |  lab apply");
+            return;
+        };
+        let Some(cmd) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|c| self.db.get(c))
+            .cloned()
+        else {
+            println!("Choose a commander first (`commander <name>` or `auto <name>`).");
+            return;
+        };
+        println!(
+            "{}",
+            self.style.dim(&format!(
+                "Playtesting {} ({}, about {} on 4 cores)...",
+                cmd.name,
+                effort.name,
+                if effort == crate::lab::Effort::THOROUGH {
+                    "five minutes"
+                } else {
+                    "a minute"
+                }
+            ))
+        );
+        let progress = crate::lab::Progress::new();
+        let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let report = std::thread::scope(|s| {
+            let job = s.spawn(|| {
+                crate::lab::explore(
+                    &cmd,
+                    &self.deck,
+                    &self.db,
+                    &self.coll,
+                    &self.rules,
+                    effort,
+                    &progress,
+                )
+            });
+            let mut last = String::new();
+            while !job.is_finished() {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let stage = progress.stage();
+                let pct = (progress.fraction() * 100.0) as u32;
+                if tty {
+                    use std::io::Write;
+                    print!("\r  {:>3}%  {:<70}", pct, stage);
+                    let _ = std::io::stdout().flush();
+                } else if stage != last && !stage.is_empty() {
+                    println!("  {:>3}%  {}", pct, stage);
+                }
+                last = stage;
+            }
+            job.join().ok().flatten()
+        });
+        if tty {
+            print!("\r{:<80}\r", "");
+        }
+        match report {
+            Some(r) => {
+                print!("{}", r.text());
+                if r.best.is_some() {
+                    println!(
+                        "\n`lab apply` makes the best combination's swaps (`undo` to go back)."
+                    );
+                }
+                if let Some(c) = r.better_colors() {
+                    println!(
+                        "Rebuilding in {} measured clearly better: `auto {} {}`.",
+                        c.colors, r.commander, c.colors
+                    );
+                }
+                self.lab = Some(r);
+            }
+            None => println!("The lab stopped before finishing."),
         }
     }
 
