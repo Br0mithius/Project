@@ -97,6 +97,13 @@ impl<'a> Game<'a> {
             return;
         }
         self.players[a].attacked_this_turn = true;
+        for at in &attacks {
+            if let Some(i) = self.idx(at.attacker) {
+                self.perms[i].attacking = true;
+                self.perms[i].attacked_turn = true;
+            }
+        }
+        self.recalc();
         self.note(|| format!("P{} attacks with {} creature(s)", a, attacks.len()));
         // "Whenever ~ attacks" and "whenever you attack" triggers.
         for at in &attacks {
@@ -106,6 +113,13 @@ impl<'a> Game<'a> {
             let x = self.perms[i].clone();
             for (k, ab) in self.abilities_of(&x).iter().enumerate() {
                 if ab.trig == Trig::Attacks {
+                    // "Attacks for the first time each turn".
+                    if ab.once_per_turn && k < 32 {
+                        if x.fired & (1 << k) != 0 {
+                            continue;
+                        }
+                        self.perms[i].fired |= 1 << k;
+                    }
                     self.pending.push(Pending {
                         ctrl: x.ctrl,
                         source: Some(x.id),
@@ -119,10 +133,14 @@ impl<'a> Game<'a> {
                         from_graveyard: false,
                         kicked: false,
                         overloaded: false,
+                        x: None,
                     });
                 }
             }
         }
+        // "Whenever a creature you control attacks alone": about that creature.
+        let lone = (attacks.len() == 1).then(|| attacks[0].attacker);
+        self.emit(Ev::OthersAttack, a, lone);
         self.emit(Ev::OthersAttack, a, None);
         // "Whenever a creature you control attacks": once per attacker, about it.
         for at in &attacks {
@@ -338,6 +356,11 @@ impl<'a> Game<'a> {
             if self.perms[ti].protection & colors != 0 {
                 continue;
             }
+            self.perms[ti].hurt_by = src;
+            if let Some(si) = self.idx(src) {
+                self.perms[si].ever_hit = true;
+            }
+            let Some(ti) = self.idx(target) else { continue };
             self.damage_perm(ti, n, kw & DEATHTOUCH != 0);
             if let Some(si) = self.idx(src) {
                 self.perms[si].dealt_damage = true;
@@ -371,6 +394,10 @@ impl<'a> Game<'a> {
             if kw & LIFELINK != 0 {
                 lifelink.push((ctrl as usize, n));
             }
+            if let Some(si) = self.idx(src) {
+                self.perms[si].hit_turn |= 1 << p.min(7);
+                self.perms[si].ever_hit = true;
+            }
             dealt.push(src);
         }
         for (p, n) in lifelink {
@@ -396,6 +423,7 @@ impl<'a> Game<'a> {
                         from_graveyard: false,
                         kicked: false,
                         overloaded: false,
+                        x: None,
                     });
                 }
             }

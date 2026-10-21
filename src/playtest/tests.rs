@@ -656,6 +656,575 @@ fn hand_size_and_fog() {
     assert!(g.players[0].hand.len() <= 7);
 }
 
+// ------------------------------------------------------------ costs and conditions
+
+/// Fires ability `k` of permanent `id` as if its trigger happened.
+fn fire(g: &mut Game, id: u32, k: usize) {
+    let i = g.idx(id).expect("on the battlefield");
+    let p = g.perms[i].ctrl;
+    g.pending.push(Pending {
+        ctrl: p,
+        source: Some(id),
+        card: g.perms[i].card.unwrap(),
+        back: false,
+        ability: k as u16,
+        snapshot: None,
+        subject: None,
+        teamwork: false,
+        gift: false,
+        from_graveyard: false,
+        kicked: false,
+        overloaded: false,
+        x: None,
+    });
+    g.run_pending();
+    g.sba();
+}
+
+/// The first ability of permanent `id` that `f` picks.
+fn ability_of(g: &Game, id: u32, f: impl Fn(&SimAbility) -> bool) -> usize {
+    let i = g.idx(id).expect("on the battlefield");
+    g.abilities_of(&g.perms[i])
+        .iter()
+        .position(f)
+        .expect("ability")
+}
+
+fn token(g: &mut Game, p: usize, power: i32) -> u32 {
+    let i = g.make_token(p, power, power, 0, vec![]);
+    g.perms[i].sick = false;
+    g.perms[i].id
+}
+
+#[test]
+fn additional_costs_to_cast_are_paid() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Eaten Alive",
+            "Mountain",
+            "Thrill of Possibility",
+            "Arbiter of Woe",
+        ],
+    );
+    // Eaten Alive: "sacrifice a creature or pay {3}{B}".
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    let foe = put(&mut g, 1, 4);
+    g.players[0].hand.push(1);
+    assert!(
+        !g.can_cast(0, Src::Hand(0), CastOpts::default()),
+        "{{B}} and {{3}}{{B}} with two Swamps and nothing to sacrifice"
+    );
+    let spare = token(&mut g, 0, 1);
+    assert_eq!(
+        g.cast_cost(0, Src::Hand(0), CastOpts::default())
+            .unwrap()
+            .total(),
+        1,
+        "a spare token pays the additional cost"
+    );
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(spare).is_none(), "the token was sacrificed");
+    assert!(g.idx(foe).is_none(), "and the creature exiled");
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    put(&mut g, 1, 4);
+    g.players[0].hand.push(1);
+    assert_eq!(
+        g.cast_cost(0, Src::Hand(0), CastOpts::default())
+            .unwrap()
+            .total(),
+        5,
+        "no creature to spare: {{B}} plus {{3}}{{B}}"
+    );
+    // Thrill of Possibility: discard a card, draw two.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![3];
+    assert!(
+        !g.can_cast(0, Src::Hand(0), CastOpts::default()),
+        "nothing to discard"
+    );
+    g.players[0].hand = vec![3, 0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[0].hand.len(), 2, "one discarded, two drawn");
+    assert!(
+        g.players[0].graveyard.contains(&0),
+        "the Swamp was discarded"
+    );
+    // Arbiter of Woe: "sacrifice a creature" is required.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 6, 'B');
+    g.players[0].hand.push(4);
+    assert!(!g.can_cast(0, Src::Hand(0), CastOpts::default()));
+    let spare = token(&mut g, 0, 1);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(spare).is_none());
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 4))));
+}
+
+#[test]
+fn costs_paid_as_abilities_resolve() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Crossway Troublemakers",
+            "Vampire Gourmand",
+            "Killmonger, Scourge of Wakanda",
+            "Lich's Relic",
+            "Guiding Hydra",
+            "Fishing Pole",
+        ],
+    );
+    // Crossway Troublemakers: "you may pay 2 life. If you do, draw a card."
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    let v = put(&mut g, 0, 2);
+    let i = g.idx(v).unwrap();
+    g.destroy(i);
+    g.run_pending();
+    assert_eq!(g.players[0].life, 28, "paid 2 life");
+    assert_eq!(g.players[0].hand.len(), 1, "and drew");
+    // At low life it isn't worth it: no payment, no card.
+    g.players[0].life = 6;
+    let v = put(&mut g, 0, 2);
+    let i = g.idx(v).unwrap();
+    g.destroy(i);
+    g.run_pending();
+    assert_eq!(
+        (g.players[0].life, g.players[0].hand.len()),
+        (6, 1),
+        "declined at 6 life"
+    );
+    // Killmonger: "you may sacrifice another creature. When you do, destroy ...".
+    let mut g = game(&[&d, &d]);
+    let foe = put(&mut g, 1, 1);
+    put(&mut g, 0, 3);
+    assert!(
+        g.idx(foe).is_some(),
+        "nothing sacrificed, nothing destroyed"
+    );
+    let mut g = game(&[&d, &d]);
+    let foe = put(&mut g, 1, 1);
+    let spare = token(&mut g, 0, 1);
+    put(&mut g, 0, 3);
+    assert!(g.idx(spare).is_none(), "the token was sacrificed");
+    assert!(
+        g.idx(foe).is_none(),
+        "so the opponent's creature is destroyed"
+    );
+    // Lich's Relic: "you may pay {2}. When you do, destroy ...".
+    let mut g = game(&[&d, &d]);
+    let foe = put(&mut g, 1, 1);
+    put(&mut g, 0, 4);
+    assert!(g.idx(foe).is_some(), "no mana, no destruction");
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    let foe = put(&mut g, 1, 1);
+    put(&mut g, 0, 4);
+    assert!(g.idx(foe).is_none());
+    assert!(
+        g.perms.iter().filter(|x| x.is(T_LAND) && x.tapped).count() == 2,
+        "{{2}} was paid"
+    );
+    // Guiding Hydra: "you may remove a +1/+1 counter from it. If you do, put a +1/+1
+    // counter on each other creature you control."
+    let mut g = game(&[&d, &d]);
+    let i = g.enter_card(0, 5, 0, false).unwrap();
+    g.perms[i].counters = 3;
+    let hydra = g.perms[i].id;
+    g.pending.clear();
+    let other = put(&mut g, 0, 1);
+    let k = ability_of(&g, hydra, |a| matches!(a.trig, Trig::Phase { .. }));
+    fire(&mut g, hydra, k);
+    assert_eq!(perm(&g, hydra).counters, 2, "the Hydra paid a counter");
+    assert_eq!(perm(&g, other).counters, 1, "the other creature got one");
+    // Fishing Pole: "remove a bait counter from it. If you do, create a Fish."
+    let mut g = game(&[&d, &d]);
+    let pole = put(&mut g, 0, 6);
+    let k = ability_of(&g, pole, |a| matches!(a.trig, Trig::Event(..)));
+    fire(&mut g, pole, k);
+    assert!(
+        !g.perms.iter().any(|x| x.tok == Tok::Creature),
+        "no bait, no Fish"
+    );
+    let i = g.idx(pole).unwrap();
+    g.perms[i].other_counters = 1;
+    fire(&mut g, pole, k);
+    assert!(g.perms.iter().any(|x| x.tok == Tok::Creature), "a Fish");
+    assert_eq!(perm(&g, pole).other_counters, 0, "the bait counter is gone");
+}
+
+#[test]
+fn activated_ability_costs_are_paid() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Swamp",
+            "Drake Hatcher",
+            "Jessica Jones, Private Eye",
+            "Lathril, Blade of the Elves",
+            "Feldon's Cane",
+            "Suspicious Shambler",
+            "Gallia, Tragic Host",
+            "Island",
+            "Bruce Banner",
+            "Myojin of Night's Reach",
+        ],
+    );
+    let act = |a: &SimAbility| matches!(a.trig, Trig::Activated { .. });
+    // Drake Hatcher: "Remove three incubation counters from it: create a Drake."
+    let mut g = game(&[&d, &d]);
+    let hatcher = put(&mut g, 0, 1);
+    let k = ability_of(&g, hatcher, act);
+    let i = g.idx(hatcher).unwrap();
+    assert!(
+        g.activation_cost(0, i, k).is_none(),
+        "no counters to remove"
+    );
+    g.perms[i].other_counters = 3;
+    assert!(g.activate(0, hatcher, k));
+    assert_eq!(perm(&g, hatcher).other_counters, 0);
+    assert!(g.perms.iter().any(|x| x.tok == Tok::Creature && x.p == 2));
+    // Jessica Jones: "{T}, put a stun counter on her".
+    let jess = put(&mut g, 0, 2);
+    let k = ability_of(&g, jess, act);
+    assert!(g.activate(0, jess, k));
+    assert_eq!(perm(&g, jess).stun, 1);
+    // Lathril: "{T}, tap ten untapped Elves you control".
+    let lathril = put(&mut g, 0, 3);
+    let k = ability_of(&g, lathril, act);
+    let i = g.idx(lathril).unwrap();
+    assert!(g.activation_cost(0, i, k).is_none(), "no ten Elves");
+    // Feldon's Cane: "{T}, exile it".
+    let cane = put(&mut g, 0, 4);
+    let k = ability_of(&g, cane, act);
+    assert!(g.activate(0, cane, k));
+    assert!(g.idx(cane).is_none() && g.players[0].exile.contains(&4));
+    // Suspicious Shambler works only from the graveyard, exiling itself.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 6, 'B');
+    let shambler = put(&mut g, 0, 5);
+    let k = ability_of(&g, shambler, act);
+    let i = g.idx(shambler).unwrap();
+    assert!(
+        g.activation_cost(0, i, k).is_none(),
+        "not from the battlefield"
+    );
+    g.leave(i, state::Zone::Graveyard, false);
+    let gk = g.players[0].graveyard.iter().position(|&c| c == 5).unwrap();
+    assert!(g.activate_from_graveyard(0, gk, k));
+    assert!(g.players[0].exile.contains(&5), "exiled as the cost");
+    assert_eq!(
+        g.perms.iter().filter(|x| x.tok == Tok::Creature).count(),
+        2,
+        "two Zombies"
+    );
+    // Gallia: "{4}{B}, exile another creature card from your graveyard: return her".
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    g.players[0].graveyard = vec![6];
+    assert!(
+        g.graveyard_activation_cost(0, 0, 1).is_none(),
+        "no other creature card to exile"
+    );
+    g.players[0].graveyard = vec![6, 2];
+    let k = d.cards[6]
+        .abilities
+        .iter()
+        .position(|a| matches!(a.trig, Trig::Activated { .. }))
+        .unwrap();
+    assert!(g.activate_from_graveyard(0, 0, k));
+    let gallia = g.perms.iter().find(|x| x.card == Some((0, 6))).unwrap();
+    assert!(gallia.tapped && gallia.counters == 1);
+    assert_eq!(g.players[0].exile, vec![2]);
+    // Bruce Banner: "{X}{X}, {T}: Draw X cards" - four lands make X = 2.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'U');
+    let bruce = put(&mut g, 0, 8);
+    let k = ability_of(&g, bruce, act);
+    assert!(g.activate(0, bruce, k));
+    assert_eq!(g.players[0].hand.len(), 2);
+    // Myojin of Night's Reach: cast from hand, it has a divinity counter (and so
+    // indestructible); removing it makes each opponent discard their hand.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 8, 'B');
+    g.players[0].hand.push(9);
+    g.players[1].hand = vec![0, 0, 0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let myojin = g.perms.iter().find(|x| x.card == Some((0, 9))).unwrap().id;
+    assert_eq!(perm(&g, myojin).other_counters, 1);
+    assert!(perm(&g, myojin).has(INDESTRUCTIBLE));
+    let k = ability_of(&g, myojin, act);
+    assert!(g.activate(0, myojin, k));
+    assert!(g.players[1].hand.len() < 3, "the opponent discarded");
+    assert!(!perm(&g, myojin).has(INDESTRUCTIBLE));
+    let i = g.idx(myojin).unwrap();
+    assert!(g.activation_cost(0, i, k).is_none(), "one use");
+}
+
+#[test]
+fn conditions_are_checked_not_guessed() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Hidetsugu's Second Rite",
+            "Burst Lightning",
+            "Island",
+            "Finale of Revelation",
+            "Knight of Grace",
+            "Kitesail Corsair",
+            "Leonin Vanguard",
+            "Garna, Bloodfist of Keld",
+            "Agent 13, Sharon Carter",
+            "Arbiter of Woe",
+        ],
+    );
+    let bear = prep(&[
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card(
+            "Knight",
+            "{2}{W}{W}",
+            "Creature — Knight",
+            "",
+            Some(("4", "4")),
+        ),
+    ]);
+    // Hidetsugu's Second Rite: only the player at exactly 10 life.
+    let mut g = game(&[&d, &bear, &bear]);
+    lands(&mut g, 0, 4, 'R');
+    g.players[1].life = 5;
+    g.players[2].life = 10;
+    g.players[0].hand.push(1);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.sba();
+    assert_eq!(g.players[1].life, 5);
+    assert!(!g.players[2].alive, "10 damage to the player at 10");
+    let mut g = game(&[&d, &bear]);
+    lands(&mut g, 0, 4, 'R');
+    g.players[0].hand.push(1);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[1].life, 30, "nobody at 10 life: nothing");
+    // Burst Lightning: 2 damage, or 4 if kicked.
+    let mut g = game(&[&d, &bear]);
+    lands(&mut g, 0, 5, 'R');
+    let b = put(&mut g, 1, 0);
+    let k = put(&mut g, 1, 1);
+    g.players[0].hand.push(2);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(
+        g.idx(b).is_none() && g.idx(k).is_some(),
+        "2 damage kills the Bear"
+    );
+    g.players[0].hand.push(2);
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    let kicked = CastOpts {
+        kicker: true,
+        ..Default::default()
+    };
+    assert!(g.cast(0, Src::Hand(0), kicked));
+    assert!(g.idx(k).is_none(), "kicked, 4 damage kills the Knight");
+    // Finale of Revelation with X = 2: draws two, not four.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 6, 'U');
+    g.players[0].hand.push(4);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[0].hand.len(), 2);
+    // Knight of Grace: +1/+0 only while someone controls a black permanent.
+    let mut g = game(&[&d, &d]);
+    let knight = put(&mut g, 0, 5);
+    assert_eq!(perm(&g, knight).p, 2);
+    put(&mut g, 1, 10);
+    g.recalc();
+    assert_eq!(perm(&g, knight).p, 3, "Arbiter of Woe is black");
+    // Kitesail Corsair flies only while attacking.
+    let corsair = put(&mut g, 0, 6);
+    assert!(!perm(&g, corsair).has(FLYING));
+    let i = g.idx(corsair).unwrap();
+    g.perms[i].attacking = true;
+    g.recalc();
+    assert!(perm(&g, corsair).has(FLYING));
+    // Leonin Vanguard: only with three or more creatures.
+    let mut g = game(&[&d, &d]);
+    let vanguard = put(&mut g, 0, 7);
+    let k = ability_of(&g, vanguard, |a| matches!(a.trig, Trig::Phase { .. }));
+    fire(&mut g, vanguard, k);
+    assert_eq!(g.players[0].life, 30, "one creature: nothing");
+    put(&mut g, 0, 5);
+    put(&mut g, 0, 5);
+    fire(&mut g, vanguard, k);
+    assert_eq!(g.players[0].life, 31, "three creatures: +1/+1 and 1 life");
+    // Garna: draw if the creature that died was attacking, otherwise 1 damage to each
+    // opponent.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 8);
+    let a = put(&mut g, 0, 5);
+    let i = g.idx(a).unwrap();
+    g.perms[i].attacking = true;
+    g.destroy(i);
+    g.run_pending();
+    assert_eq!((g.players[0].hand.len(), g.players[1].life), (1, 30));
+    let b = put(&mut g, 0, 5);
+    let i = g.idx(b).unwrap();
+    g.destroy(i);
+    g.run_pending();
+    assert_eq!((g.players[0].hand.len(), g.players[1].life), (1, 29));
+    // Agent 13: "whenever a creature you control attacks alone".
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 9);
+    let a = put(&mut g, 0, 5);
+    let b = put(&mut g, 0, 5);
+    for id in [a, b] {
+        let i = g.idx(id).unwrap();
+        g.perms[i].attacking = true;
+    }
+    g.emit(Ev::OthersAttack, 0, None);
+    g.run_pending();
+    assert!(!g.perms.iter().any(|x| x.tok == Tok::Clue), "two attackers");
+    let i = g.idx(b).unwrap();
+    g.perms[i].attacking = false;
+    g.emit(Ev::OthersAttack, 0, Some(a));
+    g.run_pending();
+    assert!(
+        g.perms.iter().any(|x| x.tok == Tok::Clue),
+        "one attacker: a Clue"
+    );
+}
+
+#[test]
+fn ward_costs_life_or_a_card() {
+    let db = db();
+    let d0 = prep_db(&db, &["Zul Ashur, Lich Lord", "Gideon the Oathless"]);
+    let d1 = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        card(
+            "Murder",
+            "{1}{B}{B}",
+            "Instant",
+            "Destroy target creature.",
+            None,
+        ),
+    ]);
+    // Zul Ashur: "Ward—Pay 2 life".
+    let mut g = game(&[&d0, &d1]);
+    let zul = put(&mut g, 0, 0);
+    lands(&mut g, 1, 3, 'B');
+    g.players[1].hand.push(1);
+    assert!(g.cast(1, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(zul).is_none());
+    assert_eq!(g.players[1].life, 28, "ward took 2 life");
+    // Gideon: "Ward—Discard a card": with an empty hand he can't be targeted.
+    let mut g = game(&[&d0, &d1]);
+    let gideon = put(&mut g, 0, 1);
+    lands(&mut g, 1, 3, 'B');
+    g.players[1].hand.push(1);
+    assert!(g.cast(1, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(gideon).is_some(), "no card to discard for ward");
+}
+
+#[test]
+fn self_reductions_equip_flashback_and_modes() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Forest",
+            "Ghalta the Unstoppable",
+            "Island",
+            "Falcon's Wing Harness",
+            "My Precious",
+            "Twinned Vision",
+            "Swamp",
+            "Vraska's Final Mercy",
+            "Hulk, Gamma Goliath",
+            "Viv Vision, Teen Synthezoid",
+        ],
+    );
+    let big = prep(&[card(
+        "Wurm",
+        "{5}{G}",
+        "Creature — Wurm",
+        "",
+        Some(("6", "6")),
+    )]);
+    // Ghalta the Unstoppable costs {X} less, X = the greatest power among your creatures.
+    let mut g = game(&[&d, &big]);
+    g.players[0].hand.push(1);
+    let full = g
+        .cast_cost(0, Src::Hand(0), CastOpts::default())
+        .unwrap()
+        .total();
+    let i = g.enter_card(1, 0, 0, false).unwrap();
+    g.perms[i].sick = false;
+    let less = g
+        .cast_cost(0, Src::Hand(0), CastOpts::default())
+        .unwrap()
+        .total();
+    assert_eq!((full, less), (9, 3), "a 6/6 makes it cost 6 less");
+    // Hulk: other creatures' power-ups cost {3} less ({7} -> {4}); spells don't.
+    let mut g = game(&[&d, &d]);
+    let viv = put(&mut g, 0, 9);
+    let i = g.idx(viv).unwrap();
+    g.perms[i].born = 0;
+    let k = ability_of(&g, viv, |a| matches!(a.trig, Trig::PowerUp(_)));
+    assert_eq!(g.activation_cost(0, i, k).unwrap().total(), 7);
+    put(&mut g, 0, 8);
+    let i = g.idx(viv).unwrap();
+    assert_eq!(g.activation_cost(0, i, k).unwrap().total(), 4);
+    assert!(
+        d.cards[8].cost_reduction.is_none() && d.cards[8].power_up_less == 3,
+        "creature spells aren't 3 cheaper"
+    );
+    // Falcon's Wing Harness: Equip {2}{U} needs blue.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'G');
+    let harness = put(&mut g, 0, 3);
+    let w = put(&mut g, 0, 1);
+    let i = g.idx(harness).unwrap();
+    g.perms[i].attached = None;
+    assert!(!g.equip(0, harness, w), "no blue mana");
+    lands(&mut g, 0, 1, 'U');
+    assert!(g.equip(0, harness, w));
+    // My Precious: "Equip—{2}, Pay 2 life".
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'G');
+    let ring = put(&mut g, 0, 4);
+    let w = put(&mut g, 0, 1);
+    assert!(g.equip(0, ring, w));
+    assert_eq!(g.players[0].life, 28);
+    // Twinned Vision's flashback: "{1}{U/R}{U/R}, Discard a card"; from the graveyard it
+    // draws two.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'U');
+    g.players[0].graveyard = vec![5];
+    assert!(
+        !g.can_cast(0, Src::Graveyard(0), CastOpts::default()),
+        "nothing to discard"
+    );
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Graveyard(0), CastOpts::default()));
+    assert_eq!(g.players[0].hand.len(), 2, "discarded one, drew two");
+    assert!(g.players[0].exile.contains(&5));
+    // Vraska's Final Mercy: each mode is "you lose 2 life" and its effect.
+    let mut g = game(&[&d, &big]);
+    lands(&mut g, 0, 2, 'B');
+    let wurm = g.enter_card(1, 0, 1, false).map(|i| g.perms[i].id).unwrap();
+    g.players[0].hand.push(7);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(wurm).is_none());
+    assert_eq!(g.players[0].life, 28);
+}
+
 // ------------------------------------------------------------ whole games
 
 fn league_decks(db: &CardDb) -> Vec<Prepared> {
