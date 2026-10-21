@@ -570,7 +570,10 @@ pub fn cond_of(text: &str, conditional: bool) -> Cond {
     if t.contains("isn't prepared") {
         return Cond::NotPrepared;
     }
-    if t.contains("attacked this turn") || t.contains("attacked with") {
+    if t.contains("attacked this turn")
+        || t.contains("attacked with")
+        || t.contains("dealt combat damage by")
+    {
         return Cond::AttackedThisTurn;
     }
     if t.contains("died this turn") {

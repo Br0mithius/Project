@@ -2252,6 +2252,22 @@ pub fn parse(card: &Card) -> Parsed {
             }
         }
     }
+    // "Destroy each nonland permanent with mana value X whose controller was dealt combat
+    // damage by ~ this turn" (Steel Hellkite): only after it connects, and only that
+    // player's permanents of one mana value - a few of theirs, never yours.
+    for a in parsed.abilities.iter_mut() {
+        if !a.text.contains("was dealt combat damage by") {
+            continue;
+        }
+        for e in a.effects.iter_mut() {
+            if let Effect::Destroy(t) = e {
+                t.whose = Whose::Theirs;
+                t.mass = false;
+                t.count = 2;
+            }
+        }
+        a.conditional = true;
+    }
     parsed
 }
 
