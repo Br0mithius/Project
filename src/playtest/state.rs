@@ -1582,10 +1582,8 @@ impl<'a> Game<'a> {
         // "Artifacts and creatures entering the battlefield don't cause abilities to
         // trigger" (Karn, Argent Defender; it counts as it enters itself).
         let hushed = snap.is(T_ARTIFACT | T_CREATURE)
-            && self
-                .perms
-                .iter()
-                .any(|x| self.perm_rules(x) & R_NO_ETB_TRIGGERS != 0);
+            && (self.rule_anywhere(R_NO_ETB_TRIGGERS)
+                || self.perm_rules(&snap) & R_NO_ETB_TRIGGERS != 0);
         if let Some(r) = snap.card.filter(|_| snap.tok == Tok::None) {
             let c = self.card(r);
             // Legend rule: keep the newer one.

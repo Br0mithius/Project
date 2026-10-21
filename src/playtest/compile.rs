@@ -2322,7 +2322,9 @@ pub fn keyword_bits(words: &[String]) -> u32 {
             continue;
         }
         for (k, bit) in KEYWORDS {
-            if w == k || w.starts_with(&format!("{} ", k)) && k != "flash" {
+            // "k" or "k ..." (no allocation: this runs on every board recalculation).
+            let prefixed = w.len() > k.len() && w.starts_with(k) && w.as_bytes()[k.len()] == b' ';
+            if w == k || prefixed && k != "flash" {
                 bits |= bit;
             }
         }
