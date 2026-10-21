@@ -45,7 +45,11 @@ fn main() {
             }
             println!(
                 "winner: seat {} after {} rounds; life {:?}",
-                winner,
+                if winner == playtest::NO_WINNER {
+                    "none (a draw)".to_string()
+                } else {
+                    winner.to_string()
+                },
                 g.round,
                 g.players.iter().map(|p| p.life).collect::<Vec<_>>()
             );

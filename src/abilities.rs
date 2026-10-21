@@ -1487,6 +1487,8 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     // loses 3 life").
     let drawer_loses = [
         "draw a card and lose ",
+        // "You draw a card, lose 1 life, and put a plan counter on ~" (Robot Domination).
+        "draw a card, lose ",
         "cards and lose ",
         "draws a card and loses ",
         "cards and loses ",
@@ -1884,10 +1886,12 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     }
     // Graveyard hate: "exile up to one target card from a graveyard", "exile target player's
     // graveyard".
+    // (Cards in a graveyard, not a permanent: no `Effect::Exile` for them.)
     if s.contains("exile target player's graveyard")
         || s.contains("exile each opponent's graveyard")
         || s.contains("exile all cards from target player's graveyard")
     {
+        out.retain(|e| !matches!(e, Effect::Exile { .. }));
         out.push(Effect::Rule("exiles a graveyard".into()));
     } else if s.starts_with("exile")
         && (s.contains("card from a graveyard")
@@ -1896,6 +1900,9 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
             || s.contains("target card from a graveyard"))
         && !s.contains("creature card from a graveyard")
     {
+        if !s.contains("permanent") {
+            out.retain(|e| !matches!(e, Effect::Exile { .. }));
+        }
         out.push(Effect::Rule("exiles a graveyard card".into()));
     }
     // "You may play an additional land this turn".
@@ -3343,15 +3350,17 @@ fn read_line(line: &str, card: &Card, is_spell: bool) -> Option<Ability> {
             .iter()
             .position(|e| matches!(e, Effect::Draw { you: true, .. }))
         {
-            let n = match &ability.effects[pos] {
-                Effect::Draw { amount, .. } => amount.n,
-                _ => 1,
+            let (n, x) = match &ability.effects[pos] {
+                Effect::Draw { amount, .. } => (amount.n, amount.x),
+                _ => (1, false),
             };
+            // ("Draw a card for each card you've discarded this turn" stays a count: the
+            // simulator counts it when it resolves.)
             ability.effects[pos] = if n <= 1 {
                 Effect::Loot
             } else {
                 Effect::Draw {
-                    amount: Amount::fixed(n - 1),
+                    amount: Amount { n: n - 1, x },
                     you: true,
                 }
             };

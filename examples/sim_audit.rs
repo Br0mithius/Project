@@ -82,7 +82,11 @@ fn main() {
         }
         text += &format!(
             "RESULT: winner seat {} after {} rounds; life {:?}; poison {:?}\n",
-            winner,
+            if winner == playtest::NO_WINNER {
+                "none (a draw)".to_string()
+            } else {
+                winner.to_string()
+            },
             g.round,
             g.players.iter().map(|p| p.life).collect::<Vec<_>>(),
             g.players.iter().map(|p| p.poison).collect::<Vec<_>>()

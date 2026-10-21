@@ -9,7 +9,7 @@ use super::combat::{Attack, Def};
 use super::compile::*;
 use super::resolve::Ctx;
 use super::state::*;
-use super::{CastOpts, ExtraPay, Src};
+use super::{CastOpts, ExtraPay, FROM_LIBRARY_TOP, Src};
 use crate::abilities::{Effect, Kind, Whose};
 use crate::restrict::{Dyn, Restr};
 
@@ -528,7 +528,7 @@ fn arrival_value(c: &SimCard) -> f32 {
         .sum()
 }
 
-pub fn blink_choice(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
+pub fn blink_choice(g: &Game, me: usize, not: Option<u32>, types: u16) -> Option<usize> {
     (0..g.perms.len())
         .filter(|&i| {
             let x = &g.perms[i];
@@ -537,6 +537,7 @@ pub fn blink_choice(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
                 && x.commander == 0
                 && x.card.is_some()
                 && Some(x.id) != not
+                && (x.is(types) || types & T_CREATURE != 0 && x.is_creature())
         })
         .map(|i| (arrival_value(g.card(g.perms[i].card.unwrap())), i))
         .filter(|(v, _)| *v > 0.0)
@@ -810,8 +811,34 @@ pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool, r: &Restr) {
 
 pub fn tutor_choice(g: &Game, p: usize, text: &str, r: &Restr) -> Option<usize> {
     let pl = &g.players[p];
+    // "Search your library for a Plan card": a card of that subtype only.
+    let sub = text
+        .split("search your library for a")
+        .nth(1)
+        .map(|s| s.trim_start_matches('n').trim_start())
+        .and_then(|s| s.split(" card").next())
+        .filter(|w| !w.is_empty() && !w.contains(' ') && !w.starts_with("card"))
+        .filter(|w| {
+            ![
+                "creature",
+                "land",
+                "artifact",
+                "equipment",
+                "enchantment",
+                "instant",
+                "sorcery",
+                "planeswalker",
+                "basic",
+                "legendary",
+                "permanent",
+                "nonland",
+            ]
+            .contains(w)
+        });
     let want = |c: &SimCard| {
-        if text.contains("creature card") {
+        if let Some(s) = sub {
+            c.has_subtype(s)
+        } else if text.contains("creature card") {
             c.is(T_CREATURE)
         } else if text.contains("land card") || text.contains("basic land") {
             c.is(T_LAND)
@@ -1123,7 +1150,7 @@ fn is_reactive_only(c: &SimCard) -> bool {
 }
 
 /// What an effect would do for player `p` right now (card points).
-fn effect_now(
+pub(crate) fn effect_now(
     g: &Game,
     p: usize,
     e: &Effect,
@@ -1301,9 +1328,14 @@ fn effect_now(
                 }
         }
         Effect::AddMana(n) => n.n as f32 * 0.3,
-        Effect::Blink => blink_choice(g, p, src.filter(|_| text.contains("target")))
-            .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
-            .unwrap_or(0.0),
+        Effect::Blink => blink_choice(
+            g,
+            p,
+            src.filter(|_| text.contains("target")),
+            blink_types(text),
+        )
+        .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
+        .unwrap_or(0.0),
         Effect::Copy => best_to_copy(g, p, true)
             .map(|i| perm_value(g, i) * 0.7)
             .unwrap_or(0.5),
@@ -1754,6 +1786,16 @@ fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
         if let Some(k) = best {
             return Some((true, k));
         }
+    }
+    // Ka-Zar: a land on top of the library is a free card.
+    if g.rules[p % 8] & R_LANDS_FROM_TOP != 0
+        && g.active == p
+        && pl
+            .library
+            .last()
+            .is_some_and(|&c| pl.cards[c as usize].is(T_LAND))
+    {
+        return Some((false, FROM_LIBRARY_TOP));
     }
     (0..pl.playable.len())
         .find(|&k| {
@@ -2736,7 +2778,13 @@ pub fn crew_for_combat(g: &mut Game, a: usize) {
         .perms
         .iter()
         .filter(|x| {
-            x.ctrl as usize == a && x.is(T_VEHICLE) && !x.crewed && !x.tapped && x.base_p >= 3
+            // (A Vehicle that arrived this turn can't attack even crewed.)
+            x.ctrl as usize == a
+                && x.is(T_VEHICLE)
+                && !x.crewed
+                && !x.tapped
+                && !(x.sick && !x.has(HASTE))
+                && x.base_p >= 3
         })
         .map(|x| x.id)
         .collect();

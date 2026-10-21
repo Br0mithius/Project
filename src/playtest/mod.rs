@@ -262,6 +262,10 @@ impl<'a> Game<'a> {
         }
         for p in 0..g.players.len() {
             g.players[p].px.chosen_type = g.most_common_type(p);
+            g.players[p].px.identity = decks[p]
+                .commanders
+                .iter()
+                .fold(0, |m, &(c, _)| m | decks[p].cards[c as usize].identity);
         }
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
@@ -422,6 +426,15 @@ impl<'a> Game<'a> {
         }
         // "Your opponents can't cast spells during your turn" (Jennifer Walters).
         if self.active != p && self.rules[self.active % 8] & R_OPP_NO_CAST_MY_TURN != 0 {
+            return None;
+        }
+        // An instant or sorcery needs a legal choice for each target it requires (CR 601.2c).
+        let spell_abilities: Option<&[SimAbility]> = match (&c.back, back) {
+            (Some(b), true) if b.types & (T_INSTANT | T_SORCERY) != 0 => Some(&b.abilities),
+            (_, false) if !c.is_permanent() => Some(&c.abilities),
+            _ => None,
+        };
+        if spell_abilities.is_some_and(|a| !self.targets_exist(p, c, a)) {
             return None;
         }
         // Stashed cards: only during your turn (and not once their owner has left the game).
@@ -636,6 +649,72 @@ impl<'a> Game<'a> {
         Some((cost, x, pay))
     }
 
+    /// Does every permanent a spell's abilities must target ("destroy target creature",
+    /// "deals 2 damage to target attacking or blocking creature") have a legal choice for
+    /// player `p`? ("Up to one target" and modal spells may choose none / another mode.)
+    pub fn targets_exist(&self, p: usize, c: &SimCard, abilities: &[SimAbility]) -> bool {
+        use crate::abilities::{Effect as E, Kind as K, Whose as W};
+        for a in abilities
+            .iter()
+            .filter(|a| a.trig == Trig::Spell && !a.modal)
+        {
+            if !a.text.contains("target") || a.text.contains("up to") {
+                continue;
+            }
+            // The first target the ability names.
+            let first = a.effects.iter().find_map(|e| match e {
+                E::Destroy(t) | E::Bounce(t) | E::GainControl(t) | E::Fight(t) => Some((t, true)),
+                E::Exile { target, .. } | E::Lock { target, .. } => Some((target, true)),
+                E::Damage { to, .. } | E::Shrink { to, .. } => Some((to, true)),
+                E::PlusCounters { to, .. } | E::Pump { to, .. } | E::Grant { to, .. } => {
+                    Some((to, false))
+                }
+                E::Untap(t) => Some((t, false)),
+                _ => None,
+            });
+            let Some((t, harmful)) = first else { continue };
+            if t.mass
+                || t.restr.has(crate::restrict::PREV)
+                || !matches!(
+                    t.kind,
+                    K::Creature
+                        | K::CreatureOrPlaneswalker
+                        | K::NonlandPermanent
+                        | K::Permanent
+                        | K::Artifact
+                        | K::Enchantment
+                        | K::ArtifactOrEnchantment
+                        | K::Planeswalker
+                        | K::Land
+                )
+            {
+                continue;
+            }
+            let ctx = resolve::Ctx {
+                ctrl: p,
+                src: None,
+                snap: None,
+                card: Some(c),
+                card_ref: None,
+                subject: None,
+                text: &a.text,
+                until_eot: a.until_eot,
+                overload: false,
+                card_restr: a.card_restr,
+                x: None,
+                paid: None,
+                teamwork: false,
+                about: None,
+            };
+            let any = !self.candidates(&ctx, t, harmful).is_empty()
+                || t.whose == W::Any && !self.candidates(&ctx, t, !harmful).is_empty();
+            if !any {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Creatures (convoke) or artifacts (improvise) that could be tapped to help pay.
     fn convoke_tappers(&self, p: usize, c: &SimCard) -> Vec<u32> {
         let improvise = self.improvises(p, c);
@@ -703,6 +782,28 @@ impl<'a> Game<'a> {
         };
         let list = self.spell_list(p, src);
         let c: &'a SimCard = &self.players[list].cards[idx as usize];
+        // "This spell costs {3} less to cast if it targets a tapped creature": cast for less,
+        // it must target one (CR 601.2f).
+        let must_target = if back || opts.free {
+            0
+        } else {
+            c.self_reduce
+                .iter()
+                .find_map(|r| match r {
+                    SelfReduce::If(_, cond @ Cond::TappedCreatureToTarget)
+                        if self.cond_holds(cond, p, None) =>
+                    {
+                        Some(1)
+                    }
+                    SelfReduce::If(_, cond @ Cond::AttackingCreatureToTarget(nontoken))
+                        if self.cond_holds(cond, p, None) =>
+                    {
+                        Some(if *nontoken { 3 } else { 2 })
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0)
+        };
         // Muldrotha: a permanent type used up for this turn.
         let gy_type = match src {
             Src::Graveyard(_)
@@ -892,6 +993,10 @@ impl<'a> Game<'a> {
         if self.auditing() {
             self.audit_cast(p, src, (list, idx), back, &cost, x, opts, commander_slot);
         }
+        // Cast triggers go on the stack above the spell and resolve first, every player's
+        // (APNAP) - before the spell resolves or the permanent enters (CR 603.3).
+        self.run_pending();
+        self.sba();
         // Opponents may counter it.
         // (Sphinx of the Final Word, Samut: instants and sorceries can't be countered.)
         let uncounterable = c.cant_be_countered
@@ -940,7 +1045,12 @@ impl<'a> Game<'a> {
             if c.is(T_AURA) {
                 if let Some(t) = ai::aura_target(self, p, (list as u8, idx)) {
                     let tid = self.perms[t].id;
-                    if let Some(j) = self.idx(id) {
+                    // An opponent's creature with ward: unpaid, the Aura spell is countered
+                    // (it has nothing to enchant and goes to the graveyard).
+                    let warded = self.perms[t].ctrl as usize != p && !self.pay_ward(p, t);
+                    if warded {
+                        self.note(|| "  (the target's ward isn't paid: it's countered)".into());
+                    } else if let Some(j) = self.idx(id) {
                         self.perms[j].attached = Some(tid);
                     }
                 }
@@ -997,7 +1107,9 @@ impl<'a> Game<'a> {
                     });
                 }
             }
+            self.ext.must_target = must_target;
             self.run_pending();
+            self.ext.must_target = 0;
             if c.is(T_INSTANT | T_SORCERY) || back {
                 self.players[p].last_spell = Some(((list as u8, idx), back));
             }
@@ -1167,6 +1279,7 @@ impl<'a> Game<'a> {
         match &ab.trig {
             Trig::Activated {
                 mana,
+                cost,
                 tap,
                 sac_other,
                 discard,
@@ -1174,15 +1287,23 @@ impl<'a> Game<'a> {
                 extra,
                 ..
             } => {
-                if ab
+                let adds_mana = ab
                     .effects
                     .iter()
-                    .any(|e| matches!(e, crate::abilities::Effect::AddMana(_)))
-                    && *tap
-                    && *mana == 0
-                    && extra.tap_others == 0
-                {
+                    .any(|e| matches!(e, crate::abilities::Effect::AddMana(_)));
+                if adds_mana && *tap && *mana == 0 && extra.tap_others == 0 {
                     return None; // mana abilities are used as mana sources
+                }
+                // Filters ("{1}, {T}: Add one mana of any color", Baxter Building's "{4},
+                // {T}: Add four mana"): nothing gained by activating them on their own.
+                if adds_mana
+                    && *mana > 0
+                    && ab
+                        .effects
+                        .iter()
+                        .all(|e| matches!(e, crate::abilities::Effect::AddMana(_)))
+                {
+                    return None;
                 }
                 // Abilities that work from the graveyard or the hand, not the battlefield.
                 if extra.from_graveyard || extra.from_hand || ab.graveyard_only() {
@@ -1205,6 +1326,10 @@ impl<'a> Game<'a> {
                     return None;
                 }
                 if ab.once && x.powered {
+                    return None;
+                }
+                // "Harness ~": once harnessed, it stays so.
+                if x.powered && ab.text.contains(": harness ~") {
                     return None;
                 }
                 if ab.once_per_turn && k < 32 && x.fired & (1 << k) != 0 {
@@ -1239,13 +1364,14 @@ impl<'a> Game<'a> {
                 } else {
                     x.other_counters as i32
                 });
-                let mut total = *mana as u32;
+                // Coloured symbols must be paid with mana of their colours (CR 602.2b).
+                let mut cost = *cost;
                 if extra.x > 0 {
-                    let v = self.choose_x(p, i, ab, total, extra.x)?;
-                    total += v as u32 * extra.x as u32;
+                    let v = self.choose_x(p, i, ab, *mana as u32, extra.x)?;
+                    cost = cost.plus_generic(v as u32 * extra.x as u32);
                     x_paid = Some(v);
                 }
-                Some((Mana::generic(total), x_paid))
+                Some((cost, x_paid))
             }
             Trig::PowerUp(full) => {
                 // (Kang's extra turn: "power-up abilities can't be activated".)
@@ -1255,7 +1381,8 @@ impl<'a> Game<'a> {
                 // The turn it entered, the cost is reduced by the permanent's mana cost:
                 // its coloured pips come off matching pips, the rest off generic.
                 let mut cost = *full;
-                if x.born == self.round {
+                // "If it entered this turn" - this turn, not this round.
+                if x.entered_turn {
                     if let Some(r) = x.card {
                         let own = self.card(r).cost;
                         let mut spare = own.generic as u32;
@@ -1275,7 +1402,15 @@ impl<'a> Game<'a> {
                     .filter_map(|y| y.card)
                     .map(|r| self.card(r).power_up_less as u32)
                     .sum();
-                Some((cost.minus_generic(less), None))
+                let mut cost = cost.minus_generic(less);
+                // "Power-up — {X}{U}{U}: put X +1/+1 counters": X is chosen and paid (CR
+                // 107.3), and at least 1 (nothing is gained with X = 0).
+                if cost.x {
+                    cost.x = false;
+                    let v = self.choose_x(p, i, ab, cost.total(), 1)?;
+                    return Some((cost.plus_generic(v as u32), Some(v)));
+                }
+                Some((cost, None))
             }
             Trig::Loyalty(n) => {
                 if x.loyalty_used || x.loyalty + (*n as i16) < 0 {
@@ -1321,8 +1456,27 @@ impl<'a> Game<'a> {
         let Some((cost, x_paid)) = self.activation_plan(p, i, k) else {
             return false;
         };
+        // A {T} cost taps the source itself: it can't also tap for mana to pay the rest
+        // ("{4}, {T}: Draw a card" on Baxter Building needs four other mana).
+        let taps = matches!(
+            self.abilities_of(&self.perms[i]).get(k).map(|a| &a.trig),
+            Some(Trig::Activated { tap: true, .. })
+        );
+        let was_tapped = self.perms[i].tapped;
+        if taps {
+            self.perms[i].tapped = true;
+        }
         if !self.pay_for(p, &cost, Purpose::Ability { src: id }) {
+            if let Some(i) = self.idx(id) {
+                self.perms[i].tapped = was_tapped;
+            }
             return false;
+        }
+        if taps {
+            // (Tapped below, as the cost is paid.)
+            if let Some(i) = self.idx(id) {
+                self.perms[i].tapped = was_tapped;
+            }
         }
         let Some(i) = self.idx(id) else { return false };
         let x = self.perms[i].clone();
@@ -1359,7 +1513,8 @@ impl<'a> Game<'a> {
                 }
                 let Some(i) = self.idx(id) else { return false };
                 self.perms[i].activations += 1;
-                if ab.once {
+                // (Harnessing an Infinity Stone turns on its "∞" ability: `Cond::Harnessed`.)
+                if ab.once || ab.text.contains(": harness ~") {
                     self.perms[i].powered = true;
                 }
                 if ab.once_per_turn && k < 32 {
@@ -1462,7 +1617,7 @@ impl<'a> Game<'a> {
         let c = &pl.cards[*pl.graveyard.get(gk)? as usize];
         let ab = c.abilities.get(k)?;
         let Trig::Activated {
-            mana,
+            cost,
             tap: false,
             life,
             discard,
@@ -1491,7 +1646,7 @@ impl<'a> Game<'a> {
             return None;
         }
         self.gy_cost(p, extra, Some(gk))?;
-        Some(Mana::generic(*mana as u32))
+        Some(*cost)
     }
 
     /// Activates an ability of a card in the graveyard (paying its costs).
@@ -1697,9 +1852,10 @@ impl<'a> Game<'a> {
                 self.perms[i].tapped = true;
             }
         }
+        // (Crewing doesn't make it able to attack: a Vehicle that arrived this turn is still
+        // summoning sick - CR 302.6.)
         if let Some(v) = self.idx(vehicle_id) {
             self.perms[v].crewed = true;
-            self.perms[v].sick = false;
         }
         self.recalc();
         if self.log.is_some() {
@@ -1714,13 +1870,15 @@ impl<'a> Game<'a> {
         let Some((cost, find)) = c.cycling.clone() else {
             return false;
         };
-        if !self.pay(p, &Mana::generic(cost as u32)) {
+        let mana = c.cycling_mana.unwrap_or(Mana::generic(cost as u32));
+        if !self.pay(p, &mana) {
             return false;
         }
         let card = self.players[p].hand.remove(h);
         if self.log.is_some() {
             let name = self.players[p].cards[card as usize].name.clone();
-            self.note(|| format!("P{} cycles {} (paid {{{}}})", p, name, cost));
+            let paid = audit::fmt_mana(&mana);
+            self.note(|| format!("P{} cycles {} (paid {})", p, name, paid));
         }
         self.put_discarded(p, card);
         if find.is_empty() {
@@ -1745,10 +1903,16 @@ impl<'a> Game<'a> {
         true
     }
 
-    /// Plays a land from the graveyard (`(true, slot)`: Mole Man, Muldrotha) or from exile
-    /// (`(false, playable slot)`).
+    /// Plays a land from the graveyard (`(true, slot)`: Mole Man, Muldrotha), from exile
+    /// (`(false, playable slot)`) or from the top of the library (`(false,
+    /// FROM_LIBRARY_TOP)`: Ka-Zar).
     pub fn play_land_from(&mut self, p: usize, (gy, k): (bool, usize)) {
-        let c = if gy {
+        let c = if !gy && k == FROM_LIBRARY_TOP {
+            let Some(c) = self.players[p].library.pop() else {
+                return;
+            };
+            c
+        } else if gy {
             let c = self.players[p].graveyard.remove(k);
             self.players[p].gy_types_used |= T_LAND;
             self.emit(Ev::LeavesGraveyard, p, None);
@@ -1767,6 +1931,8 @@ impl<'a> Game<'a> {
         if self.auditing() {
             let from = if gy {
                 " from the graveyard"
+            } else if k == FROM_LIBRARY_TOP {
+                " from the top of the library"
             } else {
                 " from exile"
             };
@@ -1924,16 +2090,25 @@ impl<'a> Game<'a> {
         let stays: Vec<u32> = self
             .perms
             .iter()
-            .filter(|x| x.ctrl as usize == a && !x.no_abilities)
+            .filter(|x| x.ctrl as usize == a)
             .filter(|x| {
-                x.card.is_some_and(|r| {
-                    let c = self.card(r);
-                    c.no_untap
-                        && !(storied
-                            && c.abilities
-                                .iter()
-                                .any(|ab| ab.text.contains("unless you have an enduring story")))
-                })
+                !x.no_abilities
+                    && !x.blank
+                    && x.card.is_some_and(|r| {
+                        let c = self.card(r);
+                        c.no_untap
+                            && !(storied
+                                && c.abilities.iter().any(|ab| {
+                                    ab.text.contains("unless you have an enduring story")
+                                }))
+                    })
+                    // "Enchanted creature ... doesn't untap during its controller's untap
+                    // step" (Enchanted River's Grasp).
+                    || self.perms.iter().any(|y| {
+                        y.attached == Some(x.id)
+                            && !y.no_abilities
+                            && y.card.is_some_and(|r| self.card(r).attached_no_untap)
+                    })
             })
             .map(|x| x.id)
             .collect();
@@ -1968,62 +2143,18 @@ impl<'a> Game<'a> {
         }
         let hijacked = std::mem::take(&mut self.players[a].hijacked);
         self.phase_triggers(a, Phase::Upkeep);
-        if !first_turn {
+        // (A player who lost in their upkeep takes no further actions - CR 800.4a.)
+        if !first_turn && self.players[a].alive {
             self.draw(a, 1);
         }
         self.run_pending();
         self.sba();
-        if !self.players[a].alive {
-            return;
+        if self.players[a].alive {
+            self.main_turn(a, hijacked);
         }
-        // Sagas gain a lore counter after the draw.
-        let sagas: Vec<u32> = self
-            .perms
-            .iter()
-            .filter(|x| x.ctrl as usize == a && x.is(T_SAGA))
-            .map(|x| x.id)
-            .collect();
-        for id in sagas {
-            if let Some(i) = self.idx(id) {
-                self.add_other_counters(i, 1);
-                self.run_pending();
-                if let Some(i) = self.idx(id) {
-                    let ch = self.perms[i]
-                        .card
-                        .map(|r| self.card(r).chapters)
-                        .unwrap_or(3) as i16;
-                    if self.perms[i].other_counters >= ch {
-                        self.sacrifice(i);
-                    }
-                }
-            }
-        }
-        if hijacked {
-            // An opponent runs this turn (MSH Plans): they play a land and nothing useful.
-            if let Some(h) = self.players[a]
-                .hand
-                .iter()
-                .position(|&c| self.players[a].cards[c as usize].is(T_LAND))
-            {
-                self.play_land(a, h);
-            }
-        } else {
-            self.phase_triggers(a, Phase::Main);
-            ai::main_phase(self, a, false);
-            let combats = 1 + self.players[a].extra_combats as usize;
-            for _ in 0..combats {
-                if self.alive_count() <= 1 || !self.players[a].alive || self.end_turn {
-                    break;
-                }
-                self.phase_triggers(a, Phase::Combat);
-                self.combat(a);
-            }
-            self.players[a].extra_combats = 0;
-            if self.players[a].alive && self.alive_count() > 1 && !self.end_turn {
-                ai::main_phase(self, a, true);
-            }
-        }
-        if !self.players[a].alive || self.alive_count() <= 1 {
+        // A player eliminated during their own turn: the turn goes on without them (end step
+        // triggers of the others, damage and "until end of turn" effects wear off - CR 800.4a).
+        if self.alive_count() <= 1 {
             self.end_turn = false;
             return;
         }
@@ -2059,6 +2190,62 @@ impl<'a> Game<'a> {
         self.cleanup(a);
     }
 
+    /// The active player's turn after the draw step: Sagas, main phases and combats.
+    fn main_turn(&mut self, a: usize, hijacked: bool) {
+        // Sagas gain a lore counter after the draw.
+        let sagas: Vec<u32> = self
+            .perms
+            .iter()
+            .filter(|x| x.ctrl as usize == a && x.is(T_SAGA))
+            .map(|x| x.id)
+            .collect();
+        for id in sagas {
+            if let Some(i) = self.idx(id) {
+                self.add_other_counters(i, 1);
+                self.run_pending();
+                if let Some(i) = self.idx(id) {
+                    let ch = self.perms[i]
+                        .card
+                        .map(|r| self.card(r).chapters)
+                        .unwrap_or(3) as i16;
+                    if self.perms[i].other_counters >= ch {
+                        self.sacrifice(i);
+                    }
+                }
+            }
+        }
+        if hijacked {
+            // An opponent runs this turn (MSH Plans): they play a land and nothing useful.
+            if let Some(h) = self.players[a]
+                .hand
+                .iter()
+                .position(|&c| self.players[a].cards[c as usize].is(T_LAND))
+            {
+                self.play_land(a, h);
+            }
+        } else {
+            self.phase_triggers(a, Phase::Main);
+            ai::main_phase(self, a, false);
+            // Extra combats added during a combat ("after this phase, there is an additional
+            // combat phase") count too (CR 505.1a); at most five in a turn (loops).
+            self.players[a].extra_combats = self.players[a].extra_combats.saturating_add(1);
+            let mut combats = 0;
+            while self.players[a].extra_combats > 0 && combats < 5 {
+                self.players[a].extra_combats -= 1;
+                combats += 1;
+                if self.alive_count() <= 1 || !self.players[a].alive || self.end_turn {
+                    break;
+                }
+                self.phase_triggers(a, Phase::Combat);
+                self.combat(a);
+            }
+            self.players[a].extra_combats = 0;
+            if self.players[a].alive && self.alive_count() > 1 && !self.end_turn {
+                ai::main_phase(self, a, true);
+            }
+        }
+    }
+
     /// Player `a`'s turn and any extra turns after it (Kang: power-ups can't be activated
     /// during them).
     pub fn take_turns(&mut self, a: usize, first_turn: bool) {
@@ -2076,7 +2263,7 @@ impl<'a> Game<'a> {
     /// The cleanup step of player `a`'s turn: hand size, damage and "this turn" effects end.
     fn cleanup(&mut self, a: usize) {
         let outer = std::mem::replace(&mut self.cause, audit::Cause::Rule("hand size"));
-        while self.players[a].hand.len() > 7 {
+        while self.players[a].alive && self.players[a].hand.len() > 7 {
             self.discard(a);
         }
         self.cause = outer;
@@ -2298,13 +2485,28 @@ pub const KEYWORDS_PLAYED: &[&str] = &[
 /// Rounds before a game is called on life and board.
 pub const MAX_ROUNDS: u32 = 25;
 
-/// Plays one game; returns the winner's seat.
+/// `Game::play_land_from` slot for the top card of the library (Ka-Zar).
+pub const FROM_LIBRARY_TOP: usize = usize::MAX;
+
+/// What `play` returns when the game is a draw: the last players left the game together
+/// (CR 104.4a), so nobody wins.
+pub const NO_WINNER: usize = usize::MAX;
+
+/// Does seat `a` skip the draw of this turn (round `round`, `n` players)? Only the starting
+/// player of a two-player game, on their first turn; in multiplayer games nobody does (CR
+/// 103.8c).
+pub fn skips_first_draw(n: usize, round: u32, a: usize) -> bool {
+    n == 2 && round == 1 && a == 0
+}
+
+/// Plays one game; returns the winner's seat (`NO_WINNER` for a draw).
 pub fn play_game(decks: &[&Prepared], rules: &Rules, rng: &mut Rng) -> usize {
     let seed = rng.next();
     let mut g = Game::new(decks, rules, Rng::new(seed));
     play(&mut g)
 }
 
+/// Plays a game to its end; returns the winner's seat (`NO_WINNER` for a draw).
 pub fn play(g: &mut Game) -> usize {
     // A log set after `Game::new` still gets statistics (they name who eliminated whom).
     if g.log.is_some() && g.stats.is_none() {
@@ -2317,12 +2519,12 @@ pub fn play(g: &mut Game) -> usize {
             if !g.players[a].alive {
                 continue;
             }
-            g.take_turns(a, round == 1 && a == 0);
+            g.take_turns(a, skips_first_draw(n, round, a));
             let alive: Vec<usize> = (0..n).filter(|&i| g.players[i].alive).collect();
             match alive.len() {
                 0 => {
-                    g.audit_game_end(a, false, true);
-                    return a;
+                    g.audit_game_end(NO_WINNER, false, true);
+                    return NO_WINNER;
                 }
                 1 => {
                     g.audit_game_end(alive[0], false, false);
