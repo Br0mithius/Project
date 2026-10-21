@@ -21,12 +21,17 @@ fn main() {
     let rules = Rules::default();
     let cmd = db.get(&args[2]).expect("commander").clone();
     let bed = ranking::TestBed::new(&db, &rules);
+    // More games for closer calls: COMPARE_GAMES=4800.
+    let games: u32 = std::env::var("COMPARE_GAMES")
+        .ok()
+        .and_then(|g| g.parse().ok())
+        .unwrap_or(1200);
     for colors in &args[3..] {
         let set = ColorSet::parse(colors).expect("colours like WUBRG");
         let (deck, short) = analysis::autobuild(&cmd, &db, &coll, &rules, Some(set), None);
         let st = analysis::stats(&deck, &db);
         let sim = analysis::simulate(&deck, &db, 5000);
-        let wr = playtest::win_rate(&deck, &bed.gauntlet, &db, &rules, 1200, 7);
+        let wr = playtest::win_rate(&deck, &bed.gauntlet, &db, &rules, games, 7);
         // Hero / Equipment / Vehicle cards in the library.
         let hits: u32 = deck
             .cards
@@ -41,9 +46,10 @@ fn main() {
         let lib = deck.main_count() as u64;
         let miss = choose(lib - hits as u64, 7) / choose(lib, 7);
         println!(
-            "{:<6} won {:>4.1}% of 1200 games | keepable {:.0}% | commander on time {:.0}% | short {} | sources W{} U{} B{} R{} G{} | pips W{} U{} B{} R{} G{} | Hero/Equip/Vehicle {} -> top-7 hit {:.0}%",
+            "{:<6} won {:>4.1}% of {} games | keepable {:.0}% | commander on time {:.0}% | short {} | sources W{} U{} B{} R{} G{} | pips W{} U{} B{} R{} G{} | Hero/Equip/Vehicle {} -> top-7 hit {:.0}%",
             colors,
             wr * 100.0,
+            games,
             sim.keepable * 100.0,
             sim.commander_on_curve.map(|(_, p)| p).unwrap_or(0.0) * 100.0,
             short,

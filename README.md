@@ -62,7 +62,10 @@ Command-line examples: `commanders`, `auto madame hydra`, `season 6`, `draft red
 `cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool;
 `compare_builds -- data "Thanos, the Mad Titan" WBR WUBRG` playtests one commander in several colour sets (win rate,
 mana sources, opening hands); `score_cards -- data "<commander>" "<card>"...` shows how cards score for that deck;
-`review_cards -- data <list.txt>` prints each card's rules text beside the app's reading, for checking misreads.
+`review_cards -- data <list.txt>` prints each card's rules text beside the app's reading, for checking misreads;
+`probe_cards -- data <list.txt>` fires every ability of each card on a standard three-player board in the real
+simulator and lists exactly what changed (who lost what, counters, tokens, life, cards), which is the quickest way to
+see whether a card plays the way its text says. Add `COMPARE_GAMES=4800` before `compare_builds` for closer calls.
 
 ## Files
 
@@ -220,5 +223,14 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
 ## Development
 
 ```bash
-cargo test
+cargo test --release
 ```
+
+`data/probe_snapshot.txt` pins what the simulator does with every card in the database (the `probe_cards` output).
+If a change makes any card play differently, the `probe_snapshot` test fails and shows each card's old and new
+behaviour. Check every listed card against its rules text, then accept the changes with
+`UPDATE_PROBE_SNAPSHOT=1 cargo test --release probe_snapshot`.
+
+Card-reading accuracy is measured with blind audits: a random 200 league cards are probed and every result is
+compared with the card's rules text. October 2026: 48.5% of cards had some misplay and 10.5% a serious one; after
+three rounds of fixes, 4.5% and 1%.
