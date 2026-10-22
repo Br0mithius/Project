@@ -887,7 +887,7 @@ impl App {
                 "  To claim {} this round, trade in: {} ({} VP)",
                 top.card.name,
                 plan.iter()
-                    .map(|t| format!("{}x {}", t.copies, t.card.name))
+                    .map(|t| format!("{}x {}{}", t.copies, t.card.name, crate::league::deck_note(t)))
                     .collect::<Vec<_>>()
                     .join(", "),
                 vp
@@ -2251,7 +2251,7 @@ impl App {
         println!(
             "{}",
             self.style.dim(
-                "Only spare copies are suggested; cards in your current deck are kept. Claims cost 2x VP."
+                "Only spare copies are suggested (a deck card only when the rarity floor needs it). Claims cost 2x VP."
             )
         );
     }

@@ -388,34 +388,62 @@ pub fn plan_trade_in<'a>(
             .unwrap()
             .then(b.vp.cmp(&a.vp))
     });
+    // Rarity floor first, if a rare/mythic claim is planned: from spares when they cover it,
+    // otherwise topped up with the deck's least valuable cards of that rarity (said so in `why`).
     let mut picked: Vec<TradeIn> = Vec::new();
-    // Rarity floor first, if a rare/mythic claim is planned.
     let floor: Vec<(&str, usize)> = match need_rarity {
-        Some("mythic") => vec![("mythic", 1)],
+        // 2 rares also satisfy a mythic claim; whichever costs the deck less.
+        Some("mythic") => vec![("mythic", 1), ("rare", 2)],
         Some("rare") => vec![("rare", 1)],
         _ => vec![],
     };
-    for (rarity, n) in floor {
-        let mut found: Vec<usize> = spares
+    let in_deck = |rarity: &str| -> Vec<TradeIn<'a>> {
+        let commanders = deck.commanders();
+        let mut v: Vec<TradeIn> = db
+            .cards
             .iter()
-            .enumerate()
-            .filter(|(_, t)| t.card.rarity == rarity)
-            .map(|(i, _)| i)
-            .take(n)
+            .filter(|c| c.rarity == rarity && !c.is_basic())
+            .filter(|c| !commanders.iter().any(|n| **n == c.name))
+            .filter(|c| deck.used(&c.name) > 0 && coll.owned(&c.name) > 0)
+            .map(|card| TradeIn {
+                card,
+                copies: 1,
+                vp: vp_value(card),
+                keep_value: score_card(card, deck, db, rules).0.max(0.0),
+                why: "from your deck - the rarity floor needs it".to_string(),
+            })
             .collect();
-        if found.is_empty() && rarity == "mythic" {
-            // 2 rares also satisfy a mythic claim.
-            found = spares
+        v.sort_by(|a, b| a.keep_value.partial_cmp(&b.keep_value).unwrap());
+        v
+    };
+    // Each way of meeting the floor: (spare indices, deck cards), cheapest to keep first.
+    let options: Vec<(Vec<usize>, Vec<TradeIn>)> = floor
+        .iter()
+        .filter_map(|&(rarity, n)| {
+            let spare: Vec<usize> = spares
                 .iter()
                 .enumerate()
-                .filter(|(_, t)| t.card.rarity == "rare")
+                .filter(|(_, t)| t.card.rarity == rarity)
                 .map(|(i, _)| i)
-                .take(2)
+                .take(n)
                 .collect();
-        }
-        for i in found.into_iter().rev() {
+            let from_deck: Vec<TradeIn> = in_deck(rarity).into_iter().take(n - spare.len()).collect();
+            (spare.len() + from_deck.len() == n).then_some((spare, from_deck))
+        })
+        .collect();
+    let lost = |o: &(Vec<usize>, Vec<TradeIn>)| -> f32 {
+        // Spares cost what they'd still be worth; deck cards cost a lot more (the deck gets worse).
+        o.0.iter().map(|&i| spares[i].keep_value).sum::<f32>()
+            + o.1.iter().map(|t| 10.0 + t.keep_value).sum::<f32>()
+    };
+    if let Some((spare, from_deck)) = options
+        .into_iter()
+        .min_by(|a, b| lost(a).partial_cmp(&lost(b)).unwrap())
+    {
+        for i in spare.into_iter().rev() {
             picked.push(spares.remove(i));
         }
+        picked.extend(from_deck);
     }
     let floor_count = picked.len();
     let mut total: u32 = picked.iter().map(|t| t.vp).sum();
@@ -457,6 +485,15 @@ pub fn plan_trade_in<'a>(
         }
     }
     merged
+}
+
+/// " (from your deck)" for a trade-in the rarity floor had to take from the deck, else "".
+pub fn deck_note(t: &TradeIn) -> &'static str {
+    if t.why.starts_with("from your deck") {
+        " (from your deck)"
+    } else {
+        ""
+    }
 }
 
 /// Cards you'd have to cut when singleton starts (extra copies in the deck).
@@ -529,6 +566,43 @@ mod tests {
         assert!(apply_session(&mut r, 14).is_err());
         assert_eq!(staple_cost(9), 45);
         assert_eq!((1..=9).map(staple_cost).sum::<u32>(), 225);
+    }
+
+    #[test]
+    fn mythic_floor_takes_a_deck_rare_when_spares_are_short() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+        let db = CardDb::load(&dir.join("cards.json")).unwrap();
+        let rules = Rules::default();
+        let mut deck = Deck::new("t");
+        deck.commander = Some("Thanos, the Mad Titan".into());
+        for n in ["Construct a Cosmic Cube", "Hawkeye, Master Marksman", "Ronin, Shadow Stalker"] {
+            deck.add(n, 1);
+        }
+        let mut counts: std::collections::BTreeMap<String, u32> = [
+            "Thanos, the Mad Titan",
+            "Construct a Cosmic Cube",
+            "Hawkeye, Master Marksman",
+            "Ronin, Shadow Stalker",
+            "Nick Fury, Agent of S.H.I.E.L.D.",
+            "Kree Commandos",
+            "Super Suit",
+        ]
+        .iter()
+        .map(|n| (n.to_string(), 1))
+        .collect();
+        let coll = Collection::new(dir.join("none.txt"), counts.clone());
+        let plan = plan_trade_in(&deck, &db, &coll, &rules, 16, Some("mythic"));
+        let rares: Vec<&TradeIn> = plan.iter().filter(|t| t.card.rarity == "rare").collect();
+        assert_eq!(rares.len(), 2, "one spare rare + one from the deck");
+        assert!(rares.iter().any(|t| t.card.name.starts_with("Nick Fury")));
+        assert_eq!(plan.iter().filter(|t| !deck_note(t).is_empty()).count(), 1);
+        assert!(!plan.iter().any(|t| t.card.name.starts_with("Thanos")));
+        // With two spare rares the deck is left alone.
+        counts.insert("Vision Quest".into(), 1);
+        let coll = Collection::new(dir.join("none.txt"), counts);
+        let plan = plan_trade_in(&deck, &db, &coll, &rules, 16, Some("mythic"));
+        assert_eq!(plan.iter().filter(|t| t.card.rarity == "rare").count(), 2);
+        assert!(plan.iter().all(|t| deck_note(t).is_empty()));
     }
 }
 

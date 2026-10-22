@@ -480,6 +480,18 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             why.push("repeatable value".into());
         }
     }
+    // "Choose one that hasn't been chosen" ending in "you lose the game" (Demonic Pact): the
+    // last mode comes round a few turns later unless the card leaves first.
+    if parsed.all_abilities().any(|a| {
+        a.modal
+            && a.text.contains("hasn't been chosen")
+            && a.effects
+                .iter()
+                .any(|e| matches!(e, AbEffect::Rule(r) if r.contains("lose the game")))
+    }) {
+        score -= 12.0;
+        why.push("its last mode makes you lose the game".into());
+    }
     let st = stats(deck, db);
     let plan = deck_plan(deck, db, rules);
     if card.is_creature() {

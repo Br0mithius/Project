@@ -1,12 +1,14 @@
 //! Statistics over many simulated games, for auditing the simulator and its AI:
 //! `cargo run --release --example sim_stats -- <data dir> "<commander>" <colours> [games] [--gauntlet] [--check]`.
-//! Plays the commander's deck against the simulated league opponents (rotating seats), or
+//! In place of the commander, a deck file (`decks/thanos.txt`) plays that exact list (colours are then
+//! ignored; pass "-"). Plays the commander's deck against the simulated league opponents (rotating seats), or
 //! with `--gauntlet` tables of league opponents only (commander and colours are then ignored;
 //! pass "-"). `--check` replays every game without instrumentation and stops if anything
 //! differs (instrumentation must not change the game).
 use msh_deckbuilder::analysis::{self, Rng};
 use msh_deckbuilder::card::ColorSet;
 use msh_deckbuilder::db::*;
+use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::playtest::audit::{EndCause, Stats};
 use msh_deckbuilder::playtest::compile::T_LAND;
 use msh_deckbuilder::playtest::{self, MAX_ROUNDS, Prepared};
@@ -48,6 +50,10 @@ fn main() {
     let mut rules = Rules::default();
     rules.data_dir = Some(dir.clone());
     let me = (!gauntlet_only).then(|| {
+        if args[2].ends_with(".txt") {
+            let deck = Deck::load(std::path::Path::new(args[2]), &db).expect("deck file");
+            return Prepared::new(&deck, &db);
+        }
         let cmd = db.get(args[2]).expect("commander").clone();
         let colors = ColorSet::parse(args[3]).expect("colours");
         let (deck, _) = analysis::autobuild(&cmd, &db, &coll, &rules, Some(colors), None);
