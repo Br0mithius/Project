@@ -5,8 +5,10 @@
 //! plays. The lab takes a finished deck and, with paired playtests (`playtest::lab`: the
 //! deck and the changed deck play exactly the same games), measures:
 //!
-//! 1. What each card is worth: the win rate lost when it's replaced by the best card left
-//!    on the bench (and one land more or fewer).
+//! 1. What each card is worth: the win rate lost when it's replaced by the best spell left
+//!    on the bench. One land more or fewer is a check of its own: a deck at the league's
+//!    land goal (26 of 60) is never told to swap a spell for a basic - when one more land
+//!    clearly helps, the report says the mana base needs better fixing instead.
 //! 2. Additions: the most promising bench cards, each in place of the cards stage 1 found
 //!    least valuable.
 //! 3. The best combination: the measured gains combined greedily, then confirmed on fresh
@@ -89,6 +91,26 @@ const SEED_ADDITIONS: u64 = 0x1AB_0002;
 const SEED_CONFIRM: u64 = 0x1AB_0003;
 const SEED_RECONFIRM: u64 = 0x1AB_0004;
 const SEED_COLORS: u64 = 0x1AB_0005;
+const SEED_LANDS: u64 = 0x1AB_0006;
+
+/// The stand-in a card's worth is measured against when the bench has no spell left and
+/// the deck is at its land goal (a basic would make the measurement about the land count):
+/// a plain colourless 2/2 for two.
+pub const FILLER: &str = "Filler (colourless 2/2 for {2})";
+
+fn filler_card() -> Card {
+    Card {
+        name: FILLER.into(),
+        mana_cost: "{2}".into(),
+        cmc: 2.0,
+        type_line: "Artifact Creature — Construct".into(),
+        power: Some("2".into()),
+        toughness: Some("2".into()),
+        rarity: "common".into(),
+        confidence: "verified".into(),
+        ..Default::default()
+    }
+}
 
 /// Shared with the caller while the lab runs: games played so far, the expected total,
 /// what it's doing, and a stop button.
@@ -171,13 +193,20 @@ pub struct Addition {
     pub heuristic: f32,
 }
 
-/// One land more (+1) or fewer (-1).
+/// One land more (+1) or fewer (-1): a check of the land count, measured by turning the
+/// weakest spell into a basic (or a basic into the best bench card).
 #[derive(Debug, Clone)]
 pub struct LandChange {
     pub delta: i32,
     pub lands: u32,
     pub swap: Swap,
     pub gain: Measure,
+    /// The change goes past the league's land goal from the right side (more lands at or
+    /// above it, fewer at or below it): measured, but never suggested as a swap.
+    pub past_goal: bool,
+    /// One more land measured again on fresh games (done when the deck is at its land goal
+    /// and the screen said it gains clearly).
+    pub confirmed: Option<Measure>,
 }
 
 /// The deck rebuilt in a colour set.
@@ -225,6 +254,12 @@ pub struct LabReport {
     /// Best measured gain for each bench card tried, best first.
     pub additions: Vec<Addition>,
     pub lands: Vec<LandChange>,
+    /// Lands in the tested deck, and the league's land goal (`analysis::land_goal`): at or
+    /// above it the lab suggests no swap of a spell for a basic.
+    pub land_count: u32,
+    pub land_goal: u32,
+    /// The deck measured clearly short of mana at its land goal: what to do about it.
+    pub mana_note: Option<String>,
     /// Colour sets, best first (empty when the commander allows only one).
     pub colors: Vec<ColorOption>,
     /// The combination the playtests support (confirmed gain > 2 standard errors).
@@ -291,6 +326,38 @@ fn basic_for(deck: &Deck, db: &CardDb) -> Option<String> {
         .filter(|n| db.get(n).is_some())
 }
 
+/// The colours the deck casts with the fewest mana sources for what its spells ask of them
+/// (sources per coloured pip, the commander's counting double): the lowest one, and a
+/// second when it's about as short. Empty when nothing stands out.
+fn short_colors(deck: &Deck, db: &CardDb) -> String {
+    let st = analysis::stats(deck, db);
+    let cmd = deck
+        .commander
+        .as_ref()
+        .and_then(|c| db.get(c))
+        .map(|c| c.pips())
+        .unwrap_or([0; 5]);
+    let mut need: Vec<(f32, usize)> = (0..5)
+        .filter(|&i| st.pips[i] + cmd[i] > 0)
+        .map(|i| {
+            let want = (st.pips[i] + 2 * cmd[i]) as f32;
+            (st.sources[i] as f32 / want, i)
+        })
+        .collect();
+    if need.len() < 2 {
+        return String::new();
+    }
+    need.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let median = need[need.len() / 2].0;
+    let short: Vec<&str> = need
+        .iter()
+        .take(2)
+        .filter(|(r, _)| *r < 0.8 * median)
+        .map(|&(_, i)| analysis::color_name(i))
+        .collect();
+    short.join(" and ").to_lowercase()
+}
+
 /// Playtests changes to `deck` (or, if it isn't a complete deck for `commander`, to the
 /// deck auto-build makes) against simulated league opponents. Returns None if cancelled.
 pub fn explore(
@@ -353,6 +420,16 @@ pub fn explore_with(
     }
     let prep = Prepared::new(&base, db);
     let base_lands = analysis::land_count(&base, db);
+    // At the league's land goal (26 of 60) a spell isn't swapped for a basic, and below it
+    // a basic isn't cut: the land count is a check of its own, reported apart.
+    let land_goal = analysis::land_goal(rules);
+    let at_goal = base_lands >= land_goal;
+    let is_land = |n: &str| db.get(n).is_some_and(|c| c.is_land());
+    let swap_ok = |s: &Swap| {
+        !(at_goal && is_land(&s.add) && !is_land(&s.cut))
+            && !(base_lands <= land_goal && is_land(&s.cut) && !is_land(&s.add))
+            && s.add != FILLER
+    };
 
     // ------------------------------------------------------------ the bench
     let plays = played_colors(&base, db);
@@ -372,11 +449,19 @@ pub fn explore_with(
         .chain(bench.iter().cloned())
         .collect();
     let basic = basic_for(&base, db);
+    let filler = compile(&filler_card());
     let variant = |swaps: &[Swap]| -> Variant {
         Variant {
             swaps: swaps
                 .iter()
-                .filter_map(|s| Some((prep.card_index(&s.cut)?, compile(db.get(&s.add)?))))
+                .filter_map(|s| {
+                    let add = if s.add == FILLER {
+                        filler.clone()
+                    } else {
+                        compile(db.get(&s.add)?)
+                    };
+                    Some((prep.card_index(&s.cut)?, add))
+                })
                 .collect(),
         }
     };
@@ -434,22 +519,39 @@ pub fn explore_with(
         );
         (!progress.cancelled()).then_some(o)
     };
-    // Every screened (cut, add) measurement, pooled when measured more than once.
+    // Every screened (cut, add) measurement, pooled when measured more than once. Land
+    // checks past the goal (not `swap_ok`) are kept apart: they aren't swaps to make.
     let mut screened: Vec<(Swap, Measure)> = Vec::new();
-    let mut record = |s: &Swap, m: Measure| match screened.iter_mut().find(|(x, _)| x == s) {
-        Some((_, old)) => *old = old.pool(&m),
-        None => screened.push((s.clone(), m)),
+    let mut land_checks: Vec<(Swap, Measure)> = Vec::new();
+    let mut record = |s: &Swap, m: Measure| {
+        let list = if swap_ok(s) {
+            &mut screened
+        } else {
+            &mut land_checks
+        };
+        match list.iter_mut().find(|(x, _)| x == s) {
+            Some((_, old)) => *old = old.pool(&m),
+            None => list.push((s.clone(), m)),
+        }
     };
 
     // ------------------------------------------------------------ 1. each card's worth
     progress.set_stage("Measuring what each card is worth");
     let mut worth_swaps: Vec<Swap> = Vec::new();
     for (c, _) in &spells {
+        // The best spell left on the bench (bench cards are never lands); with none, a
+        // basic below the land goal, and at it a plain 2/2 stand-in.
         let repl = bench
             .iter()
             .map(|b| b.0.clone())
             .find(|b| *b != c.name)
-            .or_else(|| basic.clone());
+            .or_else(|| {
+                if at_goal {
+                    Some(FILLER.to_string())
+                } else {
+                    basic.clone()
+                }
+            });
         if let Some(r) = repl {
             worth_swaps.push(Swap::new(&c.name, &r));
         }
@@ -515,7 +617,7 @@ pub fn explore_with(
         .iter()
         .map(|w| (w.name.clone(), w.worth.gain))
         .collect();
-    if let Some(m) = &minus_land {
+    if let Some(m) = minus_land.as_ref().filter(|m| swap_ok(m)) {
         let g = out_a.diff(a_decks.len(), 0);
         cut_rank.push((m.cut.clone(), -g.gain));
     }
@@ -530,13 +632,17 @@ pub fn explore_with(
         .take(effort.bench)
         .map(|b| b.0.clone())
         .collect();
-    adds.extend(basic.clone());
+    // A basic is an addition only below the land goal.
+    if !at_goal {
+        adds.extend(basic.clone());
+    }
     let is_basic = |n: &str| db.get(n).is_some_and(|c| c.is_basic());
     let mut b_decks: Vec<Vec<Swap>> = Vec::new();
     for cut in &cuts {
         for add in &adds {
-            if add != cut && !(is_basic(add) && is_basic(cut)) {
-                b_decks.push(vec![Swap::new(cut, add)]);
+            let s = Swap::new(cut, add);
+            if add != cut && !(is_basic(add) && is_basic(cut)) && swap_ok(&s) {
+                b_decks.push(vec![s]);
             }
         }
     }
@@ -674,14 +780,53 @@ pub fn explore_with(
     let mut lands = Vec::new();
     for (delta, s) in [(1, &plus_land), (-1, &minus_land)] {
         if let Some(s) = s {
-            if let Some((_, m)) = screened.iter().find(|(x, _)| x == s) {
+            if let Some((_, m)) = screened
+                .iter()
+                .chain(land_checks.iter())
+                .find(|(x, _)| x == s)
+            {
                 lands.push(LandChange {
                     delta,
                     lands: (base_lands as i32 + delta).max(0) as u32,
                     swap: s.clone(),
                     gain: *m,
+                    past_goal: !swap_ok(s),
+                    confirmed: None,
                 });
             }
+        }
+    }
+    // At the goal, a clear gain from one more land is checked on fresh games: if it holds,
+    // the deck is short of mana (or of a colour) - better fixing is the answer, not a spell
+    // cut for a basic.
+    let mut mana_note = None;
+    if let Some(l) = lands
+        .iter_mut()
+        .find(|l| l.delta > 0 && l.past_goal && l.gain.gain > 0.0 && l.gain.z() >= 2.0)
+    {
+        progress.set_stage("Checking the mana base on fresh games");
+        replan(0, 2, colours);
+        let out_l = run(
+            std::slice::from_ref(&vec![l.swap.clone()]),
+            effort.confirm,
+            SEED_LANDS,
+        )?;
+        add_base(&out_l);
+        let m = out_l.diff(1, 0);
+        l.confirmed = Some(m);
+        if m.z() >= 2.0 && m.gain >= 0.01 {
+            mana_note = Some(format!(
+                "The deck plays short of mana: one more land measured {} pts on {} fresh games. \
+                 It's at the league's {}-land goal, so rather than cutting a spell for a basic, \
+                 consider better fixing (dual lands, mana rocks, land search){}.",
+                pts_se(&m),
+                m.games,
+                land_goal,
+                match short_colors(&base, db) {
+                    s if s.is_empty() => String::new(),
+                    s => format!(" and more sources of {}", s),
+                }
+            ));
         }
     }
 
@@ -757,6 +902,9 @@ pub fn explore_with(
         worth,
         additions,
         lands,
+        land_count: base_lands,
+        land_goal,
+        mana_note,
         colors,
         best,
         rejected,
@@ -865,7 +1013,7 @@ impl LabReport {
         if let Some(r) = self.worth.first().map(|w| w.replacement.clone()) {
             o.push_str(&format!(
                 "WHAT EACH CARD IS WORTH (screening, {} games each): points lost when it's replaced by the\n\
-                 best card left on your bench ({}). Dead weight = replacing it helped, clearly more\n\
+                 best spell left on your bench ({}). Dead weight = replacing it helped, clearly more\n\
                  than replacing a typical card of the deck. Score = the deck builder's estimate.\n",
                 self.worth.first().map_or(0, |w| w.worth.games),
                 r
@@ -905,10 +1053,13 @@ impl LabReport {
             }
         }
         if !self.lands.is_empty() {
-            o.push_str("\nLAND COUNT (screening)\n");
+            o.push_str(&format!(
+                "\nLAND COUNT (a check of its own, screening): the deck has {} lands, the league's goal is {}.\n",
+                self.land_count, self.land_goal
+            ));
             for l in &self.lands {
                 o.push_str(&format!(
-                    "  {:>12}  {} lands ({}: cut {}, add {})\n",
+                    "  {:>12}  {} lands ({}: cut {}, add {}){}\n",
                     pts_se(&l.gain),
                     l.lands,
                     if l.delta > 0 {
@@ -917,8 +1068,23 @@ impl LabReport {
                         "one fewer land"
                     },
                     l.swap.cut,
-                    l.swap.add
+                    l.swap.add,
+                    if l.past_goal {
+                        " - measured only, not a swap to make"
+                    } else {
+                        ""
+                    }
                 ));
+                if let Some(c) = &l.confirmed {
+                    o.push_str(&format!(
+                        "  {:>12}  the same on {} fresh games\n",
+                        pts_se(c),
+                        c.games
+                    ));
+                }
+            }
+            if let Some(n) = &self.mana_note {
+                o.push_str(&format!("  MANA BASE: {}\n", n));
             }
         }
         if !self.colors.is_empty() {
@@ -1058,6 +1224,92 @@ mod tests {
         d.add("Swamp", 12);
         assert_eq!(d.main_count(), 59);
         d
+    }
+
+    const TINY: Effort = Effort {
+        name: "test",
+        screen: 60,
+        additions: 60,
+        bench: 3,
+        cut_slots: 2,
+        confirm: 150,
+        colors: 60,
+        max_swaps: 3,
+    };
+
+    /// Boss with twelve Titans, black and red Goons and `lands` basics (60 cards).
+    fn deck_with_lands(lands: u32) -> Deck {
+        let mut d = Deck::new("lands");
+        d.commander = Some("Boss".into());
+        d.add("Titan", 12);
+        for i in 0..80 {
+            if i % 4 < 2 && d.main_count() < 59 - lands {
+                d.add(&format!("Goon {}", i), 1);
+            }
+        }
+        d.add("Mountain", lands / 2);
+        d.add("Swamp", lands - lands / 2);
+        assert_eq!(d.main_count(), 59);
+        d
+    }
+
+    #[test]
+    fn no_land_swaps_at_the_land_goal() {
+        let (db, coll) = setup();
+        let rules = Rules::default();
+        assert_eq!(analysis::land_goal(&rules), 26);
+        let gauntlet = opponents(&db, &coll, &rules);
+        let boss = db.get("Boss").unwrap().clone();
+        let is_land = |n: &str| db.get(n).is_some_and(|c| c.is_land());
+        let at_goal = deck_with_lands(26);
+        let r = explore_with(
+            &boss,
+            &at_goal,
+            &db,
+            &coll,
+            &rules,
+            TINY,
+            &gauntlet,
+            &Progress::new(),
+        )
+        .unwrap();
+        assert!(!r.base_auto);
+        assert_eq!((r.land_count, r.land_goal), (26, 26));
+        assert!(r.worth.iter().all(|w| !is_land(&w.replacement)));
+        assert!(
+            r.additions
+                .iter()
+                .all(|a| !is_land(&a.add) && !is_land(&a.cut)),
+            "no basic in or out at the goal"
+        );
+        for c in r.best.iter().chain(r.rejected.iter()) {
+            assert!(
+                c.swaps
+                    .iter()
+                    .all(|(s, _)| !is_land(&s.add) && !is_land(&s.cut))
+            );
+        }
+        // The land count is still checked, as a measurement only.
+        let more = r.lands.iter().find(|l| l.delta > 0).expect("one more land");
+        assert_eq!(more.lands, 27);
+        assert!(more.past_goal);
+        assert!(r.text().contains("LAND COUNT"));
+        assert!(r.text().contains("measured only, not a swap to make"));
+        // Below the goal a basic is tried as an addition, as before.
+        let short = deck_with_lands(24);
+        let r = explore_with(
+            &boss,
+            &short,
+            &db,
+            &coll,
+            &rules,
+            TINY,
+            &gauntlet,
+            &Progress::new(),
+        )
+        .unwrap();
+        assert!(r.additions.iter().any(|a| is_land(&a.add)));
+        assert!(!r.lands.iter().find(|l| l.delta > 0).unwrap().past_goal);
     }
 
     #[test]

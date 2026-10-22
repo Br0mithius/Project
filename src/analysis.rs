@@ -281,6 +281,14 @@ pub fn land_range(rules: &Rules) -> (u32, u32) {
     ((25.0 * scale).round() as u32, (27.0 * scale).round() as u32)
 }
 
+/// The league's mana base goal: the middle of its land range (26 in a 60-card deck). A deck
+/// that has reached it isn't advised to play more lands (the playtest lab then suggests
+/// better fixing rather than another basic).
+pub fn land_goal(rules: &Rules) -> u32 {
+    let (lo, hi) = land_range(rules);
+    (lo + hi) / 2
+}
+
 pub fn recommended_lands(avg_mv: f32, rules: &Rules) -> u32 {
     let (lo, hi) = land_range(rules);
     let mid = (lo + hi) / 2;
@@ -602,7 +610,130 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     if copies > 0 && !roles.contains(&Role::Removal) {
         score -= 0.4 * copies as f32;
     }
+    if let Some((floor, label)) = removal_floor(card, deck, db, rules) {
+        if score < floor {
+            why.push(format!(
+                "{}: rated at least like a solid {}-mana creature ({:.1})",
+                label,
+                card.mana_value(),
+                floor
+            ));
+            score = floor;
+        }
+    }
     (score, why)
+}
+
+thread_local! {
+    /// (deck key, the deck's creatures as (mana value, score)) for `removal_floor`.
+    static CREATURE_SCORES: std::cell::RefCell<Option<(u64, Vec<(u32, f32)>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// What a solid playable creature costing about `mv` scores in `deck`: the median score of
+/// the deck's own creatures within one mana of it (all its creatures when fewer than three
+/// are that close), or with fewer than three creatures in all, a vanilla body worth about
+/// 130% of fair value (`value::fair_value`) for `cost`.
+fn solid_creature_score(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> f32 {
+    let key = deck_key(deck);
+    let cached = CREATURE_SCORES.with(|c| {
+        c.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
+    });
+    let scores = cached.unwrap_or_else(|| {
+        let v: Vec<(u32, f32)> = resolved(deck, db)
+            .into_iter()
+            .filter(|(c, _)| c.is_creature() && !c.is_land())
+            .map(|(c, _)| {
+                let mut without = deck.clone();
+                without.remove(&c.name, 1);
+                (c.mana_value(), score_card(c, &without, db, rules).0)
+            })
+            .collect();
+        CREATURE_SCORES.with(|c| *c.borrow_mut() = Some((key, v.clone())));
+        v
+    });
+    let mv = card.mana_value();
+    let median = |mut v: Vec<f32>| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[v.len() / 2]
+    };
+    let near: Vec<f32> = scores
+        .iter()
+        .filter(|(m, _)| m.abs_diff(mv) <= 1)
+        .map(|x| x.1)
+        .collect();
+    if near.len() >= 3 {
+        return median(near);
+    }
+    if scores.len() >= 3 {
+        return median(scores.iter().map(|x| x.1).collect());
+    }
+    let target = crate::value::fair_value(mv) * 1.3;
+    let p = (target / 1.7).round().max(1.0);
+    let t = ((target - p) / 0.7).round().max(1.0);
+    let solid = Card {
+        name: format!("(a solid {}-mana creature)", mv),
+        mana_cost: card.mana_cost.clone(),
+        cmc: card.cmc,
+        type_line: "Creature — Human".into(),
+        power: Some(format!("{}", p)),
+        toughness: Some(format!("{}", t)),
+        rarity: card.rarity.clone(),
+        color_identity: card.color_identity.clone(),
+        confidence: "verified".into(),
+        ..Default::default()
+    };
+    score_card(&solid, deck, db, rules).0
+}
+
+/// A score floor for efficient removal, so it never ranks like filler: what a solid
+/// playable creature of about the same cost scores in this deck (`solid_creature_score`),
+/// half a point more at instant speed. Removal that answers most creatures at a fair price
+/// qualifies - destroy or exile any creature, steal one, 4+ damage or -4/-4 - costing 5 or
+/// less; conditional removal (a toughness or mana value limit, 2-3 damage) gets a floor 1.5
+/// lower. None for anything else (bounce, taps, X spells, board wipes, and creatures, whose
+/// removal is valued with their bodies).
+fn removal_floor(
+    card: &Card,
+    deck: &Deck,
+    db: &CardDb,
+    rules: &Rules,
+) -> Option<(f32, &'static str)> {
+    if card.is_creature() || card.is_land() || card.mana_cost.contains("{X}") {
+        return None;
+    }
+    let rm = card.parsed().removal()?;
+    let mv = card.mana_value();
+    if rm.mass || mv > 5 {
+        return None;
+    }
+    let broad = matches!(
+        rm.label,
+        "unconditional destroy"
+            | "unconditional exile"
+            | "exile until it leaves"
+            | "steals a creature"
+    ) || matches!(rm.label, "damage-based removal" | "-X/-X removal")
+        && rm.points >= 2.6;
+    let conditional = !broad
+        && matches!(
+            rm.label,
+            "conditional removal" | "damage-based removal" | "-X/-X removal"
+        )
+        && rm.points >= 1.8;
+    if !broad && !conditional {
+        return None;
+    }
+    let base = solid_creature_score(card, deck, db, rules);
+    let instant = card.type_line.contains("Instant") || card.text_lower().contains("flash");
+    Some(if broad {
+        (base + if instant { 0.5 } else { 0.0 }, "efficient removal")
+    } else {
+        (base - 1.5, "conditional removal")
+    })
 }
 
 /// Is `word` mentioned in `text` as something the commander *cares about* (e.g. "Villain
@@ -1953,6 +2084,72 @@ mod tests {
         let goon = db.get("Goon 1").unwrap();
         let (s, why) = synergy(boss, goon);
         assert!(s >= 2.0, "{} {:?}", s, why);
+    }
+
+    #[test]
+    fn efficient_removal_scores_like_a_solid_creature() {
+        let (mut db, coll) = setup();
+        let rules = Rules::default();
+        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules, None, None);
+        let mut cards = db.cards.clone();
+        cards.push(mk(
+            "Murder",
+            "{1}{B}{B}",
+            "Instant",
+            "Destroy target creature.",
+            "B",
+        ));
+        cards.push(mk(
+            "Small Kill",
+            "{1}{B}",
+            "Sorcery",
+            "Destroy target creature with mana value 2 or less.",
+            "B",
+        ));
+        cards.push(mk(
+            "Unsummon",
+            "{U}",
+            "Instant",
+            "Return target creature to its owner's hand.",
+            "U",
+        ));
+        db = CardDb::new(cards);
+        let score = |n: &str| score_card(db.get(n).unwrap(), &deck, &db, &rules);
+        // The deck's creatures costing 2-4, as the builder rates them.
+        let mut near: Vec<f32> = resolved(&deck, &db)
+            .into_iter()
+            .filter(|(c, _)| c.is_creature() && c.mana_value().abs_diff(3) <= 1)
+            .map(|(c, _)| {
+                let mut without = deck.clone();
+                without.remove(&c.name, 1);
+                score_card(c, &without, &db, &rules).0
+            })
+            .collect();
+        near.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let solid = near[near.len() / 2];
+        let (murder, why) = score("Murder");
+        assert!(
+            murder >= solid + 0.5 - 1e-3,
+            "instant unconditional removal at least a solid 3-drop and a half ({} vs {}): {:?}",
+            murder,
+            solid,
+            why
+        );
+        let (small, _) = score("Small Kill");
+        assert!(
+            small < murder,
+            "conditional removal stays lower: {} vs {}",
+            small,
+            murder
+        );
+        assert!(small >= solid - 1.5 - 1e-3);
+        let (bounce, why) = score("Unsummon");
+        assert!(
+            !why.iter().any(|w| w.contains("rated at least")),
+            "no floor for bounce: {} {:?}",
+            bounce,
+            why
+        );
     }
 
     #[test]

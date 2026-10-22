@@ -2484,18 +2484,38 @@ impl GuiApp {
                 }
                 if !r.lands.is_empty() {
                     ui.label(RichText::new("Land count").strong());
+                    ui.label(
+                        RichText::new(format!(
+                            "A check of its own: the deck has {} lands, the league's goal is {}.",
+                            r.land_count, r.land_goal
+                        ))
+                        .small()
+                        .weak(),
+                    );
                     egui::Grid::new("lab_lands").striped(true).show(ui, |ui| {
                         for l in &r.lands {
                             ui.label(format!("{} lands", l.lands));
                             ui.label(gain(&l.gain));
                             ui.label(
-                                RichText::new(format!("cut {}, add {}", l.swap.cut, l.swap.add))
-                                    .small()
-                                    .weak(),
+                                RichText::new(format!(
+                                    "cut {}, add {}{}",
+                                    l.swap.cut,
+                                    l.swap.add,
+                                    if l.past_goal {
+                                        " (measured only, not a swap to make)"
+                                    } else {
+                                        ""
+                                    }
+                                ))
+                                .small()
+                                .weak(),
                             );
                             ui.end_row();
                         }
                     });
+                    if let Some(n) = &r.mana_note {
+                        ui.label(RichText::new(format!("Mana base: {}", n)).small());
+                    }
                     ui.add_space(6.0);
                 }
                 let repl = r.worth.first().map(|w| w.replacement.clone()).unwrap_or_default();
