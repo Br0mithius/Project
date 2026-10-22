@@ -41,6 +41,8 @@ pub enum LeaveWhy {
     AuraFell,
     /// A Treasure or Lotus sacrificed for mana (not logged).
     ManaCost,
+    /// Its owner left the game (not logged).
+    PlayerLeft,
 }
 
 /// How a player lost life last.
@@ -181,7 +183,7 @@ pub struct Stats {
     pub rounds: u32,
     /// The game hit `MAX_ROUNDS` and was called on standing.
     pub timeout: bool,
-    /// The last players left the game together (the active player is named winner).
+    /// The last players left the game together: a draw (`winner` is None).
     pub simultaneous: bool,
     /// Each player's threat at the start of the latest turn.
     pub threat: Vec<f32>,
@@ -605,7 +607,7 @@ impl<'a> Game<'a> {
 
     /// A permanent left the battlefield.
     pub fn audit_leave(&mut self, perm: &Perm, to: Zone, why: LeaveWhy) {
-        if why == LeaveWhy::ManaCost {
+        if matches!(why, LeaveWhy::ManaCost | LeaveWhy::PlayerLeft) {
             return;
         }
         let ctrl = perm.ctrl as usize;
@@ -631,6 +633,7 @@ impl<'a> Game<'a> {
             LeaveWhy::LegendRule => "legend rule".into(),
             LeaveWhy::AuraFell => "Aura fell off (its host left)".into(),
             LeaveWhy::ManaCost => "sacrificed for mana".into(),
+            LeaveWhy::PlayerLeft => "its owner left the game".into(),
             LeaveWhy::Sba => {
                 let killer = if perm.hurt_by != 0 {
                     format!(" from {}", self.id_desc(perm.hurt_by))
@@ -1112,7 +1115,7 @@ impl<'a> Game<'a> {
         self.audit_eliminations();
         let round = self.round;
         if let Some(s) = self.stats.as_mut() {
-            s.winner = Some(winner);
+            s.winner = (winner != super::NO_WINNER).then_some(winner);
             s.rounds = round;
             s.timeout = timeout;
             s.simultaneous = simultaneous;
@@ -1129,18 +1132,23 @@ impl<'a> Game<'a> {
                 })
                 .collect();
             self.note(|| {
-                format!(
-                    "GAME OVER after round {}: P{} wins{}",
-                    round,
-                    winner,
-                    if timeout {
-                        " (round limit: called on life and board)"
-                    } else if simultaneous {
-                        " (the last players left together; the active player is named winner)"
-                    } else {
-                        ""
-                    }
-                )
+                if simultaneous {
+                    format!(
+                        "GAME OVER after round {}: a draw (the last players left together)",
+                        round
+                    )
+                } else {
+                    format!(
+                        "GAME OVER after round {}: P{} wins{}",
+                        round,
+                        winner,
+                        if timeout {
+                            " (round limit: called on life and board)"
+                        } else {
+                            ""
+                        }
+                    )
+                }
             });
             for l in lines {
                 self.note(|| l);

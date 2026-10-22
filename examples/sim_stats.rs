@@ -139,8 +139,11 @@ fn main() {
     let mut seat_w = [0f64; 4];
     let mut seat_ours = [(0f64, 0f64); 4];
     for g in &played {
-        let w = g.stats.winner.unwrap_or(0);
-        seat_w[w.min(3)] += 1.0;
+        // (A draw - the last players out together - is a win for nobody.)
+        let w = g.stats.winner.unwrap_or(usize::MAX);
+        if w < 4 {
+            seat_w[w] += 1.0;
+        }
         if let Some(s) = g.decks.iter().position(|&d| d == 0) {
             seat_ours[s].1 += 1.0;
             if w == s {
@@ -212,7 +215,7 @@ fn main() {
         }
     }
     println!(
-        "rounds: avg {:.1} | hit MAX_ROUNDS ({}) {} | last players out together (no true draw is modelled; the active player 'wins') {}",
+        "rounds: avg {:.1} | hit MAX_ROUNDS ({}) {} | last players out together (a draw: nobody wins) {}",
         rsum / total,
         MAX_ROUNDS,
         pct(timeouts, total),

@@ -323,6 +323,18 @@ fn rule_names(bits: u32) -> String {
             R_PREVENT_NONCOMBAT,
             "noncombat damage to your other creatures is prevented",
         ),
+        (
+            R_EXTRA_ANY_COUNTER,
+            "one extra counter of each kind on your permanents",
+        ),
+        (
+            R_DWARF_TRIGGERS_TWICE,
+            "your Dwarves' triggers trigger twice (enduring story)",
+        ),
+        (
+            R_LANDS_FROM_TOP,
+            "lands played from the top of your library",
+        ),
     ]
     .iter()
     .filter(|(b, _)| bits & b != 0)
@@ -551,6 +563,7 @@ fn trig_label(t: &Trig) -> String {
             life,
             sorcery,
             extra,
+            ..
         } => {
             let mut parts = Vec::new();
             if *mana > 0 {
@@ -956,6 +969,39 @@ pub fn probe(card: &Card) -> String {
             c.produces, c.mana_amount
         ));
     }
+    if c.cond_produces != 0 {
+        sim.push(format!(
+            "also colours {:#07b} if it entered this turn or with a basic land",
+            c.cond_produces
+        ));
+    }
+    if c.mana_identity {
+        sim.push("its colours: the commanders' colour identity".into());
+    }
+    if let Some(t) = &c.token {
+        sim.push(format!(
+            "its creature token: {}{}{}",
+            if t.is(T_LEGENDARY) {
+                format!("legendary \"{}\" ", t.name)
+            } else {
+                String::new()
+            },
+            if t.kw != 0 {
+                format!("keyword bits {:#x} ", t.kw)
+            } else {
+                String::new()
+            },
+            if t.abilities.is_empty() {
+                "no abilities".to_string()
+            } else {
+                t.abilities
+                    .iter()
+                    .map(|a| format!("\"{}\"", a.text))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        ));
+    }
     if c.prowess > 1 {
         sim.push(format!("prowess x{}", c.prowess));
     }
@@ -1077,7 +1123,10 @@ pub fn probe(card: &Card) -> String {
     if let Some((n, what)) = &c.cycling {
         sim.push(format!(
             "cycling {} ({})",
-            n,
+            match &c.cycling_mana {
+                Some(m) => mana_text(m),
+                None => n.to_string(),
+            },
             if what.is_empty() { "draw" } else { what }
         ));
     }

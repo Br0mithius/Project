@@ -38,6 +38,9 @@ pub struct Perm {
     pub ctrl: u8,
     pub card: Option<CardRef>,
     pub tok: Tok,
+    /// A creature token made by this card, with the abilities in its quotes
+    /// (`SimCard::token`).
+    pub tok_src: Option<CardRef>,
     pub types: u16,
     pub subtypes: Vec<String>,
     pub colors: u8,
@@ -52,6 +55,9 @@ pub struct Perm {
     pub loyalty: i16,
     /// Plan, lore, charge and other counters.
     pub other_counters: i16,
+    /// Hone counters among `other_counters`: each grants +1/+0 to the creature the
+    /// Equipment is attached to (Sting, Dwalin).
+    pub hone: i16,
     pub shield: u8,
     pub stun: u8,
     pub kw: u32,
@@ -323,7 +329,7 @@ pub struct Game<'a> {
     /// Per permanent index: (tick, id, value).
     pub vcache: std::cell::RefCell<Vec<(u64, u32, f32)>>,
     /// Per player: (tick, threat).
-    pub tcache: std::cell::RefCell<[(u64, f32); 8]>,
+    pub tcache: std::cell::RefCell<[(u64, f32, f32); 8]>,
     /// Per (me, opponent): (tick, weight).
     pub wcache: std::cell::RefCell<[[(u64, f32); 8]; 8]>,
     /// A card that just returned to the battlefield from its owner's graveyard by its own
@@ -367,6 +373,18 @@ pub struct Game<'a> {
 }
 
 pub const NO_CARD: u16 = u16::MAX;
+
+/// `Pending::subject` for an event about a player rather than a permanent ("whenever a
+/// player loses life, that player ..."): player `p`.
+pub fn player_subject(p: usize) -> u32 {
+    u32::MAX - 1 - p as u32
+}
+
+/// The player a `Pending::subject` stands for (see `player_subject`).
+pub fn subject_player(id: u32) -> Option<usize> {
+    let k = u32::MAX - id;
+    (1..=8).contains(&k).then(|| (k - 1) as usize)
+}
 
 /// `Perm::fired` bit: Ramos-style counter mana was used this turn.
 pub const COUNTER_MANA_USED: u32 = 1 << 31;
@@ -446,6 +464,22 @@ pub struct GameExtra {
     /// Colours (a bit each) the rest of the AI's turn plan still needs: generic costs are
     /// paid from other sources first.
     pub reserve: std::cell::Cell<u8>,
+    /// The last connive discarded a nonland card (its +1/+1 counter is put).
+    pub connive_nonland: bool,
+    /// This combat's attackers and the player each attacks (or whose planeswalker): "target
+    /// creature defending player controls".
+    pub attack_def: Vec<(u32, u8)>,
+    /// A spell cast for less because "it targets a tapped creature" (1) / "an attacking
+    /// creature" (2) / "an attacking nontoken creature" (3) must target one.
+    pub must_target: u8,
+    /// Combat damage is being dealt: permanents dealt damage, for one "is dealt damage"
+    /// event each once it's all dealt (simultaneous damage is one event).
+    pub defer_damaged: Option<Vec<u32>>,
+    /// The resolving spell or ability targeted something whose ward wasn't paid: it's
+    /// countered (the rest of its effects don't happen).
+    pub ward_countered: bool,
+    /// State-based actions already announced the deaths of the creatures leaving now.
+    pub deaths_announced: bool,
 }
 
 /// Per-player facts beyond the core zones and counts.
@@ -461,6 +495,8 @@ pub struct PlayerExtra {
     pub gy_start: Vec<u16>,
     /// The turn "whenever you tap a Mountain for mana, add an additional {R}" lasts.
     pub mountain_bonus: u32,
+    /// The commanders' colour identity (Command Tower's colours).
+    pub identity: u8,
 }
 
 /// Creature types the league's cards care about (what a changeling counts as).
@@ -477,6 +513,7 @@ fn token_abilities(tok: Tok) -> &'static [SimAbility] {
         let act = |mana: u8, tap: bool, effects: Vec<Effect>, text: &str| SimAbility {
             trig: Trig::Activated {
                 mana,
+                cost: Mana::generic(mana as u32),
                 tap,
                 sac_self: true,
                 sac_other: false,
@@ -643,6 +680,11 @@ impl<'a> Game<'a> {
                     _ => &c.abilities,
                 }
             }
+            // A token with abilities in quotes ("Landfall — ..." on Zabu).
+            (Tok::Creature, None) => match perm.tok_src.and_then(|r| self.card(r).token.as_ref()) {
+                Some(t) => &t.abilities,
+                None => &[],
+            },
             (t, _) => token_abilities(t),
         }
     }
@@ -736,11 +778,26 @@ impl<'a> Game<'a> {
         // Skeleton", "is a 5/5 Construct creature"): before other statics, which a blanked
         // creature no longer has.
         let mut sets = Vec::new();
+        let mut blanked = Vec::new();
         for x in &self.perms {
             if let (Some(r), Some(a)) = (x.card, x.attached) {
                 if let Some(s) = self.card(r).attached_sets.filter(|_| !x.no_abilities) {
                     sets.push((a, s));
                 }
+                // "Enchanted creature loses all abilities" (Enchanted River's Grasp).
+                if self.card(r).attached_blank && !x.no_abilities {
+                    blanked.push(a);
+                }
+            }
+        }
+        for a in blanked {
+            if let Some(i) = self.idx(a) {
+                let x = &mut self.perms[i];
+                x.blank = true;
+                x.eff_kw = x.temp_kw;
+                x.ward = 0;
+                x.protection = 0;
+                x.hexproof_from = 0;
             }
         }
         for (a, s) in sets {
@@ -909,15 +966,10 @@ impl<'a> Game<'a> {
             if let (Tok::Equip(p, t), Some(a)) = (x.tok, x.attached.and_then(|id| self.idx(id))) {
                 mods.push((a, p as i16, t as i16, 0, false));
             }
-            if x.other_counters > 0 && x.is(T_EQUIPMENT) && !x.no_abilities {
-                let hone = x.card.is_some_and(|r| {
-                    self.card(r)
-                        .abilities
-                        .iter()
-                        .any(|a| a.text.contains("hone counter"))
-                });
-                if let (true, Some(t)) = (hone, x.attached.and_then(|id| self.idx(id))) {
-                    mods.push((t, x.other_counters, 0, 0, false));
+            // (The counters carry the rule: Dwalin's hone counters on any Equipment count.)
+            if x.hone > 0 && x.is(T_EQUIPMENT) {
+                if let Some(t) = x.attached.and_then(|id| self.idx(id)) {
+                    mods.push((t, x.hone, 0, 0, false));
                 }
             }
         }
@@ -1218,6 +1270,8 @@ impl<'a> Game<'a> {
                 .any(|x| x.ctrl as usize != p && x.attacking && !(*nontoken && x.is_token())),
             Cond::GainedLifeAtLeast(n) => pl.life_gained_turn >= *n,
             Cond::CastNoncreatureThisTurn => pl.noncreature_spells_turn > 0,
+            // (`Perm::powered` marks a harnessed Infinity Stone.)
+            Cond::Harnessed => src.is_some_and(|s| self.perms[s].powered),
             // Can't be checked: decided once per check, deterministically from the round.
             Cond::Chance(f) => {
                 ((self.round as usize * 7 + p * 3 + src.unwrap_or(0)) % 100) as f32 / 100.0 < *f
@@ -1276,6 +1330,25 @@ impl<'a> Game<'a> {
                 } else {
                     c.produces
                 };
+                // Command Tower: the commanders' colours only (none for a colourless
+                // commander - CR 903.4f).
+                if c.mana_identity {
+                    colors = self.players[p].px.identity;
+                    if colors == 0 {
+                        continue;
+                    }
+                }
+                // "Activate only if this land entered this turn or if you control a basic
+                // land" (Gleaming Bastion).
+                if c.cond_produces != 0
+                    && (x.entered_turn
+                        || self
+                            .perms
+                            .iter()
+                            .any(|y| y.ctrl as usize == p && y.is(T_BASIC) && y.is(T_LAND)))
+                {
+                    colors |= c.cond_produces;
+                }
                 // Restricted mana ("spend this mana only to cast a Hero spell"): for anything
                 // else only its plain {C} counts.
                 if let Some(so) = &c.spend_only {
@@ -1290,6 +1363,7 @@ impl<'a> Game<'a> {
                 // "Until end of turn, whenever you tap a Mountain for mana, add an additional
                 // {R}" (Molten Tide).
                 if land
+                    && self.players[p].px.mountain_bonus != 0
                     && self.players[p].px.mountain_bonus == self.ext.turn_no
                     && x.subtypes.iter().any(|s| s == "mountain")
                 {
@@ -1396,6 +1470,62 @@ impl<'a> Game<'a> {
     /// Plans paying `cost` from player `p`'s sources; returns the sources to use.
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
         let srcs = self.sources(p);
+        let plain = self.plan_from(p, cost, &srcs);
+        if plain.is_some() {
+            return plain;
+        }
+        // Filters ("{1}, {T}: Add one mana of any color"; Baxter Building's "{4}, {T}: Add
+        // four mana in any combination of colors"): the filter makes its mana of any colour
+        // in place of its plain {C}, and its own cost is paid like generic mana.
+        for (k, s) in srcs.iter().enumerate() {
+            let Some((paid, made)) = self.filter_of(s.0) else {
+                continue;
+            };
+            let mut alt = srcs.clone();
+            alt[k] = (s.0, 0b11111, made, false);
+            if let Some(plan) = self.plan_from(p, &cost.plus_generic(paid), &alt) {
+                return Some(plan);
+            }
+        }
+        None
+    }
+
+    /// A filter mana ability of permanent `i`: (mana it costs, mana of any colour it makes).
+    fn filter_of(&self, i: usize) -> Option<(u32, u8)> {
+        let x = &self.perms[i];
+        if x.tapped || x.no_abilities {
+            return None;
+        }
+        self.abilities_of(x).iter().find_map(|a| match &a.trig {
+            Trig::Activated {
+                mana,
+                tap: true,
+                sac_self: false,
+                sac_other: false,
+                discard: false,
+                ..
+            } if *mana > 0
+                && (a.text.contains("mana of any color")
+                    || a.text.contains("any combination of colors")) =>
+            {
+                a.effects.iter().find_map(|e| match e {
+                    crate::abilities::Effect::AddMana(n) => {
+                        Some((*mana as u32, n.n.clamp(1, 10) as u8))
+                    }
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+    }
+
+    /// `plan_payment` from these sources.
+    fn plan_from(
+        &self,
+        p: usize,
+        cost: &Mana,
+        srcs: &[(usize, u8, u8, bool)],
+    ) -> Option<(Vec<usize>, u8, u32)> {
         let mut used = vec![false; srcs.len()];
         // Ramos' ten mana of mixed colours can pay several coloured pips at once.
         let is_multi = |s: &(usize, u8, u8, bool)| {
@@ -1626,7 +1756,13 @@ impl<'a> Game<'a> {
             self.audit_life(p, before, false);
         }
         self.players[p].lost_life_turn = true;
+        // The triggers know who lost how much ("that player mills that many cards").
+        let from = self.pending.len();
         self.emit(Ev::LoseLife, p, None);
+        for pend in self.pending.iter_mut().skip(from) {
+            pend.subject = Some(player_subject(p));
+            pend.x = Some(n);
+        }
     }
 
     /// Damage to a player from `source_ctrl` (combat or not).
@@ -1656,6 +1792,7 @@ impl<'a> Game<'a> {
     /// choice for commanders is needed: they always go to the command zone).
     pub fn leave(&mut self, i: usize, to: Zone, _sba: bool) {
         let why = std::mem::take(&mut self.leave_why);
+        let announced = std::mem::take(&mut self.ext.deaths_announced);
         let perm = self.perms.remove(i);
         self.last_left = Some(perm.clone());
         // A finality counter, or Garruk ("if a creature an opponent controls would die,
@@ -1723,13 +1860,14 @@ impl<'a> Game<'a> {
                 }
             }
         }
-        if creature && to_gy {
+        if creature && to_gy && !announced {
             self.emit_about(Ev::Death, perm.ctrl as usize, &perm);
         }
         if matches!(to, Zone::Hand) {
             self.emit_about(Ev::Bounced, perm.ctrl as usize, &perm);
         }
         // The card goes to its zone.
+        let mut in_graveyard = None;
         if let (Some(r), Tok::None) = (perm.card, perm.tok) {
             let owner = perm.owner as usize;
             if r.0 as usize == owner {
@@ -1740,7 +1878,10 @@ impl<'a> Game<'a> {
                     pl.command.push((r.1, perm.commander));
                 } else {
                     match to {
-                        Zone::Graveyard => pl.graveyard.push(r.1),
+                        Zone::Graveyard => {
+                            pl.graveyard.push(r.1);
+                            in_graveyard = Some((owner, r.1));
+                        }
                         Zone::Exile => pl.exile.push(r.1),
                         Zone::Hand => pl.hand.push(r.1),
                         Zone::Library(top) => {
@@ -1753,6 +1894,9 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+        }
+        if let Some((owner, c)) = in_graveyard {
+            self.to_graveyard(owner, &[c]);
         }
         for fid in fall {
             if let Some(fi) = self.idx(fid) {
@@ -1786,6 +1930,15 @@ impl<'a> Game<'a> {
         }
     }
 
+    /// Would creature `x` dying go to its graveyard (no finality counter, no Garruk exiling
+    /// it instead)?
+    pub fn dies_to_graveyard(&self, x: &Perm) -> bool {
+        let garruk = self.rule_anywhere(R_OPP_DIE_EXILE)
+            && (0..self.players.len())
+                .any(|o| o != x.ctrl as usize && self.rules[o % 8] & R_OPP_DIE_EXILE != 0);
+        x.is_creature() && !x.finality && !garruk
+    }
+
     /// Destroys a permanent (indestructible and shield counters stop it). True if it left.
     pub fn destroy(&mut self, i: usize) -> bool {
         let x = &mut self.perms[i];
@@ -1811,29 +1964,39 @@ impl<'a> Game<'a> {
     }
 
     /// Damage to a permanent from a source with these keywords.
-    pub fn damage_perm(&mut self, i: usize, n: i16, deathtouch: bool) {
+    /// Deals `n` damage to permanent `i`; returns the damage actually dealt (0 if it was
+    /// prevented), which is what lifelink gains (CR 702.15b).
+    pub fn damage_perm(&mut self, i: usize, n: i16, deathtouch: bool) -> i16 {
         if n <= 0 {
-            return;
+            return 0;
         }
         let x = &mut self.perms[i];
         // "Prevent all damage that would be dealt to ~" (Black Panther).
         if x.has(NO_DAMAGE) {
-            return;
+            return 0;
         }
         if x.is(T_PLANESWALKER) && !x.is_creature() {
             x.loyalty -= n;
-            return;
+            return n;
         }
         if x.shield > 0 {
             x.shield -= 1;
-            return;
+            return 0;
         }
         x.damage += n;
         if deathtouch {
             x.deathtouched = true;
         }
-        let snap = x.clone();
+        let id = x.id;
+        if let Some(ids) = self.ext.defer_damaged.as_mut() {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+            return n;
+        }
+        let snap = self.perms[i].clone();
         self.emit_about(Ev::Damaged, snap.ctrl as usize, &snap);
+        n
     }
 
     /// Creates a new permanent and returns its index.
@@ -1866,6 +2029,7 @@ impl<'a> Game<'a> {
             ctrl: ctrl as u8,
             card,
             tok,
+            tok_src: None,
             types,
             subtypes,
             colors,
@@ -1878,6 +2042,7 @@ impl<'a> Game<'a> {
             deathtouched: false,
             loyalty: 0,
             other_counters: 0,
+            hone: 0,
             shield: 0,
             stun: 0,
             kw,
@@ -1964,7 +2129,8 @@ impl<'a> Game<'a> {
         let c = self.card(r);
         // "As this land enters, you may behold a Jace. If you don't, it enters tapped."
         let beheld = c.behold_untapped && self.cond_holds(&Cond::CanBeholdJace, ctrl, None);
-        if c.is(T_LAND) && c.enters_tapped && !beheld {
+        // ("Whiplash enters tapped": any permanent, not only lands.)
+        if c.enters_tapped && !beheld {
             self.perms[i].tapped = true;
         }
         if let Some(cond) = &c.enters_tapped_unless {
@@ -2043,11 +2209,20 @@ impl<'a> Game<'a> {
                     } else {
                         k
                     };
-                    let k = k + i32::from(self.rules[ctrl % 8] & R_EXTRA_COUNTER != 0);
+                    let k = k + self.extra_counters(ctrl, k);
                     self.perms[i].counters += k as i16;
                 }
-                "shield" => self.perms[i].shield += k as u8,
-                _ => self.perms[i].other_counters += k as i16,
+                "shield" => {
+                    let k = k + i32::from(self.rules[ctrl % 8] & R_EXTRA_ANY_COUNTER != 0);
+                    self.perms[i].shield += k as u8
+                }
+                _ => {
+                    let k = k + i32::from(self.rules[ctrl % 8] & R_EXTRA_ANY_COUNTER != 0);
+                    self.perms[i].other_counters += k as i16;
+                    if kind == "hone" {
+                        self.perms[i].hone += k as i16;
+                    }
+                }
             }
             self.recalc();
         }
@@ -2138,6 +2313,15 @@ impl<'a> Game<'a> {
                 }
             }
         }
+        // A legendary token (Zabu) follows the legend rule too (CR 704.5j).
+        if let (Tok::Creature, Some(src), true) = (snap.tok, snap.tok_src, snap.is(T_LEGENDARY)) {
+            if let Some(old) = self.perms.iter().position(|x| {
+                x.id != id && x.ctrl as usize == ctrl && x.tok_src == Some(src) && x.is(T_LEGENDARY)
+            }) {
+                self.leave_why = super::audit::LeaveWhy::LegendRule;
+                self.leave(old, Zone::Graveyard, true);
+            }
+        }
         if snap.is(T_LAND) && !hushed {
             self.emit(Ev::Landfall, ctrl, Some(id));
         }
@@ -2193,14 +2377,55 @@ impl<'a> Game<'a> {
         self.emit_inner(ev, p, Some(subject));
     }
 
+    /// Cards `cards` of player `p` were just put into their graveyard (died, discarded,
+    /// milled): one event for all of them ("whenever one or more creature cards are put into
+    /// your graveyard from anywhere"), about a creature card among them if there is one.
+    pub fn to_graveyard(&mut self, p: usize, cards: &[u16]) {
+        if cards.is_empty() {
+            return;
+        }
+        let pl = &self.players[p];
+        let c = cards
+            .iter()
+            .copied()
+            .find(|&c| pl.cards[c as usize].is(T_CREATURE))
+            .unwrap_or(cards[0]);
+        let card = &pl.cards[c as usize];
+        let probe = Perm {
+            ctrl: p as u8,
+            owner: p as u8,
+            card: Some((p as u8, c)),
+            tok: Tok::None,
+            types: card.types,
+            subtypes: card.subtypes.clone(),
+            colors: card.colors,
+            mv: card.mv,
+            ..self.probe()
+        };
+        let from = self.pending.len();
+        self.emit_inner(Ev::ToGraveyard, p, Some(&probe));
+        // (The card isn't a permanent: nothing for "it" to refer to.)
+        for pend in self.pending.iter_mut().skip(from) {
+            pend.subject = None;
+        }
+    }
+
     fn emit_inner(&mut self, ev: Ev, p: usize, subject: Option<&Perm>) {
         let mut add = Vec::new();
         let mut fired = Vec::new();
         let bit = ev_bit(ev);
         for (si, src) in self.perms.iter().enumerate() {
-            // Only cards that listen for this kind of event (tokens without a card don't).
-            let Some(r) = src.card else { continue };
-            if self.card(r).ev_mask & bit == 0
+            // Only cards that listen for this kind of event (tokens without a card don't, but
+            // for abilities in quotes).
+            let (r, mask) = match (src.card, src.tok_src) {
+                (Some(r), _) => (r, self.card(r).ev_mask),
+                (None, Some(t)) => (
+                    (src.ctrl, NO_CARD),
+                    self.card(t).token.as_ref().map_or(0, |c| c.ev_mask),
+                ),
+                (None, None) => continue,
+            };
+            if mask & bit == 0
                 || src.tok != Tok::None && src.tok != Tok::Other && src.tok != Tok::Creature
             {
                 continue;
@@ -2491,6 +2716,7 @@ impl<'a> Game<'a> {
             ctrl: 0,
             card: None,
             tok: Tok::Other,
+            tok_src: None,
             types: 0,
             subtypes: Vec::new(),
             colors: 0,
@@ -2503,6 +2729,7 @@ impl<'a> Game<'a> {
             deathtouched: false,
             loyalty: 0,
             other_counters: 0,
+            hone: 0,
             shield: 0,
             stun: 0,
             kw: 0,
@@ -2575,37 +2802,76 @@ impl<'a> Game<'a> {
                     changed = true;
                 }
                 if !self.players[p].alive {
-                    // A player who leaves takes their permanents with them (CR 800.4a).
-                    let before = self.perms.len();
-                    self.perms
-                        .retain(|x| x.owner as usize != p && x.ctrl as usize != p);
-                    changed |= self.perms.len() != before;
+                    // A player who leaves takes what they own with them, and what they
+                    // controlled but didn't own goes back to its owner (control effects end -
+                    // CR 800.4a). Leaving the battlefield the usual way, cards exiled "until ~
+                    // leaves the battlefield" by their permanents come back.
+                    for x in self.perms.iter_mut() {
+                        if x.ctrl as usize == p && x.owner as usize != p {
+                            x.ctrl = x.owner;
+                            x.threaten_from = None;
+                            x.attacking = false;
+                            x.blocking = false;
+                            changed = true;
+                        }
+                    }
+                    let exiled = self.players[p].exile.len();
+                    while let Some(i) = self.perms.iter().position(|x| x.owner as usize == p) {
+                        self.leave_why = super::audit::LeaveWhy::PlayerLeft;
+                        self.leave(i, Zone::Exile, true);
+                        changed = true;
+                    }
+                    // (They left the game, not to exile.)
+                    self.players[p].exile.truncate(exiled);
+                    // (Their exiled cards that would come back stay out with them.)
+                    self.pending.retain(|x| x.ctrl as usize != p);
                 }
             }
-            let dead = self.perms.iter().position(|x| {
-                (x.is_creature()
-                    && (x.t <= 0
-                        || (!x.has(INDESTRUCTIBLE)
-                            && (x.damage >= x.t || x.deathtouched && x.damage > 0))))
-                    || (x.is(T_PLANESWALKER)
-                        && !x.is_creature()
-                        && x.loyalty <= 0
-                        && self.rules[x.ctrl as usize % 8] & R_WALKERS_STAY == 0)
-                    || (x.is(T_AURA)
-                        && x.attached
-                            .is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))
-            });
-            if let Some(i) = dead {
-                let x = &self.perms[i];
+            let dead: Vec<u32> = self
+                .perms
+                .iter()
+                .filter(|x| {
+                    (x.is_creature()
+                        && (x.t <= 0
+                            || (!x.has(INDESTRUCTIBLE)
+                                && (x.damage >= x.t || x.deathtouched && x.damage > 0))))
+                        || (x.is(T_PLANESWALKER)
+                            && !x.is_creature()
+                            && x.loyalty <= 0
+                            && self.rules[x.ctrl as usize % 8] & R_WALKERS_STAY == 0)
+                        || (x.is(T_AURA)
+                            && x.attached
+                                .is_none_or(|a| !self.perms.iter().any(|y| y.id == a)))
+                })
+                .map(|x| x.id)
+                .collect();
+            let mut going = Vec::new();
+            for id in dead {
+                let Some(i) = self.idx(id) else { continue };
+                let x = &mut self.perms[i];
                 if x.is_creature() && x.t > 0 && x.shield > 0 && !x.deathtouched {
-                    let x = &mut self.perms[i];
                     x.shield -= 1;
                     x.damage = 0;
                 } else {
-                    self.leave_why = super::audit::LeaveWhy::Sba;
-                    self.leave(i, Zone::Graveyard, true);
+                    going.push(id);
                 }
                 changed = true;
+            }
+            // They all die at once (CR 704.3): "whenever another creature dies" on one of them
+            // sees the others (CR 603.10a) - the deaths are announced while all are still here.
+            for &id in &going {
+                let Some(i) = self.idx(id) else { continue };
+                if self.dies_to_graveyard(&self.perms[i]) {
+                    let snap = self.perms[i].clone();
+                    self.emit_about(Ev::Death, snap.ctrl as usize, &snap);
+                }
+            }
+            for id in going {
+                if let Some(i) = self.idx(id) {
+                    self.leave_why = super::audit::LeaveWhy::Sba;
+                    self.ext.deaths_announced = true;
+                    self.leave(i, Zone::Graveyard, true);
+                }
             }
             if !changed {
                 break;

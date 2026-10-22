@@ -9,7 +9,7 @@ use super::combat::{Attack, Def};
 use super::compile::*;
 use super::resolve::Ctx;
 use super::state::*;
-use super::{CastOpts, ExtraPay, Src};
+use super::{CastOpts, ExtraPay, FROM_LIBRARY_TOP, Src};
 use crate::abilities::{Effect, Kind, Whose};
 use crate::restrict::{Dyn, Restr};
 
@@ -138,20 +138,21 @@ pub fn perm_value_peek(g: &Game, i: usize) -> f32 {
 
 /// `threat` without filling caches.
 pub fn threat_peek(g: &Game, o: usize) -> f32 {
+    threat_parts_peek(g, o).0
+}
+
+/// (`threat`, `win_score`) without filling caches.
+fn threat_parts_peek(g: &Game, o: usize) -> (f32, f32) {
     if !g.players[o].alive {
-        return 0.0;
+        return (0.0, f32::MIN);
     }
     if o < 8 {
-        let (t, v) = g.tcache.borrow()[o];
+        let (t, v, s) = g.tcache.borrow()[o];
         if t == g.tick {
-            return v;
+            return (v, s);
         }
     }
-    let board: f32 = (0..g.perms.len())
-        .filter(|&i| g.perms[i].ctrl as usize == o && !g.perms[i].is(T_LAND))
-        .map(|i| perm_value_peek(g, i))
-        .sum();
-    board + g.players[o].hand.len() as f32 * 0.4 + g.players[o].life as f32 * 0.05
+    threat_parts_uncached(g, o, perm_value_peek)
 }
 
 /// `weight` without filling caches.
@@ -237,22 +238,9 @@ fn perm_value_uncached(g: &Game, i: usize) -> f32 {
     v.max(0.2)
 }
 
-/// How threatening a player is to the rest of the table.
+/// How threatening a player is to the rest of the table: its board's value, hand and life.
 pub fn threat(g: &Game, o: usize) -> f32 {
-    if !g.players[o].alive {
-        return 0.0;
-    }
-    if o < 8 {
-        let (t, v) = g.tcache.borrow()[o];
-        if t == g.tick {
-            return v;
-        }
-    }
-    let v = threat_uncached(g, o);
-    if o < 8 {
-        g.tcache.borrow_mut()[o] = (g.tick, v);
-    }
-    v
+    threat_parts(g, o).0
 }
 
 /// How likely player `o` is to win, as a score (log-odds, up to a constant): life, cards in
@@ -260,46 +248,55 @@ pub fn threat(g: &Game, o: usize) -> f32 {
 /// to who went on to win from the start of rounds 3-9 of simulated league games. It names
 /// the eventual winner more often than the board value alone from round 5 on.
 pub fn win_score(g: &Game, o: usize) -> f32 {
-    if !g.players[o].alive {
-        return f32::MIN;
-    }
-    win_score_from(g, o, threat(g, o))
+    threat_parts(g, o).1
 }
 
 /// `win_score` without filling caches.
 pub fn win_score_peek(g: &Game, o: usize) -> f32 {
-    if !g.players[o].alive {
-        return f32::MIN;
-    }
-    win_score_from(g, o, threat_peek(g, o))
+    threat_parts_peek(g, o).1
 }
 
-fn win_score_from(g: &Game, o: usize, threat: f32) -> f32 {
+/// (`threat`, `win_score`), cached until the board changes.
+fn threat_parts(g: &Game, o: usize) -> (f32, f32) {
+    if !g.players[o].alive {
+        return (0.0, f32::MIN);
+    }
+    if o < 8 {
+        let (t, v, s) = g.tcache.borrow()[o];
+        if t == g.tick {
+            return (v, s);
+        }
+    }
+    let parts = threat_parts_uncached(g, o, perm_value);
+    if o < 8 {
+        g.tcache.borrow_mut()[o] = (g.tick, parts.0, parts.1);
+    }
+    parts
+}
+
+fn threat_parts_uncached(g: &Game, o: usize, value: fn(&Game, usize) -> f32) -> (f32, f32) {
     let pl = &g.players[o];
-    // The board: what its permanents are worth (`threat` without its hand and life terms).
-    let board = threat - pl.hand.len() as f32 * 0.4 - pl.life as f32 * 0.05;
-    let (mut power, mut lands) = (0i32, 0i32);
-    for x in g.perms.iter().filter(|x| x.ctrl as usize == o) {
-        if x.is_creature() {
-            power += x.p.max(0) as i32;
+    let (mut board, mut power, mut lands) = (0.0f32, 0i32, 0i32);
+    for (i, x) in g.perms.iter().enumerate() {
+        if x.ctrl as usize != o {
+            continue;
         }
         if x.is(T_LAND) {
             lands += 1;
+        } else {
+            board += value(g, i);
+        }
+        if x.is_creature() {
+            power += x.p.max(0) as i32;
         }
     }
-    0.0893 * pl.life as f32
+    let threat = board + pl.hand.len() as f32 * 0.4 + pl.life as f32 * 0.05;
+    let score = 0.0893 * pl.life as f32
         + 0.0779 * pl.hand.len() as f32
         + 0.0391 * power as f32
         + 0.1328 * lands as f32
-        + 0.0363 * board
-}
-
-fn threat_uncached(g: &Game, o: usize) -> f32 {
-    let board: f32 = (0..g.perms.len())
-        .filter(|&i| g.perms[i].ctrl as usize == o && !g.perms[i].is(T_LAND))
-        .map(|i| perm_value(g, i))
-        .sum();
-    board + g.players[o].hand.len() as f32 * 0.4 + g.players[o].life as f32 * 0.05
+        + 0.0363 * board;
+    (threat, score)
 }
 
 /// How much `me` wants to hurt opponent `o`: the biggest threat, whoever attacked it, and
@@ -600,7 +597,7 @@ fn arrival_value(c: &SimCard) -> f32 {
         .sum()
 }
 
-pub fn blink_choice(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
+pub fn blink_choice(g: &Game, me: usize, not: Option<u32>, types: u16) -> Option<usize> {
     (0..g.perms.len())
         .filter(|&i| {
             let x = &g.perms[i];
@@ -609,6 +606,7 @@ pub fn blink_choice(g: &Game, me: usize, not: Option<u32>) -> Option<usize> {
                 && x.commander == 0
                 && x.card.is_some()
                 && Some(x.id) != not
+                && (x.is(types) || types & T_CREATURE != 0 && x.is_creature())
         })
         .map(|i| (arrival_value(g.card(g.perms[i].card.unwrap())), i))
         .filter(|(v, _)| *v > 0.0)
@@ -746,14 +744,16 @@ pub fn card_worth(g: &Game, p: usize, c: &SimCard) -> f32 {
     if c.is(T_LAND) {
         return if lands_total(g, p) >= 6 { 0.3 } else { 2.5 };
     }
-    let lands = lands_in_play(g, p) as f32;
     // Colours its lands can't make, and mana it's far from, make a card worth less.
-    let have = g
+    let (mut lands, mut have) = (0.0f32, 0u8);
+    for x in g
         .perms
         .iter()
         .filter(|x| x.ctrl as usize == p && x.is(T_LAND))
-        .filter_map(|x| x.card)
-        .fold(0u8, |m, r| m | g.card(r).produces);
+    {
+        lands += 1.0;
+        have |= x.card.map_or(0, |r| g.card(r).produces);
+    }
     let offcolour = lands >= 3.0 && pip_mask(&c.cost) & !have != 0;
     c.value * if offcolour { 0.6 } else { 1.0 } - (c.mv as f32 - lands - 1.0).max(0.0)
 }
@@ -890,8 +890,34 @@ pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool, r: &Restr) {
 
 pub fn tutor_choice(g: &Game, p: usize, text: &str, r: &Restr) -> Option<usize> {
     let pl = &g.players[p];
+    // "Search your library for a Plan card": a card of that subtype only.
+    let sub = text
+        .split("search your library for a")
+        .nth(1)
+        .map(|s| s.trim_start_matches('n').trim_start())
+        .and_then(|s| s.split(" card").next())
+        .filter(|w| !w.is_empty() && !w.contains(' ') && !w.starts_with("card"))
+        .filter(|w| {
+            ![
+                "creature",
+                "land",
+                "artifact",
+                "equipment",
+                "enchantment",
+                "instant",
+                "sorcery",
+                "planeswalker",
+                "basic",
+                "legendary",
+                "permanent",
+                "nonland",
+            ]
+            .contains(w)
+        });
     let want = |c: &SimCard| {
-        if text.contains("creature card") {
+        if let Some(s) = sub {
+            c.has_subtype(s)
+        } else if text.contains("creature card") {
             c.is(T_CREATURE)
         } else if text.contains("land card") || text.contains("basic land") {
             c.is(T_LAND)
@@ -1229,7 +1255,7 @@ fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
 }
 
 /// What an effect would do for player `p` right now (card points).
-fn effect_now(
+pub(crate) fn effect_now(
     g: &Game,
     p: usize,
     e: &Effect,
@@ -1426,9 +1452,14 @@ fn effect_now(
                 }
         }
         Effect::AddMana(n) => n.n as f32 * 0.3,
-        Effect::Blink => blink_choice(g, p, src.filter(|_| text.contains("target")))
-            .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
-            .unwrap_or(0.0),
+        Effect::Blink => blink_choice(
+            g,
+            p,
+            src.filter(|_| text.contains("target")),
+            blink_types(text),
+        )
+        .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
+        .unwrap_or(0.0),
         Effect::Copy => best_to_copy(g, p, true)
             .map(|i| perm_value(g, i) * 0.7)
             .unwrap_or(0.5),
@@ -1488,6 +1519,17 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
             then - now
         }
         "extra turn" => 6.0,
+        // An Infinity Stone's "∞" ability, for the rest of the game.
+        "harness (turns on its infinity ability)" => me
+            .filter(|&i| !g.perms[i].powered)
+            .map(|i| {
+                g.abilities_of(&g.perms[i])
+                    .iter()
+                    .filter(|a| matches!(a.cond, Cond::Harnessed))
+                    .map(|a| engine_value(std::slice::from_ref(a)) / 0.6)
+                    .sum()
+            })
+            .unwrap_or(0.0),
         // Worth it before our attack, when an opponent has a blocker to stop.
         "can't block this turn" => {
             let attackers = g
@@ -1856,6 +1898,8 @@ enum Act {
     ActivateGy(usize, usize),
     Equip(u32, u32),
     Cycle(usize),
+    /// An ability of a card in hand that works from there: (hand slot, ability).
+    ActivateHand(usize, usize),
 }
 
 /// Value of the best set of spells (value, mana, colours needed) castable with `budget` mana
@@ -1945,6 +1989,16 @@ fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
         if let Some(k) = best {
             return Some((true, k));
         }
+    }
+    // Ka-Zar: a land on top of the library is a free card.
+    if g.rules[p % 8] & R_LANDS_FROM_TOP != 0
+        && g.active == p
+        && pl
+            .library
+            .last()
+            .is_some_and(|&c| pl.cards[c as usize].is(T_LAND))
+    {
+        return Some((false, FROM_LIBRARY_TOP));
     }
     (0..pl.playable.len())
         .find(|&k| {
@@ -2079,6 +2133,19 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             continue;
         }
         push_cast(&mut out, Src::Hand(h), idx, false, false);
+        // Abilities that work from the hand ("{3}{G}, Discard this card: ..."): the card
+        // is spent on it.
+        for (k, ab) in c.abilities.iter().enumerate() {
+            let Some(cost) = g.hand_activation_cost(p, h, k) else {
+                continue;
+            };
+            if g.can_pay(p, &cost) {
+                let v = ability_now(g, p, ab, None)
+                    - 0.1 * cost.total() as f32
+                    - 0.3 * card_worth(g, p, c).max(0.0);
+                out.push((v, cost.total(), Act::ActivateHand(h, k)));
+            }
+        }
         if c.back
             .as_ref()
             .is_some_and(|b| b.kind != BackKind::Prepare && b.kind != BackKind::Transform)
@@ -2262,7 +2329,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 }
                 Trig::PowerUp(full) => {
                     // Cheapest the turn it enters: worth the mana it saves.
-                    if x.born == g.round {
+                    if x.entered_turn {
                         v += 0.7 * full.total().saturating_sub(cost.total()) as f32;
                     }
                 }
@@ -2388,6 +2455,7 @@ fn act_cost(g: &Game, p: usize, act: &Act) -> Option<Mana> {
         Act::Activate(id, k) => g.idx(id).and_then(|i| g.activation_cost(p, i, k)),
         Act::ActivateGy(gk, k) => g.graveyard_activation_cost(p, gk, k),
         Act::Equip(e, t) => g.equip_cost(p, e, t).map(|c| c.0),
+        Act::ActivateHand(h, k) => g.hand_activation_cost(p, h, k),
         Act::Cycle(h) => {
             let pl = &g.players[p];
             pl.hand
@@ -2429,6 +2497,7 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
         Act::ActivateGy(gk, k) => g.activate_from_graveyard(p, gk, k),
         Act::Equip(e, t) => g.equip(p, e, t),
         Act::Cycle(h) => g.cycle(p, h),
+        Act::ActivateHand(h, k) => g.activate_from_hand(p, h, k),
     }
 }
 
@@ -2506,6 +2575,11 @@ fn act_name(g: &Game, p: usize, act: &Act) -> String {
             .get(h)
             .map(|&c| format!("cycle {}", g.players[p].cards[c as usize].name))
             .unwrap_or_else(|| format!("{:?}", act)),
+        Act::ActivateHand(h, _) => g.players[p]
+            .hand
+            .get(h)
+            .map(|&c| format!("{} (hand ability)", g.players[p].cards[c as usize].name))
+            .unwrap_or_else(|| format!("{:?}", act)),
     }
 }
 
@@ -2522,12 +2596,11 @@ fn plan_turn(
     // A creature cast with its power-up is listed twice (with and without the power-up):
     // plan with each version and keep the better plan.
     let mut twins: Vec<(usize, usize)> = Vec::new();
-    for i in 0..opts.len() {
-        if let Act::Cast(..) = opts[i].2 {
-            if let Some(j) =
-                (0..i).find(|&j| format!("{:?}", opts[j].2) == format!("{:?}", opts[i].2))
-            {
-                twins.push((j, i));
+    for i in 1..opts.len() {
+        // (The two versions are listed one after the other.)
+        if let (Act::Cast(s1, o1), Act::Cast(s2, o2)) = (opts[i - 1].2, opts[i].2) {
+            if s1 == s2 && o1.back == o2.back {
+                twins.push((i - 1, i));
             }
         }
     }
@@ -2638,10 +2711,10 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
         if !post && g.stats.is_some() {
             g.audit_mana_avail(p);
         }
-        let opts: Vec<(f32, u32, Act)> = options(g, p, post)
-            .into_iter()
-            .filter(|o| !failed.contains(&format!("{:?}", o.2)))
-            .collect();
+        let mut opts: Vec<(f32, u32, Act)> = options(g, p, post);
+        if !failed.is_empty() {
+            opts.retain(|o| !failed.contains(&format!("{:?}", o.2)));
+        }
         if opts.is_empty() {
             return;
         }
@@ -3131,7 +3204,13 @@ pub fn crew_for_combat(g: &mut Game, a: usize) {
         .perms
         .iter()
         .filter(|x| {
-            x.ctrl as usize == a && x.is(T_VEHICLE) && !x.crewed && !x.tapped && x.base_p >= 3
+            // (A Vehicle that arrived this turn can't attack even crewed.)
+            x.ctrl as usize == a
+                && x.is(T_VEHICLE)
+                && !x.crewed
+                && !x.tapped
+                && !(x.sick && !x.has(HASTE))
+                && x.base_p >= 3
         })
         .map(|x| x.id)
         .collect();
