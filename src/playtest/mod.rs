@@ -363,7 +363,7 @@ impl<'a> Game<'a> {
         base: &Mana,
         from_hand: bool,
     ) -> Option<ExtraPay> {
-        let others_in_hand = self.players[p].hand.len() - usize::from(from_hand);
+        let others_in_hand = self.players[p].hand.len().saturating_sub(usize::from(from_hand));
         Some(match e {
             ExtraCost::Sacrifice(t) => {
                 ExtraPay::Sacrifice(self.perms[ai::sac_for_cost(self, p, *t)?].id)
