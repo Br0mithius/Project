@@ -1,6 +1,7 @@
 //! Writes full logs of simulated games for one commander's deck against the simulated
 //! league opponents, for auditing the simulator's rules and AI:
-//! `cargo run --release --example sim_audit -- <data dir> "<commander>" <colours> <out dir> [games] [--gauntlet]`.
+//! `cargo run --release --example sim_audit -- <data dir> "<commander>" <colours> <out dir> [games] [--gauntlet]`
+//! (or a deck file such as `decks/thanos.txt` in place of the commander, with "-" for colours).
 //! With `--gauntlet` the tables are the league opponents only (the commander and colours are
 //! then ignored; pass "-" for them).
 use msh_deckbuilder::analysis::{self, Rng};
@@ -21,6 +22,12 @@ fn main() {
     let mut rules = Rules::default();
     rules.data_dir = Some(dir.clone());
     let me = (!gauntlet_only).then(|| {
+        // A deck file plays that exact list (pass "-" for the colours).
+        if args[2].ends_with(".txt") {
+            let deck = msh_deckbuilder::deck::Deck::load(std::path::Path::new(args[2]), &db)
+                .expect("deck file");
+            return Prepared::new(&deck, &db);
+        }
         let cmd = db.get(args[2]).expect("commander").clone();
         let colors = ColorSet::parse(args[3]).expect("colours");
         let (deck, _) = analysis::autobuild(&cmd, &db, &coll, &rules, Some(colors), None);
