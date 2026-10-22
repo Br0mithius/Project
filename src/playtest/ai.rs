@@ -448,11 +448,12 @@ pub fn choose_victims(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usi
                 -1.0
             } else if super::exp::on(super::exp::RMTARGET, me) {
                 // As removal is valued: less on a commander or a player about to die.
-                weight(g, me, owner) * removal_discount(g, me, i)
+                rm_weight(g, me, owner) * removal_discount(g, me, i)
             } else {
                 weight(g, me, owner)
             };
-            (focus + perm_value(g, i) * w, i)
+            let danger = if owner == me { 0.0 } else { danger_to(g, me, i) };
+            (focus + perm_value(g, i) * w + danger, i)
         })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
@@ -518,7 +519,7 @@ pub fn damage_target(g: &Game, ctx: &Ctx, to: &crate::abilities::Target, n: i32)
         })
         .map(|&i| {
             (
-                perm_value(g, i) * weight(g, me, g.perms[i].ctrl as usize),
+                perm_value(g, i) * rm_weight(g, me, g.perms[i].ctrl as usize),
                 i,
             )
         })
@@ -1465,6 +1466,11 @@ fn is_spot_removal(c: &SimCard) -> bool {
         && !copies_x_times(c)
 }
 
+/// Spot removal of any speed (for the never-cast experiment).
+fn is_removal_card(c: &SimCard) -> bool {
+    is_spot_removal(c) || is_instant_removal(c) || copies_x_times(c)
+}
+
 /// Cards worth casting only in response (counters, Fogs, protection, combat tricks).
 fn is_reactive_only(c: &SimCard) -> bool {
     c.is(T_INSTANT)
@@ -1476,6 +1482,29 @@ fn is_reactive_only(c: &SimCard) -> bool {
 
 /// Removing permanent `i` is worth less when it's a commander (it comes back, for more
 /// mana) or its controller is about to die anyway.
+/// What opposing creature `i` threatens to do to `p` itself: its damage on each swing,
+/// dearer as `p`'s life runs low.
+fn danger_to(g: &Game, p: usize, i: usize) -> f32 {
+    if !super::exp::on(super::exp::RMDANGER, p) {
+        return 0.0;
+    }
+    let x = &g.perms[i];
+    if !x.is_creature() || x.has(DEFENDER) || x.ctrl as usize == p {
+        return 0.0;
+    }
+    let life = g.players[p].life.max(1) as f32;
+    dmg_of(g, x) as f32 * 0.5 * (1.0 + ((20.0 - life) / 10.0).max(0.0))
+}
+
+/// How much `p` wants to remove a permanent of `o` (`weight`, or flat).
+fn rm_weight(g: &Game, p: usize, o: usize) -> f32 {
+    if super::exp::on(super::exp::RMFLAT, p) {
+        1.5
+    } else {
+        weight(g, p, o)
+    }
+}
+
 fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
     let x = &g.perms[i];
     let o = x.ctrl as usize;
@@ -1497,6 +1526,23 @@ fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
         .sum();
     if g.players[o].life <= 3 || g.active == p && !g.in_combat && clock >= g.players[o].life * 2 {
         f *= 0.5;
+    }
+    if super::exp::on(super::exp::RMSCALE, p) {
+        f *= 0.5;
+    }
+    if super::exp::on(super::exp::RMSCALE2, p) {
+        f *= 0.75;
+    }
+    if super::exp::on(super::exp::RMSCALE3, p) {
+        f *= 2.0 / 3.0;
+    }
+    // One-for-one removal is for real threats: a small body is worth only a fraction of
+    // a card spent on it.
+    if super::exp::on(super::exp::RMBOMB, p) {
+        f *= 0.375 * (perm_value(g, i) / 10.0).clamp(0.6, 2.0);
+    }
+    if super::exp::on(super::exp::RMCONVEX, p) {
+        f *= (perm_value(g, i) / 12.0).clamp(0.3, 1.0);
     }
     f
 }
@@ -1558,12 +1604,21 @@ pub(crate) fn effect_now(
                 .filter(|&&i| g.perms[i].ctrl as usize != p && kill(&g.perms[i]))
                 .map(|&i| {
                     perm_value(g, i)
-                        * weight(g, p, g.perms[i].ctrl as usize)
+                        * if removal {
+                            rm_weight(g, p, g.perms[i].ctrl as usize)
+                        } else {
+                            weight(g, p, g.perms[i].ctrl as usize)
+                        }
                         * 0.8
                         * if removal {
                             removal_discount(g, p, i)
                         } else {
                             1.0
+                        }
+                        + if removal {
+                            danger_to(g, p, i) * removal_discount(g, p, i)
+                        } else {
+                            0.0
                         }
                 })
                 .fold(0.0, f32::max)
@@ -2333,7 +2388,13 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
     if is_counter(c) {
         stage
     } else if is_instant_removal(c) {
-        if opp_power > 0 { stage.min(3.5) } else { 1.0 }
+        if super::exp::on(super::exp::RMNOHOLD, p) {
+            0.0
+        } else if opp_power > 0 {
+            stage.min(3.5)
+        } else {
+            1.0
+        }
     } else if is_fog(c) {
         if opp_power * 2 >= g.players[p].life {
             4.0
@@ -2621,6 +2682,9 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     for (h, &idx) in pl.hand.iter().enumerate() {
         let c = &pl.cards[idx as usize];
         if c.is(T_LAND) {
+            continue;
+        }
+        if super::exp::on(super::exp::RMNEVER, p) && is_removal_card(c) {
             continue;
         }
         // A combat trick is for combat (its other half, an impulse draw, at the end of the
@@ -3697,7 +3761,9 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
     }
     // Instant removal on the attacker whose death helps most: its value plus how much
     // better our blocks get without it (a lethal swing counts for a lot).
-    if let Some(h) = hand_find(g, d, is_instant_removal) {
+    if let Some(h) = hand_find(g, d, is_instant_removal)
+        .filter(|_| !super::exp::on(super::exp::RMNEVER, d))
+    {
         let mine: Vec<Attack> = attacks
             .iter()
             .filter(|at| g.def_player(at.def) == Some(d))
@@ -3764,7 +3830,10 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
         for h in 0..pl.hand.len() {
             let c = &pl.cards[pl.hand[h] as usize];
             let instant_speed = c.is(T_INSTANT) || has_flash(g, p, c);
-            if !instant_speed || is_reactive_only(c) {
+            if !instant_speed
+                || is_reactive_only(c)
+                || super::exp::on(super::exp::RMNEVER, p) && is_removal_card(c)
+            {
                 continue;
             }
             if !g.can_cast(p, Src::Hand(h), CastOpts::default()) {

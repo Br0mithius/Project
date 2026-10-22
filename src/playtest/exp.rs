@@ -4,13 +4,13 @@ use std::cell::Cell;
 
 thread_local! {
     /// Switches turned off, per seat.
-    static OFF: Cell<[u64; 8]> = const { Cell::new([0; 8]) };
+    static OFF: Cell<[u64; 8]> = Cell::new([parse(&std::env::var("EXP_OFF").unwrap_or_default()); 8]);
 }
 
 pub const NAMES: &[&str] = &[
     "twin", "arrows", "net", "tax", "ronin", "decoy", "boom", "plans", "saga", "draw", "edict",
     "ramos", "barrage", "soft", "blink", "colors", "walker", "removal", "explosive", "teamwork",
-    "land", "maypay", "trick", "x13", "rmhold", "rmcmd", "rmtarget", "trickhold",
+    "land", "maypay", "trick", "x13", "rmhold", "rmcmd", "rmtarget", "trickhold", "rmscale", "rmscale2", "rmnohold", "rmnever", "rmflat", "rmdanger", "rmscale3", "rmconvex", "rmbomb",
 ];
 
 pub fn bit(name: &str) -> u64 {
@@ -62,3 +62,12 @@ pub const RMHOLD: u64 = 1 << 24;
 pub const RMCMD: u64 = 1 << 25;
 pub const RMTARGET: u64 = 1 << 26;
 pub const TRICKHOLD: u64 = 1 << 27;
+pub const RMSCALE: u64 = 1 << 28;
+pub const RMSCALE2: u64 = 1 << 29;
+pub const RMNOHOLD: u64 = 1 << 30;
+pub const RMNEVER: u64 = 1 << 31;
+pub const RMFLAT: u64 = 1 << 32;
+pub const RMDANGER: u64 = 1 << 33;
+pub const RMSCALE3: u64 = 1 << 34;
+pub const RMCONVEX: u64 = 1 << 35;
+pub const RMBOMB: u64 = 1 << 36;

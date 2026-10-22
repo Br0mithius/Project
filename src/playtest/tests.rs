@@ -4401,6 +4401,40 @@ fn ai_casts_a_saga() {
 }
 
 #[test]
+fn removal_waits_for_a_real_threat() {
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        card("Kill", "{3}{B}", "Sorcery", "Destroy target creature.", None),
+        card("Ogre", "{3}{B}", "Creature — Ogre", "", Some(("4", "4"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card(
+            "Dragon",
+            "{4}{R}{R}",
+            "Creature — Dragon",
+            "Flying",
+            Some(("6", "6")),
+        ),
+    ]);
+    // A 2/2 isn't worth the turn: the Ogre comes down.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'B');
+    g.players[0].hand = vec![1, 2];
+    let bear = put(&mut g, 1, 3);
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].hand, vec![1], "the Ogre, not the Kill");
+    assert!(g.idx(bear).is_some());
+    // A 6/6 flier is: Kill it (not the Bear next to it).
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'B');
+    g.players[0].hand = vec![1, 2];
+    let bear = put(&mut g, 1, 3);
+    let dragon = put(&mut g, 1, 4);
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.idx(dragon).is_none(), "the Dragon is killed");
+    assert!(g.idx(bear).is_some());
+}
+
+#[test]
 fn choose_one_or_both_takes_both() {
     let db = db();
     let d = deck(
