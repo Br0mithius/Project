@@ -233,7 +233,23 @@ pub fn ability_value(a: &Ability) -> f32 {
             }
             per[m] += v;
         }
-        per.iter().copied().fold(0.0, f32::max) + per.iter().filter(|v| **v < -1.0).sum::<f32>()
+        // "You may pay {1} up to three times. When you do, choose up to that many" (Hawkeye's
+        // Trick Arrows): several modes each time, each paid for, not just the best one.
+        let several = if a.text.contains("up to three times") {
+            3
+        } else if a.text.contains("up to two times") {
+            2
+        } else {
+            1
+        };
+        let mut best: Vec<f32> = per.iter().copied().filter(|v| *v > 0.0).collect();
+        best.sort_by(|x, y| y.partial_cmp(x).unwrap());
+        let picked: f32 = if several > 1 {
+            best.iter().take(several).map(|v| v * 0.75).sum()
+        } else {
+            per.iter().copied().fold(0.0, f32::max)
+        };
+        picked + per.iter().filter(|v| **v < -1.0).sum::<f32>()
     } else {
         vals.iter().sum()
     };
