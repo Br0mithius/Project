@@ -1567,11 +1567,6 @@ impl<'a> Game<'a> {
         // Colours the rest of the turn's plan needs (`GameExtra::reserve`): a pip is paid
         // from a source that can't make them when there's a choice.
         let reserve = self.ext.reserve.get();
-        let keep = if super::exp::on(super::exp::TWIN, p) {
-            reserve
-        } else {
-            0
-        };
         for c in order {
             while pips[c] > 0 {
                 let pick = srcs
@@ -1580,7 +1575,7 @@ impl<'a> Game<'a> {
                     .filter(|(i, s)| {
                         (!used[*i] || multi[*i] && left[*i] > 0) && s.1 & (1 << c) != 0
                     })
-                    .min_by_key(|(_, s)| (s.3, s.1 & keep & !(1 << c) != 0, s.1.count_ones()))
+                    .min_by_key(|(_, s)| (s.3, s.1 & reserve & !(1 << c) != 0, s.1.count_ones()))
                     .map(|(i, _)| i);
                 match pick {
                     Some(i) if multi[i] => {
@@ -1638,7 +1633,6 @@ impl<'a> Game<'a> {
         // Best fit: sources that make no more than what's still needed (keeping the colours
         // the rest of the turn's plan needs, `GameExtra::reserve`), then the smallest one
         // that covers the rest - a big source isn't burnt on a small cost.
-        let reserve = self.ext.reserve.get();
         let mut cands: Vec<usize> = (0..srcs.len()).filter(|&i| !used[i]).collect();
         cands.sort_by_key(|&i| {
             let s = &srcs[i];

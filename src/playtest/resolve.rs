@@ -2661,7 +2661,7 @@ impl<'a> Game<'a> {
                             self.opponents(me)
                         }
                     } else {
-                        ai::burn_opponent(self, me, n).into_iter().collect()
+                        ai::choose_opponent(self, me, n).into_iter().collect()
                     };
                     for o in targets {
                         self.hurt_player(ctx, o, n);
@@ -3617,7 +3617,7 @@ impl<'a> Game<'a> {
                     // "Whenever an opponent casts a spell, that player loses 5 life".
                     vec![o]
                 } else {
-                    ai::burn_opponent(self, me, n).into_iter().collect()
+                    ai::choose_opponent(self, me, n).into_iter().collect()
                 };
                 // "Deals 2 damage to each player", "each player loses 1 life": you too.
                 if *each
@@ -4276,28 +4276,28 @@ impl<'a> Game<'a> {
                             ai::blink_choice_now(self, me, src, types)
                         }
                         .filter(|&i| !done.contains(&self.perms[i].id))
-                            .or_else(|| {
-                                // "Two target ...": two of them whenever two are legal - the
-                                // other one a tapped land (it comes back untapped) if nothing
-                                // gains more.
-                                (times == 2).then_some(())?;
-                                (0..self.perms.len())
-                                    .filter(|&i| {
-                                        let x = &self.perms[i];
-                                        x.ctrl as usize == me
-                                            && x.tok == Tok::None
-                                            && x.commander == 0
-                                            && x.card.is_some()
-                                            && Some(x.id) != src
-                                            && !done.contains(&x.id)
-                                            && (x.is(types)
-                                                || types & T_CREATURE != 0 && x.is_creature())
-                                    })
-                                    .max_by_key(|&i| {
-                                        let x = &self.perms[i];
-                                        (x.tapped && x.is(T_LAND), !x.is_creature())
-                                    })
-                            })
+                        .or_else(|| {
+                            // "Two target ...": two of them whenever two are legal - the
+                            // other one a tapped land (it comes back untapped) if nothing
+                            // gains more.
+                            (times == 2).then_some(())?;
+                            (0..self.perms.len())
+                                .filter(|&i| {
+                                    let x = &self.perms[i];
+                                    x.ctrl as usize == me
+                                        && x.tok == Tok::None
+                                        && x.commander == 0
+                                        && x.card.is_some()
+                                        && Some(x.id) != src
+                                        && !done.contains(&x.id)
+                                        && (x.is(types)
+                                            || types & T_CREATURE != 0 && x.is_creature())
+                                })
+                                .max_by_key(|&i| {
+                                    let x = &self.perms[i];
+                                    (x.tapped && x.is(T_LAND), !x.is_creature())
+                                })
+                        })
                     };
                     let Some(i) = target else { return };
                     let x = self.perms[i].clone();
@@ -4309,7 +4309,7 @@ impl<'a> Game<'a> {
                     // moved to the command zone) and it comes back still a commander.
                     let commander = x.commander;
                     if commander > 0 {
-                        if delayed || x.owner as usize != me || !ai::blinks_commanders(me) {
+                        if delayed || x.owner as usize != me {
                             return;
                         }
                         self.perms[i].commander = 0;

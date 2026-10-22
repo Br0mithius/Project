@@ -4545,7 +4545,10 @@ fn hawkeyes_arrows_leave_the_mana_for_the_spell_after_combat() {
     g.in_combat = false;
     g.end_combat();
     ai::main_phase(&mut g, 0, true);
-    assert!(g.players[0].hand.is_empty(), "the Ogre is cast after combat");
+    assert!(
+        g.players[0].hand.is_empty(),
+        "the Ogre is cast after combat"
+    );
 }
 
 #[test]
@@ -4608,7 +4611,13 @@ fn ai_casts_a_saga() {
 fn removal_waits_for_a_real_threat() {
     let d = prep(&[
         Card::basic_land("Swamp", 'B'),
-        card("Kill", "{3}{B}", "Sorcery", "Destroy target creature.", None),
+        card(
+            "Kill",
+            "{3}{B}",
+            "Sorcery",
+            "Destroy target creature.",
+            None,
+        ),
         card("Ogre", "{3}{B}", "Creature — Ogre", "", Some(("4", "4"))),
         card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
         card(
@@ -4664,7 +4673,10 @@ fn choose_one_or_both_takes_both() {
     g.players[0].graveyard = vec![2, 3];
     ai::main_phase(&mut g, 0, true);
     let hand = &g.players[0].hand;
-    assert!(hand.contains(&2) && hand.contains(&3), "the Hero and the Villain");
+    assert!(
+        hand.contains(&2) && hand.contains(&3),
+        "the Hero and the Villain"
+    );
 }
 
 #[test]
@@ -4688,7 +4700,11 @@ fn draw_engine_stops_near_an_empty_library() {
     put(&mut g, 0, 0);
     g.players[0].library = vec![0; 4];
     ai::main_phase(&mut g, 0, true);
-    assert_eq!(g.players[0].library.len(), 4, "no 'draw three' from four cards");
+    assert_eq!(
+        g.players[0].library.len(),
+        4,
+        "no 'draw three' from four cards"
+    );
     g.players[0].library = vec![0; 30];
     ai::main_phase(&mut g, 0, true);
     assert_eq!(g.players[0].library.len(), 27, "draws with a deep library");
