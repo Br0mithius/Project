@@ -310,7 +310,10 @@ impl<'a> Game<'a> {
     pub fn id_desc(&self, id: u32) -> String {
         match self.idx(id) {
             Some(i) => self.perm_desc(&self.perms[i]),
-            None => format!("#{}", id),
+            None => match self.ext.gone.iter().rev().find(|g| g.0 == id) {
+                Some((_, d)) => format!("{}, gone", d),
+                None => format!("#{}", id),
+            },
         }
     }
 
@@ -644,7 +647,12 @@ impl<'a> Game<'a> {
                 if perm.is_creature() && perm.t <= 0 {
                     "0 toughness".into()
                 } else if perm.is_creature() && perm.deathtouched && perm.damage > 0 {
-                    format!("dies{} (deathtouch damage{})", combat, killer)
+                    let dt = if perm.dt_by != 0 {
+                        format!(" from {}", self.id_desc(perm.dt_by))
+                    } else {
+                        killer
+                    };
+                    format!("dies{} (deathtouch damage{})", combat, dt)
                 } else if perm.is_creature() {
                     format!(
                         "dies{} (lethal damage {}/{}{})",

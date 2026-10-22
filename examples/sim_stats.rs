@@ -3,7 +3,8 @@
 //! In place of the commander, a deck file (`decks/thanos.txt`) plays that exact list (colours are then
 //! ignored; pass "-"). Plays the commander's deck against the simulated league opponents (rotating seats), or
 //! with `--gauntlet` tables of league opponents only (commander and colours are then ignored;
-//! pass "-"). `--check` replays every game without instrumentation and stops if anything
+//! pass "-"). The league is the one the app uses for that data folder (its rules.json, or the
+//! upcoming session); `--session N` picks another session. `--check` replays every game without instrumentation and stops if anything
 //! differs (instrumentation must not change the game).
 use msh_deckbuilder::analysis::{self, Rng};
 use msh_deckbuilder::card::ColorSet;
@@ -41,14 +42,22 @@ fn main() {
     let all: Vec<String> = std::env::args().collect();
     let gauntlet_only = all.iter().any(|a| a == "--gauntlet");
     let check = all.iter().any(|a| a == "--check");
-    let args: Vec<&String> = all.iter().filter(|a| !a.starts_with("--")).collect();
+    let session = msh_deckbuilder::league::session_arg(&all);
+    // Positional arguments: everything but the flags (and `--session`'s number).
+    let args: Vec<&String> = all
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| !a.starts_with("--") && !(*i > 0 && all[i - 1] == "--session"))
+        .map(|(_, a)| a)
+        .collect();
     let dir = std::path::PathBuf::from(args[1]);
     let games: u64 = args.get(4).and_then(|g| g.parse().ok()).unwrap_or(1000);
     let mut db = CardDb::load(&dir.join("cards.json")).unwrap();
     db.attach_ratings(&dir);
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
-    let mut rules = Rules::default();
-    rules.data_dir = Some(dir.clone());
+    // The same league the app plays: rules.json or the upcoming session, with the data
+    // folder's imported pool, pins and cached season.
+    let rules = msh_deckbuilder::league::app_rules(&dir, session);
     let me = (!gauntlet_only).then(|| {
         if args[2].ends_with(".txt") {
             let deck = Deck::load(std::path::Path::new(args[2]), &db).expect("deck file");
@@ -121,6 +130,10 @@ fn main() {
     } else {
         vec![("all", Box::new(|_| true))]
     };
+    println!(
+        "{}",
+        msh_deckbuilder::opponents::league_header(&db, &rules, 2026)
+    );
     println!(
         "{} games, {}{} | seeds 1000..{}",
         games,

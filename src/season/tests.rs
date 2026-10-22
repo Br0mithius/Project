@@ -185,6 +185,39 @@ fn the_pool_is_shared() {
 }
 
 #[test]
+fn imported_pool_cards_were_not_claimed_before() {
+    // The imported pool shows the real state after Session 1: a Foundations card still in
+    // it was never claimed, so the simulated Session 1 must not claim it either (it would be
+    // claimed a second time from the real pool: copies that don't exist).
+    let fdn: Vec<&Card> = db()
+        .cards
+        .iter()
+        .filter(|c| c.set == POOL_START_SET && !c.is_basic())
+        .collect();
+    let real = Collection::new(
+        "real.txt".into(),
+        fdn.iter().step_by(2).map(|c| (c.name.clone(), 1)).collect(),
+    );
+    let s = simulate(db(), &rules_at_session(2), 3, Some(&real), &Pins::default());
+    assert!(s.held_back > 0);
+    let early: Vec<&str> = s
+        .opponents
+        .iter()
+        .flat_map(|o| o.log[0].claimed.iter())
+        .map(|c| name_in(c))
+        .collect();
+    assert!(!early.is_empty(), "the other half can still be claimed");
+    for c in &early {
+        assert_eq!(
+            real.owned(c),
+            0,
+            "{} claimed in Session 1 but still in the pool",
+            c
+        );
+    }
+}
+
+#[test]
 fn decks_are_legal_and_singleton_from_session_6() {
     let s = six();
     let rules = rules_at_session(6);
