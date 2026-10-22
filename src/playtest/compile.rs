@@ -567,6 +567,10 @@ pub struct ActCost {
     pub black_pips: u8,
     /// Boast: only if it attacked this turn, once each turn.
     pub boast: bool,
+    /// "Sacrifice an artifact or discard a nonland card": one OR the other (`sac_other` and
+    /// `discard` are both set), `discard_nonland` for "a nonland card".
+    pub sac_or_discard: bool,
+    pub discard_nonland: bool,
 }
 
 /// A cost paid while an ability resolves: "you may sacrifice another creature. If you do,
@@ -578,8 +582,9 @@ pub enum ResCost {
         types: u16,
         other: bool,
     },
-    /// "Sacrifice an artifact or discard a card".
-    SacrificeOrDiscard(u16),
+    /// "Sacrifice an artifact or discard a (nonland) card": types to sacrifice, and whether
+    /// the discarded card must be a nonland card.
+    SacrificeOrDiscard(u16, bool),
     SacrificeSelf,
     Mana(Mana),
     Life(u8),
@@ -657,9 +662,22 @@ fn spend_only_of(abilities: &[SimAbility]) -> Option<SpendOnly> {
         a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))
             && (a.text.contains("spend this mana only to")
                 || a.text
-                    .contains("can't be spent to cast spells from your hand"))
+                    .contains("can't be spent to cast spells from your hand")
+                || a.text.contains("can't be spent to cast a non"))
     })?;
     let t = a.text.as_str();
+    // "This mana can't be spent to cast a nonartifact spell" (Hydraulic Helper): artifact
+    // spells only, and any ability.
+    if let Some(rest) = t.split("can't be spent to cast a non").nth(1) {
+        let what = rest.split(" spell").next().unwrap_or("");
+        if types_of(what) != 0 {
+            return Some(SpendOnly {
+                spell_types: types_of(what),
+                ability_types: ANY_TYPE,
+                ..Default::default()
+            });
+        }
+    }
     if t.contains("can't be spent to cast spells from your hand") {
         return Some(SpendOnly {
             spell_types: ANY_TYPE,
@@ -1932,6 +1950,15 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             Trig::Event(Ev::EachAttacker, Filter::default())
         }
         When::Attacks => Trig::Attacks,
+        // An Equipment's "whenever equipped creature deals combat damage to a player"
+        // (Orcrist, Goldvein Pick): about the creature it's attached to (`Ev::CombatDamageAny`
+        // is emitted for each creature that connects; `fire` keeps the attached one).
+        When::CombatDamage
+            if t.starts_with("whenever equipped creature")
+                || t.starts_with("whenever enchanted creature") =>
+        {
+            Trig::Event(Ev::CombatDamageAny, Filter::default())
+        }
         When::CombatDamage => Trig::CombatDamage,
         When::EachTurn => Trig::Phase {
             phase: if t.contains("end step") {
@@ -2309,6 +2336,9 @@ fn act_cost(text: &str) -> ActCost {
                     a.tap_subtype = Some(w);
                 }
             }
+        } else if p.starts_with("sacrifice ") && p.contains(" or discard ") {
+            a.sac_or_discard = true;
+            a.discard_nonland = p.contains("discard a nonland");
         } else if p.starts_with("exile ~ from your graveyard") {
             a.from_graveyard = true;
         } else if p.starts_with("exile ~ from your hand")
@@ -2381,8 +2411,11 @@ fn pay_of(text: &str) -> Option<PayCost> {
     let cost = if phrase.starts_with("sacrifice ") {
         if phrase == "sacrifice ~" || phrase == "sacrifice it" {
             ResCost::SacrificeSelf
-        } else if phrase.contains(" or discard a card") {
-            ResCost::SacrificeOrDiscard(types_in(phrase.split(" or discard").next().unwrap_or("")))
+        } else if phrase.contains(" or discard a ") {
+            ResCost::SacrificeOrDiscard(
+                types_in(phrase.split(" or discard").next().unwrap_or("")),
+                phrase.contains("or discard a nonland"),
+            )
         } else {
             ResCost::Sacrifice {
                 types: types_in(phrase),
@@ -2656,6 +2689,11 @@ fn sim_rules(text: &str, effects: &mut Vec<Effect>) {
     if text.contains("take an extra turn after this one") {
         rule(effects, "extra turn");
     }
+    // "Draw a card, then you may put a land card from your hand onto the battlefield tapped"
+    // (H.E.R.B.I.E., Scout Unit): an extra land, not a land drop.
+    if text.contains("put a land card from your hand onto the battlefield") {
+        rule(effects, "puts a land from hand onto the battlefield");
+    }
     if body.starts_with("end the turn") {
         rule(effects, "ends the turn");
     }
@@ -2785,13 +2823,28 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
         for w in whens {
             let trig = trig_of(w, a);
             let mut effects = a.effects.clone();
+            // "{2}, {T}, Discard a card: Draw a card for each card you've discarded this
+            // turn" (Misty Knight): the parser nets it to a loot; the simulator pays the
+            // discard and counts the discards when it resolves.
+            if a.text
+                .contains("draw a card for each card you've discarded this turn")
+            {
+                for e in effects.iter_mut() {
+                    if *e == Effect::Loot {
+                        *e = Effect::Draw {
+                            amount: crate::abilities::Amount { n: 1, x: true },
+                            you: true,
+                        };
+                    }
+                }
+            }
             // Discards the simulator pays itself: the parser's "draw one fewer" undone.
             let body = a.text.split(": ").nth(1).unwrap_or("");
             let pays_discard = matches!(trig, Trig::Activated { discard: true, .. })
                 && !body.contains("discard")
                 && !body.contains("connive")
                 || pay.as_ref().is_some_and(|p| {
-                    matches!(p.cost, ResCost::Discard | ResCost::SacrificeOrDiscard(_))
+                    matches!(p.cost, ResCost::Discard | ResCost::SacrificeOrDiscard(..))
                         && a.text.contains("if you do, draw")
                 });
             if pays_discard {

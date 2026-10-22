@@ -3873,6 +3873,416 @@ fn ai_uses_abilities_that_work_from_the_hand() {
     assert!(g.players[0].graveyard.contains(&1));
 }
 
+// ------------------------------------------------------------ second rules audit (S2-xx)
+
+#[test]
+fn filters_fix_colours_but_never_make_mana() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Mountain",
+            "Rugged Highlands",
+            "Baxter Building",
+            "Swamp",
+            "Surveillance Room",
+        ],
+    );
+    // Mountain, Mountain, Rugged Highlands, Baxter: Baxter's {4} needs four OTHER sources, so
+    // no black (S2-01: its fee used to come back as floating mana).
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 0);
+    let rh = put(&mut g, 0, 1);
+    let i = g.idx(rh).unwrap();
+    g.perms[i].tapped = false;
+    put(&mut g, 0, 2);
+    assert!(!g.can_pay(0, &Mana::parse("{2}{B}")));
+    assert!(!g.can_pay(0, &Mana::parse("{B}")));
+    assert!(g.can_pay(0, &Mana::parse("{3}")), "{{C}} from Baxter");
+    // Five other sources: four pay the fee, Baxter's four any-colour mana pays {B}{B} (two
+    // pips from one filter) and two float.
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 0);
+    assert!(g.can_pay(0, &Mana::parse("{B}{B}")));
+    assert!(!g.can_pay(0, &Mana::parse("{B}{B}{B}{B}{B}")));
+    assert!(g.pay(0, &Mana::parse("{B}{B}")));
+    assert_eq!(g.players[0].pool, 2);
+    assert_eq!(g.mana_available(0), 3, "2 floating + 1 untapped land");
+    // Swamp, Mountain, Surveillance Room: {W} through the filter uses two sources, and then
+    // {1}{R} can't be paid (it used to: 4 mana from 3 lands).
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 3);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 4);
+    assert!(g.pay(0, &Mana::parse("{W}")));
+    assert_eq!(g.players[0].pool, 0);
+    assert!(!g.can_pay(0, &Mana::parse("{1}{R}")));
+    assert_eq!(g.mana_available(0), 1);
+}
+
+#[test]
+fn tapped_treasures_enter_tapped() {
+    let db = db();
+    let d = deck(&db, &["Long-Bodied Grey Dog"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let t: Vec<&Perm> = g.perms.iter().filter(|x| x.tok == Tok::Treasure).collect();
+    assert_eq!(t.len(), 1);
+    assert!(t[0].tapped);
+    assert!(!g.can_pay(0, &Mana::generic(1)), "not until the next untap");
+}
+
+fn bear() -> SimCard {
+    compile(&card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    ))
+}
+
+#[test]
+fn equipment_combat_damage_triggers() {
+    let db = db();
+    let mut d = deck(&db, &["Goldvein Pick"]);
+    d.cards.push(bear());
+    let mut g = game(&[&d, &d]);
+    let b = put(&mut g, 0, 1);
+    let pick = put(&mut g, 0, 0);
+    let i = g.idx(pick).unwrap();
+    g.perms[i].attached = Some(b);
+    // An unequipped attacker doesn't trigger it.
+    let other = put(&mut g, 0, 1);
+    let at = vec![Attack {
+        attacker: other,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(0, &at, false);
+    assert_eq!(g.perms.iter().filter(|x| x.tok == Tok::Treasure).count(), 0);
+    let at = vec![Attack {
+        attacker: b,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(0, &at, false);
+    assert_eq!(
+        g.perms
+            .iter()
+            .filter(|x| x.tok == Tok::Treasure && x.ctrl == 0)
+            .count(),
+        1,
+        "Goldvein Pick: a Treasure when the equipped creature connects"
+    );
+}
+
+#[test]
+fn sacrifice_an_artifact_or_discard_a_nonland_card_is_one_or_the_other() {
+    let db = db();
+    let d = deck(&db, &["Bullseye, Death Dealer", "Mountain", "Ultron Drone"]);
+    let mut g = game(&[&d, &d]);
+    let b = put(&mut g, 0, 0);
+    lands(&mut g, 0, 3, 'R');
+    let k = ab_with(&g, b, "{3}");
+    // Only a land in hand and no artifact: it can't be activated.
+    g.players[0].hand = vec![1];
+    assert!(g.activation_cost(0, g.idx(b).unwrap(), k).is_none());
+    // A nonland card: it's discarded, nothing sacrificed.
+    g.players[0].hand = vec![1, 2];
+    let life = g.players[1].life;
+    assert!(g.activate(0, b, k));
+    assert_eq!(g.players[0].hand, vec![1], "the land stays");
+    assert!(g.players[0].graveyard.contains(&2));
+    assert_eq!(g.players[1].life, life - 2);
+}
+
+#[test]
+fn ultron_copies_the_artifact_that_entered() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Ultron, Artificial Malevolence",
+            "The Mind Stone",
+            "Mountain",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    lands(&mut g, 0, 2, 'R');
+    let stone = put(&mut g, 0, 1);
+    assert_eq!(
+        g.perms.iter().filter(|x| x.card == Some((0, 0))).count(),
+        1,
+        "Ultron didn't copy itself"
+    );
+    // {2} paid: a token Mind Stone that is also a 2/2 Robot Villain creature.
+    let copies: Vec<&Perm> = g
+        .perms
+        .iter()
+        .filter(|x| x.card == Some((0, 1)) && x.id != stone)
+        .collect();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(tapped_lands(&g, 0), 2);
+    for c in copies {
+        assert!(c.is_creature() && c.base_p == 2 && c.base_t == 2);
+        assert!(c.subtypes.iter().any(|s| s == "robot"));
+        assert!(c.subtypes.iter().any(|s| s == "villain"));
+    }
+}
+
+#[test]
+fn photon_blast_barrage_copies_x_times() {
+    let db = db();
+    let mut d = deck(&db, &["Photon Blast Barrage", "Mountain"]);
+    d.cards.push(compile(&card(
+        "Elf",
+        "{G}",
+        "Creature — Elf",
+        "",
+        Some(("1", "1")),
+    )));
+    let mut g = game(&[&d, &d]);
+    let elves: Vec<u32> = (0..4).map(|_| put(&mut g, 1, 2)).collect();
+    lands(&mut g, 0, 5, 'R');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    // X = 3: the spell and three copies, each on its own target.
+    let alive = elves.iter().filter(|&&e| g.idx(e).is_some()).count();
+    assert_eq!(alive, 0, "four pings for X = 3");
+}
+
+#[test]
+fn second_from_the_top_is_not_the_top() {
+    let db = db();
+    let mut d = deck(&db, &["Trickster's Stratagem", "Island"]);
+    d.cards.push(bear());
+    let mut g = game(&[&d, &d]);
+    let b = put(&mut g, 1, 2);
+    g.players[1].library = vec![1, 1, 1];
+    lands(&mut g, 0, 4, 'U');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(b).is_none());
+    let lib = &g.players[1].library;
+    assert_eq!(lib.last(), Some(&1), "the old top card is still on top");
+    assert_eq!(lib[lib.len() - 2], 2, "the Bear is second from the top");
+}
+
+#[test]
+fn head_of_the_hunt_makes_a_wolf() {
+    let db = db();
+    let mut d = deck(&db, &["Head of the Hunt"]);
+    d.cards.push(bear());
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 1, 0);
+    let b = put(&mut g, 0, 1);
+    let i = g.idx(b).unwrap();
+    assert!(g.destroy(i));
+    g.run_pending();
+    assert!(g.players[0].exile.contains(&1), "exiled instead of dying");
+    let wolves = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 1 && x.is_token() && x.subtypes.iter().any(|s| s == "wolf"))
+        .count();
+    assert_eq!(wolves, 1);
+}
+
+#[test]
+fn required_targets_are_chosen_even_without_a_kill() {
+    let db = db();
+    let mut d = deck(&db, &["Helicarrier Strike", "Plains"]);
+    d.cards.push(compile(&card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("5", "5")),
+    )));
+    let mut g = game(&[&d, &d]);
+    let giant = put(&mut g, 1, 2);
+    let i = g.idx(giant).unwrap();
+    g.perms[i].attacking = true;
+    lands(&mut g, 0, 1, 'W');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(perm(&g, giant).damage, 2);
+}
+
+#[test]
+fn one_or_both_modes() {
+    let db = db();
+    let d = deck(
+        &db,
+        &["Decoy Ploy", "Swamp", "Ultron Drone", "Agent of Atlas"],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].graveyard = vec![2, 3];
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let mut hand = g.players[0].hand.clone();
+    hand.sort();
+    assert_eq!(hand, vec![2, 3], "the Villain and the Hero");
+}
+
+#[test]
+fn one_or_more_creatures_dying_at_once_trigger_once() {
+    let db = db();
+    let mut d = deck(&db, &["Great Fierce Bee"]);
+    d.cards.push(bear());
+    let mut g = game(&[&d, &d]);
+    g.log = Some(Vec::new());
+    put(&mut g, 0, 0);
+    let bears: Vec<u32> = (0..3).map(|_| put(&mut g, 1, 1)).collect();
+    for b in bears {
+        let i = g.idx(b).unwrap();
+        g.perms[i].damage = 5;
+    }
+    let before = g.log.as_ref().unwrap().len();
+    g.sba();
+    g.run_pending();
+    let resolved = g.log.as_ref().unwrap()[before..]
+        .iter()
+        .filter(|l| l.contains("resolves Great Fierce Bee"))
+        .count();
+    assert_eq!(resolved, 1);
+}
+
+#[test]
+fn herbie_puts_a_land_onto_the_battlefield() {
+    let db = db();
+    let d = deck(&db, &["H.E.R.B.I.E. Scout Unit", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1];
+    put(&mut g, 0, 0);
+    let forests: Vec<&Perm> = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 0 && x.is(T_LAND))
+        .collect();
+    assert_eq!(forests.len(), 1);
+    assert!(forests[0].tapped);
+    assert!(!g.players[0].hand.contains(&1));
+}
+
+#[test]
+fn rummage_discards_before_drawing() {
+    let d = prep(&[
+        card(
+            "Rummage",
+            "{R}",
+            "Sorcery",
+            "Discard a card, then draw a card.",
+            None,
+        ),
+        Card::basic_land("Mountain", 'R'),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card("Dud", "{7}", "Creature — Dud", "", Some(("0", "1"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'R');
+    g.players[0].hand = vec![0, 2];
+    g.players[0].library = vec![3];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(
+        g.players[0].hand,
+        vec![3],
+        "the drawn card can't be discarded"
+    );
+    assert!(g.players[0].graveyard.contains(&2));
+}
+
+#[test]
+fn sacrificed_source_counts_its_last_known_counters() {
+    let db = db();
+    let d = deck(&db, &["Ravenous Amulet", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    let a = put(&mut g, 0, 0);
+    let i = g.idx(a).unwrap();
+    g.perms[i].other_counters = 2;
+    lands(&mut g, 0, 4, 'B');
+    let k = ab_with(&g, a, "each opponent loses life");
+    let life = g.players[1].life;
+    assert!(g.activate(0, a, k));
+    assert_eq!(g.players[1].life, life - 2);
+}
+
+#[test]
+fn hydraulic_helper_mana_is_for_artifact_spells_only() {
+    let db = db();
+    let d = deck(&db, &["Hydraulic Helper", "Ultron Drone", "Agent of Atlas"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let spell = |c: u16| Purpose::Spell {
+        card: (0, c),
+        from_hand: true,
+    };
+    assert!(g.can_pay_for(0, &Mana::parse("{U}"), spell(1)));
+    assert!(!g.can_pay_for(0, &Mana::parse("{U}"), spell(2)));
+}
+
+#[test]
+fn activated_abilities_need_a_legal_target() {
+    let db = db();
+    let mut d = deck(&db, &["Eagle's Rescue", "Plains"]);
+    d.cards.push(compile(&card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("5", "5")),
+    )));
+    d.cards.push(compile(&card(
+        "Squire",
+        "{W}",
+        "Creature — Human",
+        "",
+        Some(("1", "2")),
+    )));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'W');
+    g.players[0].graveyard = vec![0];
+    let k = d.cards[0]
+        .abilities
+        .iter()
+        .position(|a| a.text.contains("from your graveyard"))
+        .unwrap();
+    assert!(
+        g.graveyard_activation_cost(0, 0, k).is_none(),
+        "no creature"
+    );
+    put(&mut g, 0, 2);
+    assert!(g.graveyard_activation_cost(0, 0, k).is_none(), "power 5");
+    put(&mut g, 0, 3);
+    assert!(g.graveyard_activation_cost(0, 0, k).is_some());
+}
+
+#[test]
+fn a_player_who_left_gets_nothing_back() {
+    let d = prep(&[card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    )]);
+    let mut g = game(&[&d, &d]);
+    let jailer = put(&mut g, 0, 0);
+    let i = g.idx(jailer).unwrap();
+    g.perms[i].holding.push((1, (1, 0)));
+    g.players[1].exile.push(0);
+    g.players[1].alive = false;
+    let i = g.idx(jailer).unwrap();
+    g.leave(i, Zone::Graveyard, false);
+    assert!(!g.perms.iter().any(|x| x.owner == 1));
+}
+
 /// Hawkeye has just attacked player 1 (tapped, attacking): his Trick Arrows trigger is
 /// resolved.
 fn hawkeye_attacks(g: &mut Game, h: u32) {

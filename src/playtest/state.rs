@@ -109,6 +109,8 @@ pub struct Perm {
     pub ever_hit: bool,
     /// The last source that dealt damage to it this turn.
     pub hurt_by: u32,
+    /// The last source that dealt it deathtouch damage this turn (for the log).
+    pub dt_by: u32,
     /// Got a +1/+1 counter this turn.
     pub countered_turn: bool,
     // Values after static effects (`Game::recalc`).
@@ -434,6 +436,9 @@ pub enum Purpose {
 pub struct GameExtra {
     /// Counts the turns (for "you may play that card this turn / until your next turn").
     pub turn_no: u32,
+    /// Descriptions of permanents that left the battlefield, for the log (only kept while
+    /// logging; the most recent few hundred).
+    pub gone: Vec<(u32, String)>,
     /// Mana from a Treasure paid for the spell being cast (Smaug).
     pub treasure_spent: bool,
     /// Loyalty counters the last loyalty ability removed (Way of the Mind Sculptor).
@@ -734,9 +739,13 @@ impl<'a> Game<'a> {
         self.perms.iter().position(|p| p.id == id)
     }
 
+    /// `p`'s opponents still in the game, in turn order after `p` (so a choice that keeps
+    /// the first of equals doesn't always land on seat 0).
     pub fn opponents(&self, p: usize) -> Vec<usize> {
-        (0..self.players.len())
-            .filter(|&o| o != p && self.players[o].alive)
+        let n = self.players.len();
+        (1..n)
+            .map(|k| (p + k) % n)
+            .filter(|&o| self.players[o].alive)
             .collect()
     }
 
@@ -1468,22 +1477,25 @@ impl<'a> Game<'a> {
     }
 
     /// Plans paying `cost` from player `p`'s sources; returns the sources to use.
+    /// The third value is the mana the plan makes beyond what it spends on a filter's own
+    /// activation cost, so `pay` floats only real leftovers.
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
         let srcs = self.sources(p);
-        let plain = self.plan_from(p, cost, &srcs);
+        let plain = self.plan_from(p, cost, &srcs, None);
         if plain.is_some() {
             return plain;
         }
         // Filters ("{1}, {T}: Add one mana of any color"; Baxter Building's "{4}, {T}: Add
         // four mana in any combination of colors"): the filter makes its mana of any colour
-        // in place of its plain {C}, and its own cost is paid like generic mana.
+        // in place of its plain {C}, and its own cost is paid by the OTHER sources (or the
+        // pool) first. A filter never makes more mana than it costs; it only fixes colours.
         for (k, s) in srcs.iter().enumerate() {
-            let Some((paid, made)) = self.filter_of(s.0) else {
+            let Some((fee, made)) = self.filter_of(s.0) else {
                 continue;
             };
             let mut alt = srcs.clone();
             alt[k] = (s.0, 0b11111, made, false);
-            if let Some(plan) = self.plan_from(p, &cost.plus_generic(paid), &alt) {
+            if let Some(plan) = self.plan_from(p, cost, &alt, Some((k, fee))) {
                 return Some(plan);
             }
         }
@@ -1519,12 +1531,16 @@ impl<'a> Game<'a> {
         })
     }
 
-    /// `plan_payment` from these sources.
+    /// `plan_payment` from these sources. `filter` is (index in `srcs`, activation cost) of a
+    /// filter whose mana is used in place of its plain mana: it pays coloured pips (several,
+    /// for Baxter Building's "any combination of colors") and the cost's own generic, but its
+    /// activation cost is paid by the pool and the other sources.
     fn plan_from(
         &self,
         p: usize,
         cost: &Mana,
         srcs: &[(usize, u8, u8, bool)],
+        filter: Option<(usize, u32)>,
     ) -> Option<(Vec<usize>, u8, u32)> {
         let mut used = vec![false; srcs.len()];
         // Ramos' ten mana of mixed colours can pay several coloured pips at once.
@@ -1534,11 +1550,14 @@ impl<'a> Game<'a> {
                 .is_some_and(|r| self.card(r).counter_mana.is_some())
         };
         // Only allocated when such a source exists (payment planning is hot).
-        let multi: Vec<bool> = if srcs.iter().any(is_multi) {
+        let mut multi: Vec<bool> = if srcs.iter().any(is_multi) {
             srcs.iter().map(is_multi).collect()
         } else {
             vec![false; srcs.len()]
         };
+        if let Some((f, _)) = filter {
+            multi[f] = true;
+        }
         let mut left: Vec<u32> = srcs.iter().map(|s| s.2 as u32).collect();
         let mut pips = cost.pips;
         // Most constrained colour first.
@@ -1597,12 +1616,20 @@ impl<'a> Game<'a> {
                 None => return None,
             }
         }
-        // What's left of a multi-pip source already in use pays generic.
+        let fee = match filter {
+            // A filter that pays no pip only costs mana: the plain plan already failed.
+            Some((f, _)) if !used[f] => return None,
+            Some((_, fee)) => fee,
+            None => 0,
+        };
+        // What's left of a multi-pip source already in use pays generic - a filter's only
+        // the spell's own generic, never its own activation cost.
+        let filter_left = filter.map_or(0, |(f, _)| left[f].min(cost.generic as u32));
         extra_generic += (0..srcs.len())
-            .filter(|&i| multi[i] && used[i])
+            .filter(|&i| multi[i] && used[i] && filter.is_none_or(|(f, _)| f != i))
             .map(|i| left[i])
             .sum::<u32>();
-        let mut need = (cost.generic as u32).saturating_sub(extra_generic);
+        let mut need = (cost.generic as u32 + fee).saturating_sub(extra_generic + filter_left);
         let mut pool = self.players[p].pool;
         while need > 0 && pool > 0 {
             pool -= 1;
@@ -1651,7 +1678,8 @@ impl<'a> Game<'a> {
                 .enumerate()
                 .filter(|(i, _)| used[*i])
                 .map(|(_, s)| s.2 as u32)
-                .sum(),
+                .sum::<u32>()
+                .saturating_sub(fee),
         ))
     }
 
@@ -1814,8 +1842,40 @@ impl<'a> Game<'a> {
         } else {
             to
         };
+        // Head of the Hunt: "... exile it instead. When you do, create a 2/2 green Wolf
+        // creature token" - for each opponent whose permanent replaced the death this way.
+        let wolves: Vec<(usize, i32, i32, String)> =
+            if garruk && !perm.finality && to == Zone::Exile {
+                self.perms
+                    .iter()
+                    .filter(|y| y.ctrl != perm.ctrl && self.perm_rules(y) & R_OPP_DIE_EXILE != 0)
+                    .filter_map(|y| {
+                        let made = self.abilities_of(y).iter().find_map(|a| {
+                            let rest = a
+                                .text
+                                .split("exile it instead. when you do, create a ")
+                                .nth(1)?;
+                            let (pt, rest) = rest.split_once(' ')?;
+                            let (p, t) = pt.split_once('/')?;
+                            let kind = rest.split(" creature token").next()?.rsplit(' ').next()?;
+                            Some((p.parse().ok()?, t.parse().ok()?, kind.to_string()))
+                        })?;
+                        Some((y.ctrl as usize, made.0, made.1, made.2))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
         if self.auditing() {
             self.audit_leave(&perm, to, why);
+        }
+        if self.log.is_some() {
+            let d = self.perm_desc(&perm);
+            let gone = &mut self.ext.gone;
+            if gone.len() >= 256 {
+                gone.drain(..128);
+            }
+            gone.push((perm.id, d));
         }
         let id = perm.id;
         // Attachments: Auras fall off (to the graveyard), Equipment stays unattached.
@@ -1831,10 +1891,20 @@ impl<'a> Game<'a> {
         // What it was attached to.
         // Cards held "until ~ leaves" come back.
         for (owner, r) in &perm.holding {
+            // (Not for a player who has left the game: their cards left with them.)
+            if !self.players[*owner as usize].alive {
+                continue;
+            }
             let pl = &mut self.players[*owner as usize];
             if let Some(pos) = pl.exile.iter().position(|&c| c == r.1) {
                 pl.exile.remove(pos);
+                // (Logged as coming back because this permanent left.)
+                let outer = std::mem::replace(
+                    &mut self.cause,
+                    super::audit::Cause::Card(perm.card.unwrap_or(*r), perm.ctrl),
+                );
                 self.enter_card(r.0 as usize, r.1, *owner as usize, false);
+                self.cause = outer;
             }
         }
         let creature = perm.is_creature();
@@ -1905,6 +1975,18 @@ impl<'a> Game<'a> {
         }
         if let Some((owner, c)) = in_graveyard {
             self.to_graveyard(owner, &[c]);
+        }
+        for (ctrl, p, t, kind) in wolves {
+            if self.players[ctrl].alive {
+                let w = self.make_token(ctrl, p, t, 0, vec![kind]);
+                self.note(|| {
+                    format!(
+                        "  P{} creates a {}/{} token (death exiled instead)",
+                        ctrl, p, t
+                    )
+                });
+                self.after_enter(w);
+            }
         }
         for fid in fall {
             if let Some(fi) = self.idx(fid) {
@@ -1994,6 +2076,7 @@ impl<'a> Game<'a> {
         x.damage += n;
         if deathtouch {
             x.deathtouched = true;
+            x.dt_by = x.hurt_by;
         }
         let id = x.id;
         if let Some(ids) = self.ext.defer_damaged.as_mut() {
@@ -2084,6 +2167,7 @@ impl<'a> Game<'a> {
             hit_turn: 0,
             ever_hit: false,
             hurt_by: 0,
+            dt_by: 0,
             countered_turn: false,
             p,
             t,
@@ -2771,6 +2855,7 @@ impl<'a> Game<'a> {
             hit_turn: 0,
             ever_hit: false,
             hurt_by: 0,
+            dt_by: 0,
             countered_turn: false,
             p: 0,
             t: 0,
@@ -2794,6 +2879,31 @@ impl<'a> Game<'a> {
     /// CR 704: players at 0 life, 10 poison or 21 commander damage lose; creatures with
     /// lethal damage or 0 toughness die; planeswalkers with no loyalty go; Auras with
     /// nothing to enchant fall off.
+    /// "Whenever one or more ...": an ability that triggered several times in one event
+    /// (pending from `from` on) about several permanents triggers once (CR 603.2c).
+    pub fn batch_one_or_more(&mut self, from: usize) {
+        let mut seen: Vec<(Option<u32>, (u8, u16), u16)> = Vec::new();
+        let mut k = from;
+        while k < self.pending.len() {
+            let pend = &self.pending[k];
+            let key = (pend.source, pend.card, pend.ability);
+            // (Only events about permanents: "whenever a player discards one or more cards"
+            // triggers once per player, and those events don't say which player.)
+            let batch = pend.subject.is_some()
+                && self
+                    .pending_ability(pend)
+                    .is_some_and(|a| trigger_part(&a.text).contains("one or more"));
+            if batch && seen.contains(&key) {
+                self.pending.remove(k);
+                continue;
+            }
+            if batch {
+                seen.push(key);
+            }
+            k += 1;
+        }
+    }
+
     pub fn sba(&mut self) {
         loop {
             self.recalc();
@@ -2866,7 +2976,9 @@ impl<'a> Game<'a> {
                 changed = true;
             }
             // They all die at once (CR 704.3): "whenever another creature dies" on one of them
-            // sees the others (CR 603.10a) - the deaths are announced while all are still here.
+            // sees the others (CR 603.10a) - the deaths are announced while all are still here,
+            // and "whenever one or more creatures die" triggers once for them all.
+            let from = self.pending.len();
             for &id in &going {
                 let Some(i) = self.idx(id) else { continue };
                 if self.dies_to_graveyard(&self.perms[i]) {
@@ -2881,6 +2993,7 @@ impl<'a> Game<'a> {
                     self.leave(i, Zone::Graveyard, true);
                 }
             }
+            self.batch_one_or_more(from);
             if !changed {
                 break;
             }

@@ -228,16 +228,8 @@ impl App {
         let mut db = CardDb::load(&data_dir.join("cards.json"))?;
         db.attach_ratings(&data_dir);
         let coll = Collection::load(&data_dir.join("collection.txt"))?;
-        let rules_path = data_dir.join("rules.json");
-        let mut rules = if rules_path.exists() {
-            Rules::load(&rules_path)
-        } else {
-            // First run: use the rules for the next league session.
-            let mut r = Rules::default();
-            let _ = league::apply_session(&mut r, league::upcoming_session().number);
-            r
-        };
-        rules.data_dir = Some(data_dir.clone());
+        // rules.json, or on a first run the rules for the next league session.
+        let rules = league::app_rules(&data_dir, None);
         let current = crate::paths::decks_dir(&data_dir).join("_current.txt");
         let deck = if current.exists() {
             Deck::load(&current, &db).map(|mut d| {

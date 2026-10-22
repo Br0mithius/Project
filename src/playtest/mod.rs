@@ -663,66 +663,93 @@ impl<'a> Game<'a> {
     /// "deals 2 damage to target attacking or blocking creature") have a legal choice for
     /// player `p`? ("Up to one target" and modal spells may choose none / another mode.)
     pub fn targets_exist(&self, p: usize, c: &SimCard, abilities: &[SimAbility]) -> bool {
-        use crate::abilities::{Effect as E, Kind as K, Whose as W};
-        for a in abilities
+        abilities
             .iter()
             .filter(|a| a.trig == Trig::Spell && !a.modal)
-        {
-            if !a.text.contains("target") || a.text.contains("up to") {
-                continue;
-            }
-            // The first target the ability names.
-            let first = a.effects.iter().find_map(|e| match e {
-                E::Destroy(t) | E::Bounce(t) | E::GainControl(t) | E::Fight(t) => Some((t, true)),
-                E::Exile { target, .. } | E::Lock { target, .. } => Some((target, true)),
-                E::Damage { to, .. } | E::Shrink { to, .. } => Some((to, true)),
-                E::PlusCounters { to, .. } | E::Pump { to, .. } | E::Grant { to, .. } => {
-                    Some((to, false))
-                }
-                E::Untap(t) => Some((t, false)),
-                _ => None,
+            .all(|a| self.ability_targets_exist(p, Some(c), None, a))
+    }
+
+    /// Does ability `a` (of card `c` / permanent `src`) have a legal choice for the first
+    /// target it requires (CR 601.2c, 602.2b)? Only the kinds of target checked reliably.
+    pub fn ability_targets_exist(
+        &self,
+        p: usize,
+        c: Option<&SimCard>,
+        src: Option<u32>,
+        a: &SimAbility,
+    ) -> bool {
+        use crate::abilities::{Effect as E, Kind as K, Whose as W};
+        // An activated ability's targets are in its effect, after the cost.
+        let body = match a.trig {
+            Trig::Activated { .. } => a.text.split_once(": ").map_or("", |x| x.1),
+            _ => a.text.as_str(),
+        };
+        // "Return ~ from your graveyard to the battlefield attached to target creature you
+        // control with power 1 or less" (Eagle's Rescue).
+        if let Some(rest) = body.split("attached to target creature you control").nth(1) {
+            let most = rest
+                .strip_prefix(" with power ")
+                .and_then(|r| r.split(" or less").next())
+                .and_then(|n| n.trim().parse::<i16>().ok());
+            return self.perms.iter().any(|x| {
+                x.ctrl as usize == p
+                    && x.is_creature()
+                    && Some(x.id) != src
+                    && most.is_none_or(|m| x.p <= m)
             });
-            let Some((t, harmful)) = first else { continue };
-            if t.mass
-                || t.restr.has(crate::restrict::PREV)
-                || !matches!(
-                    t.kind,
-                    K::Creature
-                        | K::CreatureOrPlaneswalker
-                        | K::NonlandPermanent
-                        | K::Permanent
-                        | K::Artifact
-                        | K::Enchantment
-                        | K::ArtifactOrEnchantment
-                        | K::Planeswalker
-                        | K::Land
-                )
-            {
-                continue;
-            }
-            let ctx = resolve::Ctx {
-                ctrl: p,
-                src: None,
-                snap: None,
-                card: Some(c),
-                card_ref: None,
-                subject: None,
-                text: &a.text,
-                until_eot: a.until_eot,
-                overload: false,
-                card_restr: a.card_restr,
-                x: None,
-                paid: None,
-                teamwork: false,
-                about: None,
-            };
-            let any = !self.candidates(&ctx, t, harmful).is_empty()
-                || t.whose == W::Any && !self.candidates(&ctx, t, !harmful).is_empty();
-            if !any {
-                return false;
-            }
         }
-        true
+        if a.modal || !body.contains("target") || body.contains("up to") {
+            return true;
+        }
+        // The first target the ability names.
+        let first = a.effects.iter().find_map(|e| match e {
+            E::Destroy(t) | E::Bounce(t) | E::GainControl(t) | E::Fight(t) => Some((t, true)),
+            E::Exile { target, .. } | E::Lock { target, .. } => Some((target, true)),
+            E::Damage { to, .. } | E::Shrink { to, .. } => Some((to, true)),
+            E::PlusCounters { to, .. } | E::Pump { to, .. } | E::Grant { to, .. } => {
+                Some((to, false))
+            }
+            E::Untap(t) => Some((t, false)),
+            _ => None,
+        });
+        let Some((t, harmful)) = first else {
+            return true;
+        };
+        if t.mass
+            || t.restr.has(crate::restrict::PREV)
+            || !matches!(
+                t.kind,
+                K::Creature
+                    | K::CreatureOrPlaneswalker
+                    | K::NonlandPermanent
+                    | K::Permanent
+                    | K::Artifact
+                    | K::Enchantment
+                    | K::ArtifactOrEnchantment
+                    | K::Planeswalker
+                    | K::Land
+            )
+        {
+            return true;
+        }
+        let ctx = resolve::Ctx {
+            ctrl: p,
+            src,
+            snap: None,
+            card: c,
+            card_ref: None,
+            subject: None,
+            text: &a.text,
+            until_eot: a.until_eot,
+            overload: false,
+            card_restr: a.card_restr,
+            x: None,
+            paid: None,
+            teamwork: false,
+            about: None,
+        };
+        !self.candidates(&ctx, t, harmful).is_empty()
+            || t.whose == W::Any && !self.candidates(&ctx, t, !harmful).is_empty()
     }
 
     /// Creatures (convoke) or artifacts (improvise) that could be tapped to help pay.
@@ -1170,6 +1197,39 @@ impl<'a> Game<'a> {
         ai::fodder(self, p, types, src_id)
     }
 
+    /// "Sacrifice an artifact or discard a (nonland) card": the cheaper of the two - Ok(the
+    /// permanent `fodder` to sacrifice) or Err(the hand slot to discard); None if neither can be
+    /// paid.
+    pub fn sac_or_discard(
+        &self,
+        p: usize,
+        fodder: Option<usize>,
+        nonland: bool,
+    ) -> Option<Result<usize, usize>> {
+        let pl = &self.players[p];
+        let worth = |h: usize| ai::card_worth(self, p, &pl.cards[pl.hand[h] as usize]);
+        let card = (0..pl.hand.len())
+            .filter(|&h| !nonland || !pl.cards[pl.hand[h] as usize].is(T_LAND))
+            .min_by(|&a, &b| worth(a).total_cmp(&worth(b)));
+        match (fodder, card) {
+            (Some(i), Some(h)) if ai::perm_value(self, i) * 0.8 > worth(h) => Some(Err(h)),
+            (Some(i), _) => Some(Ok(i)),
+            (None, Some(h)) => Some(Err(h)),
+            (None, None) => None,
+        }
+    }
+
+    /// Discards the card in hand slot `h` (a cost: the player picked it).
+    pub fn discard_slot(&mut self, p: usize, h: usize) {
+        let c = self.players[p].hand.remove(h);
+        if self.log.is_some() {
+            let name = self.players[p].cards[c as usize].name.clone();
+            let tag = self.cause_tag();
+            self.note(|| format!("  P{} discards {}{}", p, name, tag));
+        }
+        self.put_discarded(p, c);
+    }
+
     /// The mana an activated ability needs now (None if it can't be activated).
     pub fn activation_cost(&self, p: usize, i: usize, k: usize) -> Option<Mana> {
         self.activation_plan(p, i, k).map(|c| c.0)
@@ -1331,11 +1391,21 @@ impl<'a> Game<'a> {
                 if *tap && (x.tapped || sick) {
                     return None;
                 }
-                if *sac_other && self.sac_fodder(p, x.id, &ab.text).is_none() {
-                    return None;
-                }
-                if *discard && self.discard_for_cost(p, &ab.text).is_none() {
-                    return None;
+                if extra.sac_or_discard {
+                    let fodder = self.sac_fodder(p, x.id, &ab.text);
+                    if self
+                        .sac_or_discard(p, fodder, extra.discard_nonland)
+                        .is_none()
+                    {
+                        return None;
+                    }
+                } else {
+                    if *sac_other && self.sac_fodder(p, x.id, &ab.text).is_none() {
+                        return None;
+                    }
+                    if *discard && self.discard_for_cost(p, &ab.text).is_none() {
+                        return None;
+                    }
                 }
                 if *life as i32 >= self.players[p].life {
                     return None;
@@ -1350,8 +1420,11 @@ impl<'a> Game<'a> {
                 if ab.once_per_turn && k < 32 && x.fired & (1 << k) != 0 {
                     return None;
                 }
-                if x.activations >= 3 {
-                    return None; // keep loops in check
+                // No limit in the rules: a loop guard only. Abilities that cost mana or a tap
+                // limit themselves; free ones stop at 3 a turn.
+                let free = !*tap && cost.total() == 0 && extra.x == 0;
+                if x.activations >= if free { 3 } else { 20 } {
+                    return None;
                 }
                 if extra.remove > 0 {
                     let have = if extra.remove_plus {
@@ -1369,6 +1442,10 @@ impl<'a> Game<'a> {
                     return None;
                 }
                 self.gy_cost(p, extra, None)?;
+                // An ability with a target needs a legal one (CR 602.2b).
+                if !self.ability_targets_exist(p, x.card.map(|r| self.card(r)), Some(x.id), ab) {
+                    return None;
+                }
                 // "Activate only if ..." (Boast: only if it attacked this turn).
                 if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, Some(i)) {
                     return None;
@@ -1565,18 +1642,27 @@ impl<'a> Game<'a> {
                 if *life > 0 {
                     self.lose_life(p, *life as i32);
                 }
-                if *discard {
-                    match self.discard_for_cost(p, &ab.text) {
-                        Some(Some(h)) => {
-                            let c = self.players[p].hand.remove(h);
-                            self.put_discarded(p, c);
-                        }
-                        _ => self.discard(p),
+                if extra.sac_or_discard {
+                    let fodder = self.sac_fodder(p, id, &ab.text);
+                    match self.sac_or_discard(p, fodder, extra.discard_nonland) {
+                        Some(Ok(f)) => self.sacrifice(f),
+                        Some(Err(h)) => self.discard_slot(p, h),
+                        None => {}
                     }
-                }
-                if *sac_other {
-                    if let Some(f) = self.sac_fodder(p, id, &ab.text) {
-                        self.sacrifice(f);
+                } else {
+                    if *discard {
+                        match self.discard_for_cost(p, &ab.text) {
+                            Some(Some(h)) => {
+                                let c = self.players[p].hand.remove(h);
+                                self.put_discarded(p, c);
+                            }
+                            _ => self.discard(p),
+                        }
+                    }
+                    if *sac_other {
+                        if let Some(f) = self.sac_fodder(p, id, &ab.text) {
+                            self.sacrifice(f);
+                        }
                     }
                 }
                 if *sac_self || extra.exile_self || extra.return_self {
@@ -1658,6 +1744,10 @@ impl<'a> Game<'a> {
             return None;
         }
         if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, None) {
+            return None;
+        }
+        // A target it needs (Eagle's Rescue's creature with power 1 or less: CR 602.2b).
+        if !self.ability_targets_exist(p, Some(c), None, ab) {
             return None;
         }
         self.gy_cost(p, extra, Some(gk))?;
@@ -2183,6 +2273,7 @@ impl<'a> Game<'a> {
             x.fired = 0;
             x.hit_turn = 0;
             x.hurt_by = 0;
+            x.dt_by = 0;
             x.attacked_turn = false;
             x.entered_turn = false;
         }

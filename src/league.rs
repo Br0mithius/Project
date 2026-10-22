@@ -131,6 +131,32 @@ pub fn session(n: u32) -> Option<&'static Session> {
     SESSIONS.iter().find(|s| s.number == n)
 }
 
+/// The rules the app plays under for a data folder: its `rules.json`, or on a first run the
+/// next league session's rules. Audit and comparison tools use this too, so they measure the
+/// same league (session, imported pool, pins, cached season) the app does. `session`
+/// overrides the session number.
+pub fn app_rules(data_dir: &std::path::Path, session: Option<u32>) -> Rules {
+    let rules_path = data_dir.join("rules.json");
+    let mut rules = if rules_path.exists() {
+        Rules::load(&rules_path)
+    } else {
+        let mut r = Rules::default();
+        let _ = apply_session(&mut r, upcoming_session().number);
+        r
+    };
+    if let Some(n) = session {
+        let _ = apply_session(&mut rules, n);
+    }
+    rules.data_dir = Some(data_dir.to_path_buf());
+    rules
+}
+
+/// `--session N` from a tool's command line.
+pub fn session_arg(args: &[String]) -> Option<u32> {
+    let i = args.iter().position(|a| a == "--session")?;
+    args.get(i + 1)?.parse().ok()
+}
+
 /// Sets deck size / singleton for a session. Everything else (commander counts toward
 /// the 60, unlimited basics, colour identity, pool-only) is the same all season.
 pub fn apply_session(rules: &mut Rules, n: u32) -> Result<&'static Session, String> {

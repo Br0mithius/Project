@@ -780,8 +780,14 @@ fn counted(a: Amount, s: &str) -> Amount {
     if a.x || a.n == 0 || !(s.contains("for each") || s.contains("where x is")) {
         return a;
     }
+    // "A +1/+1 counter for each of that spell's colors" (Ramos): most spells have one colour.
+    let typical = if s.contains("for each of that spell's colors") {
+        1
+    } else {
+        TYPICAL_X
+    };
     Amount {
-        n: a.n * TYPICAL_X,
+        n: a.n * typical,
         x: true,
     }
 }
@@ -1187,8 +1193,15 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
         {
             you = false;
         }
+        // "Draw a card for each card you've discarded this turn" (Misty Knight, whose cost
+        // discards one): typically one card, not a board count.
+        let typical = if s.contains("for each card you've discarded this turn") {
+            1
+        } else {
+            TYPICAL_X
+        };
         let amt = c.get(2).map(|m| amount(m.as_str(), s)).unwrap_or(Amount {
-            n: TYPICAL_X,
+            n: typical,
             x: true,
         });
         out.push(Effect::Draw { amount: amt, you });

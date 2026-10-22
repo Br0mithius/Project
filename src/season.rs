@@ -182,6 +182,9 @@ pub struct Season {
     pub opponents: Vec<Opponent>,
     /// Cards left in the simulated Public Pool.
     pub pool_left: u32,
+    /// Cards kept out of the simulated earlier sessions' pool because the imported Public
+    /// Pool shows nobody claimed them before this session.
+    pub held_back: u32,
 }
 
 impl Season {
@@ -318,12 +321,31 @@ pub fn simulate(
             }
         })
         .collect();
+    let real_pool = real_pool.filter(|c| c.total() > 0);
     let mut public: BTreeMap<String, u32> = db
         .cards
         .iter()
         .filter(|c| c.set == POOL_START_SET && !c.is_basic())
         .map(|c| (c.name.clone(), 1))
         .collect();
+    // The imported pool is the real state after the earlier sessions' claims: a card still
+    // in it was never claimed, so the simulated earlier sessions must not claim it either
+    // (otherwise it is claimed twice, once in a made-up session and again from the real
+    // pool, and players hold copies that don't exist).
+    let mut held_back = 0;
+    if let Some(real) = real_pool {
+        let unclaimed: std::collections::HashSet<&str> = real
+            .counts
+            .iter()
+            .filter(|(_, c)| **c > 0)
+            .filter_map(|(n, _)| db.get(n).map(|card| card.name.as_str()))
+            .collect();
+        public.retain(|name, _| {
+            let still_there = unclaimed.contains(name.as_str());
+            held_back += still_there as u32;
+            !still_there
+        });
+    }
     let mut drafted_picks: Vec<Vec<String>> = vec![Vec::new(); players.len()];
     for k in 1..=last {
         let r = rules_at(rules, k, last);
@@ -381,7 +403,7 @@ pub fn simulate(
         }
         rebuild_all(&mut players, db, &r, k);
         if k == last {
-            if let Some(real) = real_pool.filter(|c| c.total() > 0) {
+            if let Some(real) = real_pool {
                 public = real
                     .counts
                     .iter()
@@ -425,9 +447,10 @@ pub fn simulate(
     Season {
         session: last,
         seed,
-        real_pool: real_pool.is_some_and(|c| c.total() > 0),
+        real_pool: real_pool.is_some(),
         opponents,
         pool_left: public.values().sum(),
+        held_back,
     }
 }
 

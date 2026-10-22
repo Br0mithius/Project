@@ -12,8 +12,11 @@ use std::sync::{Arc, Mutex};
 
 pub const PINS_FILE: &str = "opponents.json";
 pub const CACHE_FILE: &str = "gauntlet_cache.json";
-/// Bump when the simulation changes, so old cached seasons are rebuilt.
-const SIM_VERSION: u32 = 1;
+/// Bump when the simulation changes, so old cached seasons are rebuilt. The key also holds
+/// `SIM_FINGERPRINT` (build.rs: a hash of the source files the season depends on), so a
+/// code change rebuilds the cache even when nobody remembers to bump this.
+const SIM_VERSION: u32 = 2;
+const SIM_FINGERPRINT: &str = env!("SIM_FINGERPRINT");
 /// Seasons kept in the cache file (different seeds, sessions, rule previews).
 const CACHE_ENTRIES: usize = 24;
 
@@ -53,8 +56,9 @@ pub fn cache_key(
     pool: Option<&Collection>,
 ) -> String {
     fnv(&format!(
-        "v{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "v{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         SIM_VERSION,
+        SIM_FINGERPRINT,
         seed,
         serde_json::to_string(rules).unwrap_or_default(),
         serde_json::to_string(pins).unwrap_or_default(),
@@ -131,6 +135,28 @@ pub fn season(db: &CardDb, rules: &Rules, seed: u64) -> Arc<Season> {
         write_cache(dir, &key, &s);
     }
     s
+}
+
+/// One line saying which league a tool is measuring: session, seed, imported pool, pins and
+/// the season's cache key.
+pub fn league_header(db: &CardDb, rules: &Rules, seed: u64) -> String {
+    let dir = rules.data_dir.as_deref();
+    let pins = dir.map(load_pins).unwrap_or_default();
+    let pool = dir.and_then(real_pool);
+    format!(
+        "league: Session {} (deck size {}{}), seed {}, data {}, imported pool {}, {} pinned players, season cache key {}",
+        rules.session.clamp(1, 13),
+        rules.deck_size,
+        if rules.singleton { ", singleton" } else { "" },
+        seed,
+        dir.map(|d| d.display().to_string())
+            .unwrap_or_else(|| "none".into()),
+        pool.as_ref()
+            .map(|p| format!("{} cards", p.total()))
+            .unwrap_or_else(|| "none".into()),
+        pins.players.len(),
+        cache_key(db, rules, seed, &pins, pool.as_ref())
+    )
 }
 
 /// The opponents' decks (one per other player with a commander), for playtests.
@@ -294,6 +320,12 @@ pub fn report(db: &CardDb, s: &Season, full: bool) -> String {
             ""
         }
     );
+    if s.held_back > 0 {
+        out += &format!(
+            "{} cards still in your imported pool were kept out of the simulated earlier sessions (nobody claimed them).\n",
+            s.held_back
+        );
+    }
     for (i, o) in s.opponents.iter().enumerate() {
         let pinned = match o.pinned.as_str() {
             "commander" => "  [commander pinned]",

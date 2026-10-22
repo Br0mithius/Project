@@ -1,6 +1,8 @@
 //! Builds one commander in several colour sets and playtests each against the same
 //! simulated league decks:
-//! `cargo run --release --example compare_builds -- <data dir> "<commander>" WBR WUBRG ...`
+//! `cargo run --release --example compare_builds -- <data dir> "<commander>" WBR WUBRG ... [--session N]`
+//! The league is the one the app uses for that data folder (rules.json or the upcoming session,
+//! with the imported pool, pins and cached season).
 //! Prints win rate, keepable hands, coloured sources per colour, and how often a "look at
 //! the top seven for a Hero, Equipment or Vehicle" (Nick Fury's power-up) would hit.
 use msh_deckbuilder::{analysis, card::ColorSet, db::*, playtest, ranking};
@@ -13,13 +15,24 @@ fn choose(n: u64, k: u64) -> f64 {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let dir = std::path::PathBuf::from(&args[1]);
+    let all: Vec<String> = std::env::args().collect();
+    let session = msh_deckbuilder::league::session_arg(&all);
+    let args: Vec<&String> = all
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| !a.starts_with("--") && !(*i > 0 && all[i - 1] == "--session"))
+        .map(|(_, a)| a)
+        .collect();
+    let dir = std::path::PathBuf::from(args[1]);
     let mut db = CardDb::load(&dir.join("cards.json")).unwrap();
     db.attach_ratings(&dir);
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
-    let rules = Rules::default();
-    let cmd = db.get(&args[2]).expect("commander").clone();
+    let rules = msh_deckbuilder::league::app_rules(&dir, session);
+    println!(
+        "{}",
+        msh_deckbuilder::opponents::league_header(&db, &rules, 2026)
+    );
+    let cmd = db.get(args[2]).expect("commander").clone();
     let bed = ranking::TestBed::new(&db, &rules);
     // More games for closer calls: COMPARE_GAMES=4800.
     let games: u32 = std::env::var("COMPARE_GAMES")
