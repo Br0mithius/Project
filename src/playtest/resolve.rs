@@ -829,6 +829,8 @@ impl<'a> Game<'a> {
         if !self.ward_payable(me, x) {
             return false;
         }
+        // (Described now: paying may sacrifice permanents and move `i`.)
+        let desc = self.log.is_some().then(|| self.perm_desc(&self.perms[i]));
         if w.discard_or_mana {
             if !self.pay(me, &mana) {
                 self.discard(me);
@@ -852,8 +854,7 @@ impl<'a> Game<'a> {
         if w.poison > 0 {
             self.players[me].poison = self.players[me].poison.saturating_add(w.poison);
         }
-        if self.log.is_some() {
-            let d = self.perm_desc(&self.perms[i]);
+        if let Some(d) = desc {
             self.note(|| format!("  P{} pays the ward of {}", me, d));
         }
         true
@@ -1263,18 +1264,8 @@ impl<'a> Game<'a> {
             modes.sort_unstable();
             // "You may pay {1} up to three times. When you do, choose up to that many"
             // (Hawkeye's Trick Arrows): {1} per mode, the ones worth it; none unpaid.
-            if let Some(rest) = ab.text.split("you may pay {").nth(1) {
-                if ab.text.contains("up to three times") || ab.text.contains("up to two times") {
-                    let n: u32 = rest
-                        .split('}')
-                        .next()
-                        .and_then(|d| d.parse().ok())
-                        .unwrap_or(1);
-                    let most = if ab.text.contains("up to three times") {
-                        3
-                    } else {
-                        2
-                    };
+            if let Some((n, most)) = ai::paid_modes(ab) {
+                {
                     let mut ranked: Vec<(f32, usize)> = groups
                         .iter()
                         .enumerate()
@@ -1292,7 +1283,7 @@ impl<'a> Game<'a> {
                     modes.clear();
                     // Only what beats the spells that mana would cast later this turn.
                     let vals: Vec<f32> = ranked.iter().take(most).map(|r| r.0).collect();
-                    let most = ai::paid_modes(self, me, &vals, n);
+                    let most = ai::modes_worth_paying(self, me, &vals, n);
                     for (_, m) in ranked.into_iter().take(most) {
                         if !self.pay(me, &Mana::generic(n)) {
                             break;
@@ -5371,7 +5362,7 @@ impl<'a> Game<'a> {
             }
             // In our combat, before blocks: the defender's blocker that would cost us most.
             "can't block this turn" if ai::net_target(self, me).is_some() => {
-                if let Some((i, _)) = ai::net_target(self, me) {
+                if let Some(i) = ai::net_target(self, me).and_then(|(id, _)| self.idx(id)) {
                     self.perms[i].temp_kw |= CANT_BLOCK;
                     if self.log.is_some() {
                         let d = self.id_desc(self.perms[i].id);

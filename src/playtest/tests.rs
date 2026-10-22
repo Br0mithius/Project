@@ -411,6 +411,209 @@ fn ai_keeps_defenders_home_against_a_lethal_crack_back() {
 }
 
 #[test]
+fn ai_stacks_chump_blockers_in_front_of_a_trampler() {
+    let d = prep(&[
+        card(
+            "Thing",
+            "{6}{G}",
+            "Creature — Golem",
+            "Trample",
+            Some(("13", "13")),
+        ),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let thing = put(&mut g, 0, 0);
+    for _ in 0..4 {
+        put(&mut g, 1, 1);
+    }
+    g.players[1].life = 10;
+    // One chump soaks 2 of the 13: only a stack of blockers keeps us alive.
+    let blocks = ai::declare_blocks(&g, 1, &attack_on(&[thing], 1));
+    let soak: i32 = blocks
+        .iter()
+        .filter(|(_, a)| *a == thing)
+        .map(|(b, _)| perm(&g, *b).t as i32)
+        .sum();
+    assert!(13 - soak < 10, "survives the trampler: {:?}", blocks);
+}
+
+#[test]
+fn ai_gang_blocks_a_big_threat_with_three() {
+    let d = prep(&[
+        card(
+            "Behemoth",
+            "{6}{G}",
+            "Creature — Beast",
+            "",
+            Some(("9", "10")),
+        ),
+        card(
+            "Drone",
+            "{3}",
+            "Artifact Creature — Drone",
+            "",
+            Some(("4", "5")),
+        ),
+        card(
+            "Dragon",
+            "{4}{R}",
+            "Creature — Dragon",
+            "",
+            Some(("5", "5")),
+        ),
+        card("Eagle", "{2}{W}", "Creature — Bird", "", Some(("2", "5"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let behemoth = put(&mut g, 0, 0);
+    let mine = [put(&mut g, 1, 1), put(&mut g, 1, 2), put(&mut g, 1, 3)];
+    // No two of them can kill the 9/10; all three can, and it takes only one with it.
+    let blocks = ai::declare_blocks(&g, 1, &attack_on(&[behemoth], 1));
+    for b in mine {
+        assert!(blocks.contains(&(b, behemoth)), "gang block: {:?}", blocks);
+    }
+}
+
+#[test]
+fn ai_lethal_swing_pays_the_attack_tax() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Mountain", 'R'),
+        card(
+            "Sprite",
+            "{U}",
+            "Creature — Faerie",
+            "Flying",
+            Some(("1", "1")),
+        ),
+        card("Giant", "{4}{R}", "Creature — Giant", "", Some(("5", "5"))),
+        card("Ogre", "{3}{R}", "Creature — Ogre", "", Some(("4", "4"))),
+        db.get("Propaganda").unwrap().clone(),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'R');
+    put(&mut g, 0, 1);
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 2);
+    put(&mut g, 1, 4);
+    g.players[1].life = 10;
+    // {2} per attacker and four mana: the two 5/5s are lethal, the 1/1 flier isn't needed;
+    // and main phase 1 keeps that mana rather than casting the Ogre.
+    g.players[0].hand = vec![3];
+    ai::main_phase(&mut g, 0, false);
+    assert_eq!(
+        tapped_lands(&g, 0),
+        0,
+        "the tax mana is kept: {:?}",
+        g.players[0].hand
+    );
+    g.combat(0);
+    assert!(
+        g.players[1].life <= 0,
+        "lethal (life {})",
+        g.players[1].life
+    );
+}
+
+#[test]
+fn ai_rechecks_the_attack_after_keeping_some_home() {
+    let d = prep(&[
+        card("Giant", "{5}{R}", "Creature — Giant", "", Some(("7", "7"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card(
+            "Guard",
+            "{3}{W}",
+            "Creature — Soldier",
+            "",
+            Some(("3", "8")),
+        ),
+        card("Ogre", "{4}{R}", "Creature — Ogre", "", Some(("6", "6"))),
+    ]);
+    let mut g = game(&[&d, &d, &d]);
+    let giant = put(&mut g, 0, 0);
+    let bear = put(&mut g, 0, 1);
+    put(&mut g, 1, 2);
+    for _ in 0..4 {
+        put(&mut g, 2, 3);
+    }
+    g.players[0].life = 12;
+    // Together, the Guard holds off the 7/7 and the Bear gets in. The crack-back keeps the
+    // Giant home; alone, the Bear would just die to the Guard.
+    let attacks = ai::declare_attacks(&g, 0);
+    let sent = |id: u32| attacks.iter().any(|(x, _)| *x == id);
+    assert!(sent(giant) || !sent(bear), "{:?}", attacks);
+}
+
+#[test]
+fn combat_removal_only_where_it_kills_and_swings_the_fight() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Swamp", 'B'),
+        db.get("Scorching Dragonfire").unwrap().clone(),
+        db.get("Bilbo's Deadly Slice").unwrap().clone(),
+        card("Giant", "{5}{R}", "Creature — Giant", "", Some(("6", "6"))),
+        card(
+            "Knight",
+            "{2}{W}",
+            "Creature — Knight",
+            "",
+            Some(("3", "3")),
+        ),
+        card("Ogre", "{3}{R}", "Creature — Ogre", "", Some(("4", "4"))),
+    ]);
+    // 3 damage can't kill the 6/6 that attacks us: the card stays in hand.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 1, 2, 'R');
+    g.players[1].hand = vec![2];
+    g.players[1].life = 12;
+    let giant = put(&mut g, 0, 4);
+    let at = attack_on(&[giant], 1);
+    ai::before_blocks(&mut g, 1, &at);
+    assert_eq!(g.players[1].hand, vec![2], "no Dragonfire at a 6/6");
+    // After blocks: our 3/3 runs into a 4/4; destroying the blocker saves it.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'B');
+    g.players[0].hand = vec![3];
+    let knight = put(&mut g, 0, 5);
+    let ogre = put(&mut g, 1, 6);
+    let at = vec![Attack {
+        attacker: knight,
+        def: Def::Player(1),
+        blockers: vec![ogre],
+        blocked: true,
+    }];
+    ai::combat_tricks(&mut g, 0, &at);
+    assert!(g.idx(ogre).is_none(), "the blocker is destroyed");
+    assert!(g.idx(knight).is_some());
+}
+
+#[test]
+fn hawkeye_attacks_for_his_trick_arrows() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Mountain", 'R'),
+        db.get("Hawkeye, Master Marksman").unwrap().clone(),
+        card(
+            "Wall",
+            "{1}{W}",
+            "Creature — Wall",
+            "Defender",
+            Some(("0", "5")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let hawkeye = put(&mut g, 0, 1);
+    put(&mut g, 1, 2);
+    // The wall stops his 2 damage for free: with no mana for arrows, attacking gains nothing.
+    assert!(ai::declare_attacks(&g, 0).is_empty());
+    // With mana for arrows, tapping him to attack shoots them.
+    lands(&mut g, 0, 3, 'R');
+    let attacks = ai::declare_attacks(&g, 0);
+    assert!(attacks.iter().any(|(x, _)| *x == hawkeye), "{:?}", attacks);
+}
+
+#[test]
 fn counterspells_stop_big_threats() {
     let db = db();
     let d0 = prep(&[
@@ -3856,12 +4059,13 @@ fn ai_uses_abilities_that_work_from_the_hand() {
     let d = prep(&[
         Card::basic_land("Forest", 'G'),
         db.get("Sureshot Sower").unwrap().clone(),
+        // (A threat worth a card: one-for-one removal waits for one.)
         card(
             "Drake",
-            "{3}{U}",
+            "{6}{U}{U}",
             "Creature — Drake",
             "Flying",
-            Some(("4", "4")),
+            Some(("8", "8")),
         ),
     ]);
     let mut g = game(&[&d, &d]);
@@ -4423,10 +4627,18 @@ fn removal_waits_for_a_real_threat() {
     ai::main_phase(&mut g, 0, true);
     assert_eq!(g.players[0].hand, vec![1], "the Ogre, not the Kill");
     assert!(g.idx(bear).is_some());
+    // Nor is it worth the Kill on its own: it stays in hand.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'B');
+    g.players[0].hand = vec![1];
+    let bear = put(&mut g, 1, 3);
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].hand, vec![1], "the Kill waits");
+    assert!(g.idx(bear).is_some());
     // A 6/6 flier is: Kill it (not the Bear next to it).
     let mut g = game(&[&d, &d]);
     lands(&mut g, 0, 4, 'B');
-    g.players[0].hand = vec![1, 2];
+    g.players[0].hand = vec![1];
     let bear = put(&mut g, 1, 3);
     let dragon = put(&mut g, 1, 4);
     ai::main_phase(&mut g, 0, true);

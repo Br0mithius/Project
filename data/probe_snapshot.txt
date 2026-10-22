@@ -612,8 +612,7 @@ TEXT: Flying / When this creature enters, choose one — / • Destroy target no
 SIM: keywords flying
 On entering:
       itself: 4/4 flying
-      -> Opp A: graveyard +1
-      -> Opp A's Relic left the battlefield
+      -> You: life +4
 ABILITIES:
   Enters: "when ~ enters, choose one —"
       mode 1: Opp A: graveyard +1
