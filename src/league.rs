@@ -427,7 +427,8 @@ pub fn plan_trade_in<'a>(
                 .map(|(i, _)| i)
                 .take(n)
                 .collect();
-            let from_deck: Vec<TradeIn> = in_deck(rarity).into_iter().take(n - spare.len()).collect();
+            let from_deck: Vec<TradeIn> =
+                in_deck(rarity).into_iter().take(n - spare.len()).collect();
             (spare.len() + from_deck.len() == n).then_some((spare, from_deck))
         })
         .collect();
@@ -575,7 +576,11 @@ mod tests {
         let rules = Rules::default();
         let mut deck = Deck::new("t");
         deck.commander = Some("Thanos, the Mad Titan".into());
-        for n in ["Construct a Cosmic Cube", "Hawkeye, Master Marksman", "Ronin, Shadow Stalker"] {
+        for n in [
+            "Construct a Cosmic Cube",
+            "Hawkeye, Master Marksman",
+            "Ronin, Shadow Stalker",
+        ] {
             deck.add(n, 1);
         }
         let mut counts: std::collections::BTreeMap<String, u32> = [

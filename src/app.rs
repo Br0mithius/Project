@@ -887,7 +887,12 @@ impl App {
                 "  To claim {} this round, trade in: {} ({} VP)",
                 top.card.name,
                 plan.iter()
-                    .map(|t| format!("{}x {}{}", t.copies, t.card.name, crate::league::deck_note(t)))
+                    .map(|t| format!(
+                        "{}x {}{}",
+                        t.copies,
+                        t.card.name,
+                        crate::league::deck_note(t)
+                    ))
                     .collect::<Vec<_>>()
                     .join(", "),
                 vp
