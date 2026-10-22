@@ -3872,3 +3872,168 @@ fn ai_uses_abilities_that_work_from_the_hand() {
     assert!(g.idx(drake).is_none(), "{{3}}{{G}}, discard Sureshot Sower");
     assert!(g.players[0].graveyard.contains(&1));
 }
+
+/// Hawkeye has just attacked player 1 (tapped, attacking): his Trick Arrows trigger is
+/// resolved.
+fn hawkeye_attacks(g: &mut Game, h: u32) {
+    g.active = 0;
+    g.in_combat = true;
+    let i = g.idx(h).unwrap();
+    g.perms[i].tapped = true;
+    g.perms[i].attacking = true;
+    g.ext.attack_def = vec![(h, 1)];
+    g.emit(Ev::Tapped, 0, Some(h));
+    g.run_pending();
+}
+
+#[test]
+fn hawkeyes_net_keeps_the_blocker_out() {
+    let db = db();
+    let d = prep(&[
+        db.get("Hawkeye, Master Marksman").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        card("Wall", "{1}{W}", "Creature — Wall", "", Some(("1", "5"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let h = put(&mut g, 0, 0);
+    lands(&mut g, 0, 1, 'R');
+    let wall = put(&mut g, 1, 2);
+    let attack = vec![Attack {
+        attacker: h,
+        def: Def::Player(1),
+        blockers: Vec::new(),
+        blocked: false,
+    }];
+    assert!(
+        !ai::declare_blocks(&g, 1, &attack).is_empty(),
+        "the Wall blocks Hawkeye for free"
+    );
+    hawkeye_attacks(&mut g, h);
+    assert_eq!(tapped_lands(&g, 0), 1, "{{1}} paid for Net");
+    assert!(perm(&g, wall).has(CANT_BLOCK), "Net on the blocker");
+    assert!(ai::declare_blocks(&g, 1, &attack).is_empty());
+}
+
+#[test]
+fn hawkeyes_arrows_leave_the_mana_for_the_spell_after_combat() {
+    let db = db();
+    let d = prep(&[
+        db.get("Hawkeye, Master Marksman").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        card("Ogre", "{1}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let h = put(&mut g, 0, 0);
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![2];
+    hawkeye_attacks(&mut g, h);
+    assert_eq!(tapped_lands(&g, 0), 0, "no arrows: the mana casts the Ogre");
+    g.in_combat = false;
+    g.end_combat();
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.players[0].hand.is_empty(), "the Ogre is cast after combat");
+}
+
+#[test]
+fn thanos_tax_is_paid_around_the_power_up_colours() {
+    let db = db();
+    let d = prep(&[
+        db.get("Thanos, the Mad Titan").unwrap().clone(),
+        Card::basic_land("Island", 'U'),
+        Card::basic_land("Forest", 'G'),
+        Card::basic_land("Wastes", 'C'),
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Plains", 'W'),
+        Card::basic_land("Swamp", 'B'),
+        card("Troll", "{2}{G}", "Creature — Troll", "", Some(("4", "4"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    // The Island, Forest and Wastes come first: a careless payment of Thanos' {2} tax
+    // would tap two of them.
+    for k in [1, 2, 3, 4, 5, 6, 4, 5] {
+        put(&mut g, 0, k);
+    }
+    g.players[0].command = vec![(0, 0)];
+    g.players[0].casts[0] = 1;
+    let t1 = put(&mut g, 1, 7);
+    let t2 = put(&mut g, 1, 7);
+    g.log = Some(Vec::new());
+    ai::main_phase(&mut g, 0, false);
+    let thanos = g.perms.iter().find(|x| x.card == Some((0, 0)));
+    if thanos.is_none_or(|t| !t.powered) {
+        dump_log(&g);
+    }
+    assert!(
+        thanos.is_some_and(|t| t.powered),
+        "cast for {{2}}{{R}}{{W}}{{B}} and powered up for {{C}}{{U}}{{G}}"
+    );
+    assert!(g.idx(t1).is_none() && g.idx(t2).is_none());
+}
+
+#[test]
+fn ai_casts_a_saga() {
+    let db = db();
+    let d = deck(&db, &["Avengers: Under Siege", "Swamp", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![0];
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.players[0].hand.is_empty(), "the Saga is cast");
+    assert_eq!(
+        g.perms
+            .iter()
+            .filter(|x| x.ctrl == 0 && x.tok == Tok::Creature)
+            .count(),
+        2,
+        "chapter I: two Villains"
+    );
+}
+
+#[test]
+fn choose_one_or_both_takes_both() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Decoy Ploy",
+            "Swamp",
+            "Hawkeye, Master Marksman",
+            "Madame Masque",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].hand = vec![0];
+    g.players[0].graveyard = vec![2, 3];
+    ai::main_phase(&mut g, 0, true);
+    let hand = &g.players[0].hand;
+    assert!(hand.contains(&2) && hand.contains(&3), "the Hero and the Villain");
+}
+
+#[test]
+fn ramos_mana_is_not_an_action() {
+    let db = db();
+    let d = deck(&db, &["Ramos, Dragon Engine"]);
+    let mut g = game(&[&d, &d]);
+    let r = put(&mut g, 0, 0);
+    let i = g.idx(r).unwrap();
+    g.perms[i].counters = 6;
+    g.recalc();
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(perm(&g, r).counters, 6, "nothing to spend ten mana on");
+}
+
+#[test]
+fn draw_engine_stops_near_an_empty_library() {
+    let db = db();
+    let d = deck(&db, &["Arcanis the Omnipotent"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    g.players[0].library = vec![0; 4];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].library.len(), 4, "no 'draw three' from four cards");
+    g.players[0].library = vec![0; 30];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].library.len(), 27, "draws with a deep library");
+}

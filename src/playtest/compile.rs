@@ -2798,6 +2798,28 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 redraw(&mut effects);
             }
             sim_rules(&a.text, &mut effects);
+            // A mode the reader leaves to the simulator ("• Net — Target creature can't block
+            // this turn", Hawkeye's Trick Arrows): its rule goes in that mode's group.
+            let mut modes = a.modes.clone();
+            if a.modal
+                && modes.len() == a.mode_texts.len()
+                && modes.iter().map(|&m| m as usize).sum::<usize>() == effects.len()
+            {
+                let mut at = 0;
+                for (m, t) in a.mode_texts.iter().enumerate() {
+                    let n = modes[m] as usize;
+                    if (t.contains("target creature can't block this turn")
+                        || t.contains("target creature can't block until end of turn"))
+                        && !effects[at..at + n]
+                            .iter()
+                            .any(|e| matches!(e, Effect::Rule(l) if l == "can't block this turn"))
+                    {
+                        effects.insert(at + n, Effect::Rule("can't block this turn".into()));
+                        modes[m] += 1;
+                    }
+                    at += modes[m] as usize;
+                }
+            }
             let event = matches!(trig, Trig::Event(..));
             // A trigger about another creature: "it"/"that creature" may be that one (not
             // when the trigger is about the card itself: "whenever ~ is dealt damage, put a
@@ -2817,7 +2839,7 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
                 optional: a.optional,
                 once: a.once,
                 modal: a.modal,
-                modes: a.modes.clone(),
+                modes,
                 mode_texts: a
                     .mode_texts
                     .iter()

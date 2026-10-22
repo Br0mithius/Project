@@ -225,6 +225,14 @@ fn perm_value_uncached(g: &Game, i: usize) -> f32 {
         engine_value(abilities)
     };
     v += engine * if x.locked { 0.5 } else { 1.0 };
+    // A Plan: its payoff, closer with each counter.
+    if x.is(T_ENCHANTMENT) && super::exp::on(super::exp::PLANS, x.ctrl as usize) {
+        v += plan_payoff(abilities, x.other_counters);
+    }
+    // A Saga: the chapters still to come.
+    if x.is(T_SAGA) && super::exp::on(super::exp::SAGA, x.ctrl as usize) {
+        v += saga_value(g, x.ctrl as usize, abilities, x.other_counters.max(1));
+    }
     if x.card.is_some_and(|r| g.card(r).mana_ability) && !x.is(T_LAND) {
         v += 1.5;
     }
@@ -402,6 +410,28 @@ pub fn choose_opponent(g: &Game, me: usize, n: i32) -> Option<usize> {
     archenemy(g, me)
 }
 
+/// The opponent to deal `n` damage (or life loss) to: one it kills, else during our own
+/// combat the player we're attacking (damage piles up on one player) unless another is
+/// clearly the bigger threat, else the biggest threat.
+pub fn burn_opponent(g: &Game, me: usize, n: i32) -> Option<usize> {
+    let pick = choose_opponent(g, me, n)?;
+    if !super::exp::on(super::exp::EXPLOSIVE, me)
+        || !g.in_combat
+        || g.active != me
+        || g.players[pick].life <= n
+    {
+        return Some(pick);
+    }
+    let top = weight(g, me, pick);
+    g.ext
+        .attack_def
+        .iter()
+        .map(|x| x.1 as usize)
+        .filter(|&d| g.players[d].alive && d != me && weight(g, me, d) >= 0.9 * top)
+        .min_by_key(|&d| g.players[d].life)
+        .or(Some(pick))
+}
+
 // ------------------------------------------------------------ targets
 
 pub fn choose_victims(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usize> {
@@ -416,6 +446,9 @@ pub fn choose_victims(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usi
             };
             let w = if owner == me {
                 -1.0
+            } else if super::exp::on(super::exp::RMTARGET, me) {
+                // As removal is valued: less on a commander or a player about to die.
+                weight(g, me, owner) * removal_discount(g, me, i)
             } else {
                 weight(g, me, owner)
             };
@@ -478,6 +511,10 @@ pub fn damage_target(g: &Game, ctx: &Ctx, to: &crate::abilities::Target, n: i32)
             x.ctrl as usize != me
                 && ((x.is(T_PLANESWALKER) && !x.is_creature())
                     || (!x.has(INDESTRUCTIBLE) && x.t - x.damage <= n as i16))
+                // (Already dealt lethal damage by this spell's earlier copies.)
+                && !(x.is_creature()
+                    && x.damage >= x.t
+                    && super::exp::on(super::exp::BARRAGE, me))
         })
         .map(|&i| {
             (
@@ -488,10 +525,99 @@ pub fn damage_target(g: &Game, ctx: &Ctx, to: &crate::abilities::Target, n: i32)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     match best {
         Some((v, i)) if v >= n as f32 * 0.6 || !face_ok => Hit::Perm(g.perms[i].id),
-        _ if face_ok => archenemy(g, me).map(Hit::Player).unwrap_or(Hit::None),
+        _ if face_ok => burn_opponent(g, me, n)
+            .map(Hit::Player)
+            .unwrap_or(Hit::None),
         Some((_, i)) => Hit::Perm(g.perms[i].id),
         None => Hit::None,
     }
+}
+
+/// "Target creature can't block this turn" during `p`'s combat, before blocks: the
+/// defending player's creature whose predicted block costs `p` the most, and what keeping
+/// it out of the fight is worth (None outside that window, or when no predicted block
+/// hurts us).
+pub fn net_target(g: &Game, p: usize) -> Option<(usize, f32)> {
+    if !g.in_combat || g.active != p || g.ext.attack_def.is_empty() {
+        return None;
+    }
+    if !super::exp::on(super::exp::NET, p) {
+        return None;
+    }
+    // Blocks are declared once: a creature already blocking means it's too late.
+    if g.perms.iter().any(|x| x.blocking) {
+        return None;
+    }
+    let mut defenders: Vec<u8> = g.ext.attack_def.iter().map(|x| x.1).collect();
+    defenders.sort_unstable();
+    defenders.dedup();
+    defenders
+        .into_iter()
+        .filter_map(|d| {
+            let group: Vec<usize> = g
+                .ext
+                .attack_def
+                .iter()
+                .filter(|x| x.1 == d)
+                .filter_map(|x| g.idx(x.0))
+                .collect();
+            net_target_vs(g, p, d as usize, &group)
+        })
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+}
+
+/// `net_target` against attackers `group` (perm indices) sent at player `d`: the blocker
+/// `d` would use whose absence helps the attack most (its blocks predicted by the blocking
+/// AI), and that gain. For attack planning as well as for resolving the effect.
+pub fn net_target_vs(g: &Game, p: usize, d: usize, group: &[usize]) -> Option<(usize, f32)> {
+    if group.is_empty() {
+        return None;
+    }
+    let attacks: Vec<Attack> = group
+        .iter()
+        .map(|&a| Attack {
+            attacker: g.perms[a].id,
+            def: Def::Player(d),
+            blockers: Vec::new(),
+            blocked: false,
+        })
+        .collect();
+    let blocks = declare_blocks(g, d, &attacks);
+    let w = weight(g, p, d);
+    // What attacker `a` does blocked by `bl` (as `group_value` counts it).
+    let outcome = |a: usize, bl: &[usize]| -> f32 {
+        let at = &g.perms[a];
+        if bl.is_empty() || at.has(MENACE) && bl.len() == 1 {
+            return (dmg_of(g, at) + g.players[d].attacked_power as i32).max(0) as f32 * 0.6 * w;
+        }
+        let c = clash(g, a, bl);
+        let killed: f32 = c.dead.iter().map(|&b| perm_value(g, b)).sum();
+        killed + c.through as f32 * 0.6 * w - if c.att_dies { perm_value(g, a) } else { 0.0 }
+    };
+    let mut best: Option<(usize, f32)> = None;
+    for &a in group {
+        let id = g.perms[a].id;
+        let bl: Vec<usize> = blocks
+            .iter()
+            .filter(|x| x.1 == id)
+            .filter_map(|x| g.idx(x.0))
+            .collect();
+        if bl.is_empty() {
+            continue;
+        }
+        let with = outcome(a, &bl);
+        for &b in &bl {
+            if g.perms[b].has(HEXPROOF | SHROUD) {
+                continue;
+            }
+            let rest: Vec<usize> = bl.iter().copied().filter(|&x| x != b).collect();
+            let gain = outcome(a, &rest) - with;
+            if gain > 0.0 && best.is_none_or(|x| gain > x.1) {
+                best = Some((b, gain));
+            }
+        }
+    }
+    best
 }
 
 /// The biggest creature `me` controls other than `not`.
@@ -529,6 +655,23 @@ pub fn sacrifice_choice_r(g: &Game, o: usize, types: u16, r: &Restr) -> Option<u
     cands
         .into_iter()
         .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap())
+}
+
+/// The opponent a "target opponent sacrifices a creature" should hit: the one whose
+/// creature it takes is worth most to us (their least valuable one, weighted by how much we
+/// want to hurt them); none when nobody has a creature.
+pub fn edict_victim(g: &Game, me: usize, r: &Restr) -> Option<usize> {
+    if !super::exp::on(super::exp::EDICT, me) {
+        return choose_opponent(g, me, 0);
+    }
+    g.opponents(me)
+        .into_iter()
+        .filter_map(|o| {
+            sacrifice_choice_r(g, o, T_CREATURE, r).map(|i| (perm_value(g, i) * weight(g, me, o), o))
+        })
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+        .map(|x| x.1)
+        .or_else(|| choose_opponent(g, me, 0))
 }
 
 pub fn fodder(g: &Game, p: usize, types: u16, src_id: u32) -> Option<usize> {
@@ -598,17 +741,53 @@ fn arrival_value(c: &SimCard) -> f32 {
 }
 
 pub fn blink_choice(g: &Game, me: usize, not: Option<u32>, types: u16) -> Option<usize> {
+    blink_pick(g, me, not, types, false)
+}
+
+/// `blink_choice` for a blink that returns the card at once: a commander may go too (its
+/// owner leaves it in exile, and it comes back as a commander).
+pub fn blink_choice_now(g: &Game, me: usize, not: Option<u32>, types: u16) -> Option<usize> {
+    blink_pick(g, me, not, types, super::exp::on(super::exp::BLINK, me))
+}
+
+/// What blinking permanent `i` is worth: its arrival again, and - for a once-only power-up
+/// already used (Thanos) - that power-up back, less the counters it loses.
+fn blink_gain(g: &Game, i: usize) -> f32 {
+    let x = &g.perms[i];
+    let c = g.card(x.card.unwrap());
+    let mut v = arrival_value(c);
+    if !super::exp::on(super::exp::BLINK, x.ctrl as usize) {
+        return v;
+    }
+    if x.powered {
+        // Paid again at full cost on a later turn: about half of what it would do now.
+        v += c
+            .abilities
+            .iter()
+            .filter(|a| matches!(a.trig, Trig::PowerUp(_)))
+            .map(|a| ability_now(g, x.ctrl as usize, a, Some(x.id)).max(0.0) * 0.5)
+            .sum::<f32>();
+    }
+    v - 0.8 * x.counters.max(0) as f32 - 0.3 * x.other_counters.max(0) as f32
+}
+
+/// Does `p` blink its own commander when that's worth it?
+pub fn blinks_commanders(p: usize) -> bool {
+    super::exp::on(super::exp::BLINK, p)
+}
+
+fn blink_pick(g: &Game, me: usize, not: Option<u32>, types: u16, cmdr: bool) -> Option<usize> {
     (0..g.perms.len())
         .filter(|&i| {
             let x = &g.perms[i];
             x.ctrl as usize == me
                 && x.tok == Tok::None
-                && x.commander == 0
+                && (x.commander == 0 || cmdr && x.owner as usize == me)
                 && x.card.is_some()
                 && Some(x.id) != not
                 && (x.is(types) || types & T_CREATURE != 0 && x.is_creature())
         })
-        .map(|i| (arrival_value(g.card(g.perms[i].card.unwrap())), i))
+        .map(|i| (blink_gain(g, i), i))
         .filter(|(v, _)| *v > 0.0)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
         .map(|(_, i)| i)
@@ -742,7 +921,37 @@ fn lands_in_play(g: &Game, p: usize) -> usize {
 /// How much a card in hand (or library) is worth to its owner now.
 pub fn card_worth(g: &Game, p: usize, c: &SimCard) -> f32 {
     if c.is(T_LAND) {
+        if super::exp::on(super::exp::BOOM, p) {
+            // A land is worth more while the hand holds spells the lands can't cast yet.
+            let inplay = lands_in_play(g, p);
+            if inplay >= 7 {
+                return 0.3;
+            }
+            let pl = &g.players[p];
+            let waiting = pl
+                .hand
+                .iter()
+                .map(|&k| &pl.cards[k as usize])
+                .filter(|x| !x.is(T_LAND) && x.mv as usize > inplay)
+                .count() as f32;
+            return if lands_total(g, p) >= 7 && waiting == 0.0 {
+                0.3
+            } else {
+                (2.5 + 0.8 * waiting).min(5.0)
+            };
+        }
         return if lands_total(g, p) >= 6 { 0.3 } else { 2.5 };
+    }
+    // A spell that draws two or more is a card that makes cards.
+    if super::exp::on(super::exp::BOOM, p)
+        && c.abilities.iter().any(|a| {
+            a.trig == Trig::Spell
+                && a.effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::Draw { amount, you: true } if amount.n >= 2))
+        })
+    {
+        return c.value.max(5.0) - (c.mv as f32 - lands_in_play(g, p) as f32 - 1.0).max(0.0);
     }
     // Colours its lands can't make, and mana it's far from, make a card worth less.
     let (mut lands, mut have) = (0.0f32, 0u8);
@@ -794,6 +1003,26 @@ fn missing_colors(g: &Game, p: usize) -> u8 {
             if n > 0 {
                 need |= 1 << i;
             }
+        }
+    }
+    // Power-ups still to use ({C}{W}{U}{B}{R}{G}: Thanos), on the battlefield or on the
+    // commander waiting in the command zone.
+    if super::exp::on(super::exp::COLORS, p) {
+        let pu = |c: &SimCard| {
+            c.abilities.iter().fold(0u8, |m, a| match &a.trig {
+                Trig::PowerUp(full) => {
+                    m | pip_mask(full) | if full.colorless > 0 { COLORLESS } else { 0 }
+                }
+                _ => m,
+            })
+        };
+        for x in g.perms.iter().filter(|x| x.ctrl as usize == p && !x.powered) {
+            if let Some(r) = x.card {
+                need |= pu(g.card(r));
+            }
+        }
+        for &(c, _) in &pl.command {
+            need |= pu(&pl.cards[c as usize]);
         }
     }
     need & !have
@@ -1223,6 +1452,19 @@ fn is_instant_removal(c: &SimCard) -> bool {
         })
 }
 
+/// A spell whose point is to remove one creature or permanent of an opponent.
+fn is_spot_removal(c: &SimCard) -> bool {
+    c.is(T_INSTANT | T_SORCERY)
+        && effects_of(c, false).any(|e| match e {
+            Effect::Destroy(t) | Effect::Exile { target: t, .. } => {
+                t.hits_their_creatures() && !t.mass
+            }
+            Effect::Damage { to, .. } => to.hits_their_creatures() && !to.mass,
+            _ => false,
+        })
+        && !copies_x_times(c)
+}
+
 /// Cards worth casting only in response (counters, Fogs, protection, combat tricks).
 fn is_reactive_only(c: &SimCard) -> bool {
     c.is(T_INSTANT)
@@ -1239,7 +1481,12 @@ fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
     let o = x.ctrl as usize;
     let mut f = 1.0;
     if x.commander > 0 {
-        f *= 0.6;
+        // It comes back, but for two more mana each time: a real tempo gain still.
+        f *= if super::exp::on(super::exp::RMCMD, p) {
+            0.85
+        } else {
+            0.6
+        };
     }
     // Our creatures that can attack now, against their life.
     let clock: i32 = g
@@ -1364,6 +1611,24 @@ pub(crate) fn effect_now(
                 opp_value(t, &|x| x.t <= mine)
             }
         }
+        Effect::Edict { each_opponent } if super::exp::on(super::exp::EDICT, p) => {
+            let hit = |o: usize| {
+                sacrifice_choice_r(g, o, T_CREATURE, &card_restr)
+                    .map_or(0.0, |i| perm_value(g, i) * weight(g, p, o) * 0.8)
+            };
+            let theirs = if *each_opponent {
+                g.opponents(p).into_iter().map(hit).sum()
+            } else {
+                // "Target opponent sacrifices": the one it hurts most.
+                edict_victim(g, p, &card_restr).map_or(0.0, |o| hit(o))
+            };
+            let mine = if text.contains("each player sacrifices") {
+                sacrifice_choice_r(g, p, T_CREATURE, &card_restr).map_or(0.0, |i| perm_value(g, i))
+            } else {
+                0.0
+            };
+            theirs - mine
+        }
         Effect::Edict { .. } => g
             .opponents(p)
             .iter()
@@ -1371,6 +1636,9 @@ pub(crate) fn effect_now(
             .map(|i| perm_value(g, i) * 0.8)
             .sum(),
         Effect::CounterSpell | Effect::Fog => 0.0,
+        Effect::Draw { amount, you: true } if super::exp::on(super::exp::DRAW, p) => {
+            draw_value(g, p, amount.n.max(1))
+        }
         Effect::Draw { amount, .. } => {
             2.5 * amount.n.max(1) as f32
                 + if g.players[p].hand.len() <= 1 {
@@ -1452,14 +1720,16 @@ pub(crate) fn effect_now(
                 }
         }
         Effect::AddMana(n) => n.n as f32 * 0.3,
-        Effect::Blink => blink_choice(
-            g,
-            p,
-            src.filter(|_| text.contains("target")),
-            blink_types(text),
-        )
-        .map(|i| arrival_value(g.card(g.perms[i].card.unwrap())) * 0.8)
-        .unwrap_or(0.0),
+        Effect::Blink => {
+            let not = src.filter(|_| text.contains("target"));
+            if text.contains("at the beginning of the next end step") {
+                blink_choice(g, p, not, blink_types(text))
+            } else {
+                blink_choice_now(g, p, not, blink_types(text))
+            }
+            .map(|i| blink_gain(g, i) * 0.8)
+            .unwrap_or(0.0)
+        }
         Effect::Copy => best_to_copy(g, p, true)
             .map(|i| perm_value(g, i) * 0.7)
             .unwrap_or(0.5),
@@ -1490,6 +1760,25 @@ pub(crate) fn effect_now(
         }
         _ => effect_value(e),
     }
+}
+
+/// Drawing `n` cards now: 2.5 a card while the library is deep and the hand has room. Cards
+/// past a full hand are mostly discarded (a little filtering), a thin library makes each
+/// card dearer to lose than to draw, and drawing more than it holds loses the game.
+fn draw_value(g: &Game, p: usize, n: i32) -> f32 {
+    let pl = &g.players[p];
+    let lib = pl.library.len() as i32;
+    if n > lib {
+        return -30.0;
+    }
+    // Library left after the draw: full value from 15 cards, nothing at 3 or fewer.
+    let deep = ((lib - n - 3) as f32 / 12.0).clamp(0.0, 1.0);
+    // Room in hand (a card or two get played before the end of the turn).
+    let room = (9 - pl.hand.len() as i32).max(0);
+    let kept = n.min(room) as f32;
+    let spill = (n - room).max(0) as f32;
+    let v = (2.5 * kept + 0.5 * spill) * deep;
+    v + if pl.hand.len() <= 1 { 0.6 * deep } else { 0.0 } - if deep == 0.0 { 1.0 } else { 0.0 }
 }
 
 /// What a special rule (`Effect::Rule`) the simulator plays is worth to `p` now.
@@ -1531,6 +1820,8 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
             })
             .unwrap_or(0.0),
         // Worth it before our attack, when an opponent has a blocker to stop.
+        // In our combat before blocks: what taking the defender's key blocker away gains.
+        "can't block this turn" if g.in_combat => net_target(g, p).map_or(0.0, |x| x.1.min(8.0)),
         "can't block this turn" => {
             let attackers = g
                 .perms
@@ -1600,6 +1891,11 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
             })
             .collect();
         v.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        if any_number_of_modes(a, p) {
+            // Every mode worth something (at least the best one).
+            return v.first().copied().unwrap_or(0.0)
+                + v.iter().skip(1).filter(|x| **x > 0.0).sum::<f32>();
+        }
         v.iter().take(if two { 2 } else { 1 }).sum()
     } else {
         a.effects
@@ -1632,12 +1928,22 @@ pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usiz
         })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-    let chosen: Vec<usize> = v
-        .into_iter()
-        .take(if two { 2 } else { 1 })
-        .map(|(_, m)| m)
-        .collect();
+    // "Choose one or both": the best mode and every other one worth something.
+    let n = if any_number_of_modes(ab, ctx.ctrl) {
+        1 + v.iter().skip(1).filter(|x| x.0 > 0.0).count()
+    } else if two {
+        2
+    } else {
+        1
+    };
+    let chosen: Vec<usize> = v.into_iter().take(n).map(|(_, m)| m).collect();
     chosen
+}
+
+/// "Choose one or both" / "choose one or more": any number of the modes, at least one.
+fn any_number_of_modes(a: &SimAbility, p: usize) -> bool {
+    super::exp::on(super::exp::DECOY, p)
+        && (a.text.contains("choose one or both") || a.text.contains("choose one or more"))
 }
 
 pub fn wants_optional(g: &Game, ctx: &Ctx, ab: &SimAbility) -> bool {
@@ -1695,7 +2001,13 @@ fn pay_price(g: &Game, p: usize, src_id: Option<u32>, pc: &PayCost) -> Option<Op
             if !g.can_pay(p, m) {
                 return None;
             }
-            m.total() as f32 * 0.3
+            let flat = m.total() as f32 * 0.3;
+            // In our own combat the mana may be what the post-combat plan casts.
+            if super::exp::on(super::exp::MAYPAY, p) && g.in_combat && g.active == p {
+                flat.max(post_combat_loss(g, p, m.total()))
+            } else {
+                flat
+            }
         }
         ResCost::Life(n) => {
             if pl.life <= *n as i32 + 5 {
@@ -1768,7 +2080,17 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
             v += 2.5 + c.loyalty as f32 * 0.5;
         }
         v += engine_value(&c.abilities);
-        if c.mana_ability && !c.is(T_LAND) {
+        // Abilities about Equipment (Ronin's mana for Equipment, "sacrifice an Equipment
+        // attached to ~") do nothing for a player without any.
+        let no_gear = super::exp::on(super::exp::RONIN, p)
+            && c.abilities.iter().any(|a| a.text.contains("equipment"))
+            && !has_equipment(g, p);
+        if no_gear {
+            for a in c.abilities.iter().filter(|a| a.text.contains("equipment")) {
+                v -= engine_value(std::slice::from_ref(a));
+            }
+        }
+        if c.mana_ability && !c.is(T_LAND) && !(no_gear && c.spend_only.is_some()) {
             v += if g.round <= 5 { 3.0 } else { 1.2 };
         }
         if c.is(T_EQUIPMENT) {
@@ -1807,9 +2129,26 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
                 };
             }
         }
+        // A Plan's payoff ("when the third plan counter is put on ~, ..."), by how far off
+        // its goal is.
+        if super::exp::on(super::exp::PLANS, p) {
+            v += plan_payoff(&c.abilities, 0);
+        }
+        // A Saga's chapters: the first happens now, the others one turn apart.
+        if c.is(T_SAGA) && super::exp::on(super::exp::SAGA, p) {
+            v += saga_value(g, p, &c.abilities, 0);
+        }
         if commander {
             v += 1.5;
         }
+    } else if !back && super::exp::on(super::exp::BARRAGE, p) && copies_x_times(c) {
+        // "Copy it X times" (Photon Blast Barrage): one instance a target, as many as the
+        // mana pays for.
+        let spare = g.mana_available(p).saturating_sub(c.cost.total());
+        v += barrage_targets(g, p, c)
+            .iter()
+            .take(spare as usize + 1)
+            .sum::<f32>();
     } else {
         for a in spell_abilities(c, back)
             .iter()
@@ -1851,6 +2190,105 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
     v
 }
 
+/// "When you cast this spell, copy it X times."
+pub fn copies_x_times(c: &SimCard) -> bool {
+    c.abilities
+        .iter()
+        .any(|a| a.trig == Trig::Spell && a.text.contains("copy it x times"))
+}
+
+/// For a "deals N damage to target creature" spell copied X times: what each distinct
+/// target it kills is worth (best first, the ones worth a mana or more).
+fn barrage_targets(g: &Game, p: usize, c: &SimCard) -> Vec<f32> {
+    let Some(n) = c
+        .abilities
+        .iter()
+        .filter(|a| a.trig == Trig::Spell && !a.text.contains("copy it"))
+        .flat_map(|a| a.effects.iter())
+        .find_map(|e| match e {
+            Effect::Damage { amount, .. } => Some(amount.n.max(1) as i16),
+            _ => None,
+        })
+    else {
+        return Vec::new();
+    };
+    let mut v: Vec<f32> = g
+        .perms
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| {
+            x.ctrl as usize != p
+                && x.is_creature()
+                && !x.has(INDESTRUCTIBLE | HEXPROOF | SHROUD)
+                && x.t - x.damage <= n
+        })
+        .map(|(i, x)| {
+            perm_value(g, i) * weight(g, p, x.ctrl as usize) * 0.8 * removal_discount(g, p, i)
+        })
+        .filter(|&v| v >= 1.0)
+        .collect();
+    v.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    v
+}
+
+/// The X for a "copy it X times" spell: one copy for each worthwhile target beyond the
+/// first, no more than `spare` mana pays for.
+pub fn copies_x(g: &Game, p: usize, c: &SimCard, spare: u32) -> u32 {
+    (barrage_targets(g, p, c).len() as u32)
+        .saturating_sub(1)
+        .min(spare)
+}
+
+/// A payoff at a counter goal ("when the fourth plan counter is put on ~, sacrifice it,
+/// draw a card, ..."): its effects, discounted by how many counters are still to come
+/// (`have` already on it).
+fn plan_payoff(abilities: &[SimAbility], have: i16) -> f32 {
+    abilities
+        .iter()
+        .filter(|a| a.trig == Trig::Reflexive)
+        .filter_map(|a| a.counter_goal.map(|n| (n as f32, a)))
+        .map(|(goal, a)| {
+            let left = (goal - have as f32).max(0.0);
+            let odds = (2.5 / left.max(1.0)).min(1.0) * 0.8;
+            a.effects.iter().map(effect_value).sum::<f32>().max(0.0) * odds
+        })
+        .sum()
+}
+
+/// What a Saga's chapters after the `done` first ones are worth to `p`: the next one at what
+/// it would do now when it's chapter I (it triggers as the Saga enters), the later ones at
+/// their usual worth, less for each turn they're away.
+fn saga_value(g: &Game, p: usize, abilities: &[SimAbility], done: i16) -> f32 {
+    abilities
+        .iter()
+        .filter_map(|a| match a.trig {
+            Trig::Chapter(n) if n as i16 > done => Some((n, a)),
+            _ => None,
+        })
+        .map(|(n, a)| {
+            if n == 1 {
+                ability_now(g, p, a, None).max(0.0)
+            } else {
+                let e: f32 = a.effects.iter().map(effect_value).sum();
+                e * 0.8f32.powi(n as i32 - 1 - done as i32)
+            }
+        })
+        .sum()
+}
+
+/// Does `p` have an Equipment on the battlefield, in hand or in its library?
+fn has_equipment(g: &Game, p: usize) -> bool {
+    let pl = &g.players[p];
+    g.perms
+        .iter()
+        .any(|x| x.ctrl as usize == p && x.is(T_EQUIPMENT))
+        || pl
+            .hand
+            .iter()
+            .chain(pl.library.iter())
+            .any(|&k| pl.cards[k as usize].is(T_EQUIPMENT))
+}
+
 /// Value of keeping a reactive card ready, and its cost.
 fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
     let opp_power: i32 = g
@@ -1882,7 +2320,16 @@ fn reactive_value(g: &Game, p: usize, c: &SimCard) -> f32 {
     } else if is_protection(c) {
         2.0
     } else if is_trick(c) {
-        1.5
+        // Only with a creature that will fight.
+        let fighter = g
+            .perms
+            .iter()
+            .any(|x| x.ctrl as usize == p && x.is_creature() && x.p >= 2 && !x.has(DEFENDER));
+        if fighter || !super::exp::on(super::exp::TRICKHOLD, p) {
+            1.5
+        } else {
+            0.0
+        }
     } else {
         0.0
     }
@@ -1940,8 +2387,11 @@ fn choose_land(g: &Game, p: usize) -> Option<usize> {
             continue;
         }
         if let Some(cost) = g.cast_cost(p, Src::Hand(h), CastOpts::default()) {
+            // (Instants and flash spells as the main phase values them: they wait.)
+            let later = super::exp::on(super::exp::LAND, p)
+                && (c.kw & FLASH != 0 || c.is(T_INSTANT));
             spells.push((
-                spell_value(g, p, idx, false, false),
+                spell_value(g, p, idx, false, false) * if later { 0.6 } else { 1.0 },
                 cost.total(),
                 pip_mask(&cost),
             ));
@@ -2012,9 +2462,17 @@ fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
 
 fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     let c = &g.players[p].cards[idx as usize];
-    let teamwork = c
-        .teamwork
-        .is_some_and(|n| post && !teamwork_tappers(g, p, n as i16).is_empty());
+    // Before combat, only creatures that can't attack this turn are tapped for it.
+    let teamwork = c.teamwork.is_some_and(|n| {
+        let t = teamwork_tappers(g, p, n as i16);
+        !t.is_empty()
+            && (post
+                || super::exp::on(super::exp::TEAMWORK, p)
+                    && t.iter().filter_map(|&id| g.idx(id)).all(|i| {
+                        let x = &g.perms[i];
+                        x.sick && !x.has(HASTE) || x.has(DEFENDER)
+                    }))
+    });
     let mut o = CastOpts {
         back,
         teamwork,
@@ -2106,6 +2564,14 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             if !back && (c.kw & FLASH != 0 || c.is(T_INSTANT)) {
                 v *= 0.6;
             }
+            // One-for-one removal is kept for a target worth it: a bigger threat may come.
+            if !back && super::exp::on(super::exp::REMOVAL, p) && is_spot_removal(c) {
+                v -= if super::exp::on(super::exp::X13, p) {
+                    (2.5 + 0.6 * g.round as f32).min(8.0)
+                } else {
+                    (1.5 + 0.4 * g.round as f32).min(5.5)
+                };
+            }
             out.push((v, cost.total(), Act::Cast(src, opts)));
             // Cast it and use its power-up the same turn, at the reduced cost (planned as
             // one action; `plan_turn` keeps it apart from the plain cast).
@@ -2130,6 +2596,11 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     for (h, &idx) in pl.hand.iter().enumerate() {
         let c = &pl.cards[idx as usize];
         if c.is(T_LAND) {
+            continue;
+        }
+        // A combat trick is for combat (its other half, an impulse draw, at the end of the
+        // turn before ours): not a main-phase play.
+        if super::exp::on(super::exp::TRICK, p) && is_trick(c) {
             continue;
         }
         push_cast(&mut out, Src::Hand(h), idx, false, false);
@@ -2272,6 +2743,11 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         // Planeswalkers: one loyalty ability, the best that keeps it alive.
         let mut best_loyalty: Option<(f32, usize)> = None;
         for (k, a) in abilities.iter().enumerate() {
+            // Mana abilities are paid from when something needs the mana, never done for
+            // their own sake (Ramos' counters would be thrown away).
+            if super::exp::on(super::exp::RAMOS, p) && mana_only(a) {
+                continue;
+            }
             let Some(cost) = g.activation_cost(p, i, k) else {
                 continue;
             };
@@ -2384,6 +2860,13 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         }
     }
     out
+}
+
+/// An activated ability that only makes mana.
+fn mana_only(a: &SimAbility) -> bool {
+    matches!(a.trig, Trig::Activated { .. })
+        && !a.effects.is_empty()
+        && a.effects.iter().all(|e| matches!(e, Effect::AddMana(_)))
 }
 
 /// Picks the set of actions worth the most for the mana (a small knapsack); returns the
@@ -2505,12 +2988,21 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
 /// than what it would cost to tap out.
 fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
     let pl = &g.players[p];
+    let rmhold = super::exp::on(super::exp::RMHOLD, p);
     let best = pl
         .hand
         .iter()
-        .map(|&c| &pl.cards[c as usize])
-        .filter(|c| c.is(T_INSTANT) || has_flash(g, p, c))
-        .map(|c| (reactive_value(g, p, c), c.cost.total()))
+        .map(|&c| (c, &pl.cards[c as usize]))
+        .filter(|(_, c)| c.is(T_INSTANT) || has_flash(g, p, c))
+        .map(|(idx, c)| {
+            let mut v = reactive_value(g, p, c);
+            // Instant removal: what it would kill now (it's cast before blocks or at the
+            // end of the turn before ours, not left to rot in hand).
+            if rmhold && is_instant_removal(c) {
+                v = v.max(spell_value(g, p, idx, false, false));
+            }
+            (v, c.cost.total())
+        })
         .filter(|(v, _)| *v >= 1.5)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let Some((value, cost)) = best else { return 0 };
@@ -2637,13 +3129,36 @@ fn plan_turn(
         .filter(|&i| post || creature_mana || !waits_for_combat(g, p, &opts[i].2))
         .max_by(|&a, &b| opts[a].0.partial_cmp(&opts[b].0).unwrap())?;
     // Colours the rest of the plan needs: generic costs are paid from other sources.
-    let keep = set
+    let mut keep = set
         .iter()
         .filter(|&&i| i != first)
         .filter_map(|&i| act_cost(g, p, &opts[i].2))
         .fold(0u8, |a, m| a | pip_mask(&m));
+    // A creature cast to use its power-up at once: the power-up's colours (and {C}) stay
+    // untapped while the spell is paid.
+    if super::exp::on(super::exp::TWIN, p) && twins.iter().any(|t| t.1 == first) {
+        if let Some(r) = twin_powerup_cost(g, p, &opts[first].2) {
+            keep |= pip_mask(&r) | if r.colorless > 0 { COLORLESS } else { 0 };
+        }
+    }
     g.ext.reserve.set(keep);
     Some((first, total))
+}
+
+/// The reduced power-up cost of the creature a cast action puts onto the battlefield.
+fn twin_powerup_cost(g: &Game, p: usize, act: &Act) -> Option<Mana> {
+    let Act::Cast(src, o) = *act else {
+        return None;
+    };
+    let (idx, back) = g.spell_card(p, src, o)?;
+    if back {
+        return None;
+    }
+    let c = &g.players[g.spell_list(p, src)].cards[idx as usize];
+    c.abilities.iter().find_map(|a| match &a.trig {
+        Trig::PowerUp(full) => Some(powerup_cost_on_entry(g, p, c, full)),
+        _ => None,
+    })
 }
 
 /// `plan_set`, dropping the action worth least for its mana while the set's colours can't
@@ -2680,6 +3195,52 @@ fn plan_payable(
             .unwrap();
         skip.push(worst);
     }
+}
+
+/// What spending `k` of `p`'s mana now (in combat, on a trigger or a tax) costs the rest of
+/// the turn: the post-combat plan's value with all the mana, minus with `k` less. (Not our
+/// turn, or nothing left to cast: nothing.)
+pub fn post_combat_loss(g: &Game, p: usize, k: u32) -> f32 {
+    if k == 0 || g.active != p {
+        return 0.0;
+    }
+    let avail = g.mana_available(p);
+    if k > avail {
+        return 1000.0;
+    }
+    let opts = options(g, p, true);
+    let worth = |b: u32| plan_payable(g, p, &opts, b, Vec::new()).map_or(0.0, |x| x.1);
+    let full = worth(avail);
+    if full <= 0.0 {
+        return 0.0;
+    }
+    (full - worth(avail - k)).max(0.0)
+}
+
+/// How many of these optional paid modes (their values, best first; `n` mana each) to pay
+/// for: the count whose total beats what that mana would have cast later in the turn.
+pub fn paid_modes(g: &Game, p: usize, vals: &[f32], n: u32) -> usize {
+    if g.active != p || !super::exp::on(super::exp::ARROWS, p) {
+        return vals.len();
+    }
+    let avail = g.mana_available(p);
+    let opts = options(g, p, true);
+    let worth = |b: u32| plan_payable(g, p, &opts, b, Vec::new()).map_or(0.0, |x| x.1);
+    let full = worth(avail);
+    let mut best = (0.0f32, 0usize);
+    let mut sum = 0.0;
+    for (k, v) in vals.iter().enumerate() {
+        let paid = n * (k as u32 + 1);
+        if paid > avail {
+            break;
+        }
+        sum += v;
+        let net = sum - (full - worth(avail - paid)).max(0.0);
+        if net > best.0 {
+            best = (net, k + 1);
+        }
+    }
+    best.1
 }
 
 /// A main phase: land, then the best plan for the mana, re-planned after each action.
@@ -2848,6 +3409,17 @@ fn spell_threat(g: &Game, o: usize, caster: usize, card: CardRef, back: bool) ->
     v
 }
 
+/// "Counter target spell unless its controller pays {N}": N (None for a hard counter).
+fn soft_counter_tax(text: &str) -> Option<u32> {
+    let i = text.find("unless its controller pays {")?;
+    text[i + 28..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
 /// Opponents may counter a spell `caster` just cast. True if it was countered.
 /// Opponents may counter the spell `card` (whose card list it's in, index) `caster` cast.
 pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) -> bool {
@@ -2895,7 +3467,37 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
             .iter()
             .filter(|&&c| is_counter(&g.players[o].cards[c as usize]))
             .count();
-        let threshold = if counters_in_hand > 1 { 3.5 } else { 4.5 };
+        let mut threshold = if counters_in_hand > 1 { 3.5 } else { 4.5 };
+        let soft = super::exp::on(super::exp::SOFT, o);
+        // "Counter target spell unless its controller pays {N}" (N 4 with teamwork when
+        // there are creatures to tap): useless against a caster who can still pay.
+        let (unless, teamwork) = if soft {
+            let c = &g.players[o].cards[g.players[o].hand[h] as usize];
+            let text = c
+                .abilities
+                .iter()
+                .find(|a| a.effects.contains(&Effect::CounterSpell))
+                .map(|a| a.text.as_str())
+                .unwrap_or("");
+            let n = soft_counter_tax(text);
+            let tw = c.teamwork.filter(|_| text.contains("cast using teamwork"));
+            match (n, tw) {
+                (Some(_), Some(k)) if !teamwork_tappers(g, o, k as i16).is_empty() => {
+                    (Some(4), Some(k))
+                }
+                (n, _) => (n, None),
+            }
+        } else {
+            (None, None)
+        };
+        if unless.is_some_and(|n| g.mana_available(caster) >= n) {
+            g.note(|| format!("  AI P{} holds its counter: P{} could pay for it", o, caster));
+            continue;
+        }
+        // A lone counter is kept for something bigger than a cheap spell.
+        if soft && counters_in_hand <= 1 && g.card(card).mv <= 2 {
+            threshold += 1.0;
+        }
         let threat_v = spell_threat(g, o, caster, card, back);
         if g.log.is_some() {
             let cname = g.players[o].cards[g.players[o].hand[h] as usize]
@@ -2933,6 +3535,17 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
         };
         if !g.pay_for(o, &cost, why) {
             continue;
+        }
+        // Teamwork: tap the helpers (the tax goes up to {4}).
+        if let Some(k) = teamwork {
+            for id in teamwork_tappers(g, o, k as i16) {
+                if let Some(i) = g.idx(id) {
+                    g.perms[i].tapped = true;
+                    let snap = g.perms[i].clone();
+                    g.emit_about(Ev::TeamworkTapped, o, &snap);
+                    g.emit(Ev::Tapped, o, Some(id));
+                }
+            }
         }
         g.players[o].hand.remove(h);
         g.players[o].graveyard.push(counter_idx);
@@ -2980,6 +3593,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                 .collect::<String>()
                 .parse()
                 .unwrap_or(2);
+            let n = if teamwork.is_some() { 4 } else { n };
             paid_off = g.pay(caster, &Mana::generic(n));
             g.note(|| {
                 format!(
@@ -3150,7 +3764,9 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
             }
             let x = g.perms[i].clone();
             for (k, a) in g.abilities_of(&x).iter().enumerate() {
-                if !matches!(a.trig, Trig::Activated { sorcery: false, .. }) {
+                if !matches!(a.trig, Trig::Activated { sorcery: false, .. })
+                    || super::exp::on(super::exp::RAMOS, p) && mana_only(a)
+                {
                     continue;
                 }
                 let Some(cost) = g.activation_cost(p, i, k) else {
@@ -4075,6 +4691,30 @@ fn crack_back(g: &Game, me: usize, swings: &[(i32, usize)], out: &[(u32, Def)]) 
     sum
 }
 
+/// What attacker `a` hitting planeswalker `wk` unblocked is worth to `me`: the walker's
+/// worth to its controller (weighted like removal) when the damage kills it, the share of
+/// its loyalty taken otherwise.
+fn walker_attack_value(g: &Game, me: usize, a: usize, wk: &Perm) -> f32 {
+    let Some(i) = g.idx(wk.id) else {
+        return 0.0;
+    };
+    let worth = perm_value(g, i) * weight(g, me, wk.ctrl as usize) * 0.8;
+    let dmg = dmg_of(g, &g.perms[a]) as f32;
+    let loyalty = wk.loyalty.max(1) as f32;
+    worth * (dmg / loyalty).min(1.0) * if dmg >= loyalty { 1.0 } else { 0.7 }
+}
+
+/// What paying `tax` more mana in attack taxes (after `spent` already) costs `me`: at least
+/// 0.35 a mana, or what that mana would have cast after combat.
+fn tax_price(g: &Game, me: usize, spent: u32, tax: u32) -> f32 {
+    let flat = tax as f32 * 0.35;
+    if tax == 0 || !super::exp::on(super::exp::TAX, me) {
+        return flat;
+    }
+    let lost = post_combat_loss(g, me, spent + tax) - post_combat_loss(g, me, spent);
+    flat.max(lost)
+}
+
 /// Attacks for the active player: lethal swings first, then every attack that pays off,
 /// keeping enough back to survive the next turn around the table.
 pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
@@ -4180,7 +4820,7 @@ pub fn declare_attacks_why(
                 break;
             }
             let (mut value, bad, blocked) = group_value(g, o, w, &group);
-            value -= tax as f32 * 0.35 * group.len() as f32;
+            value -= tax_price(g, me, 0, tax * group.len() as u32);
             if bad.is_empty() {
                 if let Some(wh) = why.as_deref_mut() {
                     let names: Vec<String> = group.iter().map(|&a| name(a)).collect();
@@ -4251,7 +4891,7 @@ pub fn declare_attacks_why(
                 // The block prediction already said it dies for less there.
                 -1.0
             } else {
-                group_value(g, o, w_of(o), &with).0 - base - tax as f32 * 0.35
+                group_value(g, o, w_of(o), &with).0 - base - tax_price(g, me, spent, tax)
             };
             if why.is_some() {
                 gains_s.push(format!("P{} {:.1}", o, v));
@@ -4267,10 +4907,14 @@ pub fn declare_attacks_why(
             {
                 let wv = 2.0 + wk.loyalty as f32 * 0.6;
                 let kill = at.p >= wk.loyalty;
-                let v2 = if v >= 0.0 {
-                    if kill { wv } else { at.p as f32 * 0.6 }
-                } else {
+                let v2 = if v < 0.0 {
                     -1.0
+                } else if super::exp::on(super::exp::WALKER, me) {
+                    walker_attack_value(g, me, a, wk)
+                } else if kill {
+                    wv
+                } else {
+                    at.p as f32 * 0.6
                 };
                 if best.is_none_or(|b| v2 > b.0) {
                     best = Some((v2, Def::Walker(wk.id)));

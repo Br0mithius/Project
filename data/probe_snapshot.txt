@@ -3436,7 +3436,8 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Attacks: "whenever ~ attacks, it deals 4 damage to any target and 3 damage to each of up to two other targets."
-      -> Opp B: graveyard +1
+      -> Opp B: graveyard +2
+      -> Opp B's Ogre left the battlefield
       -> Opp B's Knight left the battlefield
 
 Dread Summons | {X}{B}{B} | Sorcery
@@ -5725,7 +5726,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(Tapped, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever ~ becomes tapped, you may pay {1} up to three times. when you do, choose up to that many."
-      mode 1: (nothing changes)
+      mode 1: Opp A's Dragon: gains can't block
       mode 2: Opp B: life -2
       mode 3: You: library -1, graveyard +1
 

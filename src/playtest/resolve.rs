@@ -1249,6 +1249,9 @@ impl<'a> Game<'a> {
                         .collect();
                     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
                     modes.clear();
+                    // Only what beats the spells that mana would cast later this turn.
+                    let vals: Vec<f32> = ranked.iter().take(most).map(|r| r.0).collect();
+                    let most = ai::paid_modes(self, me, &vals, n);
                     for (_, m) in ranked.into_iter().take(most) {
                         if !self.pay(me, &Mana::generic(n)) {
                             break;
@@ -2614,7 +2617,7 @@ impl<'a> Game<'a> {
                             self.opponents(me)
                         }
                     } else {
-                        ai::choose_opponent(self, me, n).into_iter().collect()
+                        ai::burn_opponent(self, me, n).into_iter().collect()
                     };
                     for o in targets {
                         self.hurt_player(ctx, o, n);
@@ -2914,7 +2917,9 @@ impl<'a> Game<'a> {
                 let mut victims: Vec<usize> = if *each_opponent {
                     self.opponents(me)
                 } else {
-                    ai::choose_opponent(self, me, 0).into_iter().collect()
+                    ai::edict_victim(self, me, &ctx.card_restr)
+                        .into_iter()
+                        .collect()
                 };
                 // "Each player sacrifices": you too.
                 if text.contains("each player sacrifices") {
@@ -3061,6 +3066,13 @@ impl<'a> Game<'a> {
                     })
                 {
                     self.draw(me, 1);
+                }
+                // "Discard a card, then draw a card" (Boomerang): the discard is chosen
+                // before the new card is seen.
+                if !connive && text.contains("discard a card, then draw a card") {
+                    self.discard(me);
+                    self.draw(me, 1);
+                    return;
                 }
                 self.draw(me, 1);
                 let before = self.players[me].graveyard.len();
@@ -3524,7 +3536,7 @@ impl<'a> Game<'a> {
                     // "Whenever an opponent casts a spell, that player loses 5 life".
                     vec![o]
                 } else {
-                    ai::choose_opponent(self, me, n).into_iter().collect()
+                    ai::burn_opponent(self, me, n).into_iter().collect()
                 };
                 // "Deals 2 damage to each player", "each player loses 1 life": you too.
                 if *each
@@ -4168,6 +4180,7 @@ impl<'a> Game<'a> {
                     1
                 };
                 let mut done: Vec<u32> = Vec::new();
+                let delayed = text.contains("at the beginning of the next end step");
                 for _ in 0..times {
                     let target = if text.contains("~") && !text.contains("target") {
                         self.src_idx(ctx)
@@ -4175,8 +4188,12 @@ impl<'a> Game<'a> {
                         // "Exile (another / up to one) target creature you control": not
                         // itself.
                         let src = ctx.src.filter(|_| text.contains("target"));
-                        ai::blink_choice(self, me, src, blink_types(text))
-                            .filter(|&i| !done.contains(&self.perms[i].id))
+                        if delayed {
+                            ai::blink_choice(self, me, src, blink_types(text))
+                        } else {
+                            ai::blink_choice_now(self, me, src, blink_types(text))
+                        }
+                        .filter(|&i| !done.contains(&self.perms[i].id))
                     };
                     let Some(i) = target else { return };
                     let x = self.perms[i].clone();
@@ -4184,8 +4201,14 @@ impl<'a> Game<'a> {
                         self.leave(i, Zone::Exile, false);
                         return;
                     };
-                    if x.commander > 0 {
-                        return;
+                    // A commander returned at once: its owner leaves it in exile (it isn't
+                    // moved to the command zone) and it comes back still a commander.
+                    let commander = x.commander;
+                    if commander > 0 {
+                        if delayed || x.owner as usize != me || !ai::blinks_commanders(me) {
+                            return;
+                        }
+                        self.perms[i].commander = 0;
                     }
                     self.leave(i, Zone::Exile, false);
                     let owner = x.owner as usize;
@@ -4212,6 +4235,7 @@ impl<'a> Game<'a> {
                         self.players[owner].exile.remove(k);
                         if let Some(j) = self.enter_card(owner, r.1, back_ctrl, false) {
                             self.perms[j].sick = x.sick;
+                            self.perms[j].commander = commander;
                             done.push(self.perms[j].id);
                         }
                     }
@@ -5197,6 +5221,17 @@ impl<'a> Game<'a> {
                 self.end_turn = true;
                 self.fog = true;
                 self.pending.clear();
+            }
+            // In our combat, before blocks: the defender's blocker that would cost us most.
+            "can't block this turn" if ai::net_target(self, me).is_some() => {
+                if let Some((i, _)) = ai::net_target(self, me) {
+                    self.perms[i].temp_kw |= CANT_BLOCK;
+                    if self.log.is_some() {
+                        let d = self.id_desc(self.perms[i].id);
+                        self.note(|| format!("  {} can't block this turn", d));
+                    }
+                    self.recalc();
+                }
             }
             "can't block this turn" => {
                 let t = Target {

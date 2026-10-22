@@ -15,6 +15,7 @@ pub mod ai;
 pub mod audit;
 pub mod combat;
 pub mod compile;
+pub mod exp;
 pub mod lab;
 pub mod probe;
 pub mod resolve;
@@ -484,8 +485,14 @@ impl<'a> Game<'a> {
         };
         let mut x = None;
         if cost.x {
-            // X spells: spend about half the remaining mana on X.
-            let n = (self.mana_available(p).saturating_sub(cost.total()) / 2).max(1);
+            // X spells: spend about half the remaining mana on X ("copy it X times": one
+            // copy per worthwhile extra target).
+            let spare = self.mana_available(p).saturating_sub(cost.total());
+            let n = if ai::copies_x_times(c) && exp::on(exp::BARRAGE, p) {
+                ai::copies_x(self, p, c, spare)
+            } else {
+                (spare / 2).max(1)
+            };
             cost = cost.plus_generic(n);
             x = Some(n as i32);
         }
@@ -898,6 +905,10 @@ impl<'a> Game<'a> {
                             self.perms[i].tapped = true;
                             let snap = self.perms[i].clone();
                             self.emit_about(Ev::TeamworkTapped, p, &snap);
+                            // It became tapped ("whenever ~ becomes tapped": Hawkeye).
+                            if exp::on(exp::TEAMWORK, p) {
+                                self.emit(Ev::Tapped, p, Some(id));
+                            }
                         }
                     }
                 }

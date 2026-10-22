@@ -1545,6 +1545,14 @@ impl<'a> Game<'a> {
         let mut order: Vec<usize> = (0..5).filter(|&c| pips[c] > 0).collect();
         order.sort_by_key(|&c| srcs.iter().filter(|s| s.1 & (1 << c) != 0).count());
         let mut extra_generic = 0u32; // mana left over from multi-mana sources
+        // Colours the rest of the turn's plan needs (`GameExtra::reserve`): a pip is paid
+        // from a source that can't make them when there's a choice.
+        let reserve = self.ext.reserve.get();
+        let keep = if super::exp::on(super::exp::TWIN, p) {
+            reserve
+        } else {
+            0
+        };
         for c in order {
             while pips[c] > 0 {
                 let pick = srcs
@@ -1553,7 +1561,7 @@ impl<'a> Game<'a> {
                     .filter(|(i, s)| {
                         (!used[*i] || multi[*i] && left[*i] > 0) && s.1 & (1 << c) != 0
                     })
-                    .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
+                    .min_by_key(|(_, s)| (s.3, s.1 & keep & !(1 << c) != 0, s.1.count_ones()))
                     .map(|(i, _)| i);
                 match pick {
                     Some(i) if multi[i] => {
