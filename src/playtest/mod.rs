@@ -363,7 +363,10 @@ impl<'a> Game<'a> {
         base: &Mana,
         from_hand: bool,
     ) -> Option<ExtraPay> {
-        let others_in_hand = self.players[p].hand.len().saturating_sub(usize::from(from_hand));
+        let others_in_hand = self.players[p]
+            .hand
+            .len()
+            .saturating_sub(usize::from(from_hand));
         Some(match e {
             ExtraCost::Sacrifice(t) => {
                 ExtraPay::Sacrifice(self.perms[ai::sac_for_cost(self, p, *t)?].id)
@@ -748,7 +751,7 @@ impl<'a> Game<'a> {
     pub fn can_cast(&self, p: usize, src: Src, opts: CastOpts) -> bool {
         let why = match self.spell_card(p, src, opts) {
             Some((idx, _)) => Purpose::Spell {
-                card: (p as u8, idx),
+                card: (self.spell_list(p, src) as u8, idx),
                 from_hand: matches!(src, Src::Hand(_)),
             },
             None => return false,
@@ -839,8 +842,9 @@ impl<'a> Game<'a> {
                 .count()
         };
         let treasures_before = treasures(self);
+        // A stolen card cast from exile is in its owner's card list, not the caster's.
         let why = Purpose::Spell {
-            card: (p as u8, idx),
+            card: (self.spell_list(p, src) as u8, idx),
             from_hand: matches!(src, Src::Hand(_)),
         };
         // Convoke / improvise: tap helpers first (the cost already counts them).
