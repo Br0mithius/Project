@@ -670,23 +670,7 @@ impl<'a> Game<'a> {
         }
         // "Whenever one or more Heroes you control deal combat damage to a player": once for
         // the damage step, not once per creature.
-        let mut seen: Vec<(Option<u32>, (u8, u16), u16)> = Vec::new();
-        let mut k = from;
-        while k < self.pending.len() {
-            let pend = &self.pending[k];
-            let key = (pend.source, pend.card, pend.ability);
-            let batch = self
-                .pending_ability(pend)
-                .is_some_and(|a| trigger_part(&a.text).contains("one or more"));
-            if batch && seen.contains(&key) {
-                self.pending.remove(k);
-                continue;
-            }
-            if batch {
-                seen.push(key);
-            }
-            k += 1;
-        }
+        self.batch_one_or_more(from);
         self.sba();
         self.run_pending();
     }

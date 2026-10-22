@@ -1632,10 +1632,20 @@ pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usiz
         })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    // "Choose one or both" / "one or more" (Decoy Ploy, Pinecone Strike): the best mode and
+    // every other one that does something.
+    let any_number = [
+        "choose one or both",
+        "choose one or more",
+        "choose any number",
+    ]
+    .iter()
+    .any(|w| ab.text.contains(w));
     let chosen: Vec<usize> = v
         .into_iter()
-        .take(if two { 2 } else { 1 })
-        .map(|(_, m)| m)
+        .enumerate()
+        .take_while(|(k, (val, _))| *k < if two { 2 } else { 1 } || any_number && *val > 0.0)
+        .map(|(_, (_, m))| m)
         .collect();
     chosen
 }
@@ -1658,12 +1668,28 @@ pub fn wants_optional(g: &Game, ctx: &Ctx, ab: &SimAbility) -> bool {
 /// do, ...") worth what it gets?
 pub fn wants_to_pay(g: &Game, ctx: &Ctx, ab: &SimAbility, pc: &PayCost) -> bool {
     let p = ctx.ctrl;
-    let gain: f32 = ab
+    let mut gain: f32 = ab
         .effects
         .iter()
         .skip(pc.first as usize)
         .map(|e| effect_now(g, p, e, &ab.text, ctx.src, ab.card_restr))
         .sum();
+    // "Create a token that's a copy of it" about the permanent that just entered (Ultron):
+    // worth that permanent, plus a 2/2 body when "it becomes a 2/2 ... creature".
+    if ab.text.contains("copy of it") {
+        if let Some(i) = ctx
+            .subject
+            .filter(|&s| Some(s) != ctx.src)
+            .and_then(|s| g.idx(s))
+        {
+            let body = if !g.perms[i].is_creature() && ab.text.contains("it becomes a 2/2") {
+                2.0
+            } else {
+                0.0
+            };
+            gain = gain.max(perm_value(g, i) + body);
+        }
+    }
     match pay_price(g, p, ctx.src, pc) {
         Some(None) => gain >= 0.0,
         Some(Some(price)) => gain > price,
@@ -1686,11 +1712,12 @@ fn pay_price(g: &Game, p: usize, src_id: Option<u32>, pc: &PayCost) -> Option<Op
                 fodder(g, p, *types, if *other { src } else { u32::MAX })?,
             ) * 0.8
         }
-        ResCost::SacrificeOrDiscard(types) => match fodder(g, p, *types, src) {
-            Some(i) => perm_value(g, i) * 0.8,
-            None if !pl.hand.is_empty() => 1.0,
-            None => return None,
-        },
+        ResCost::SacrificeOrDiscard(types, nonland) => {
+            match g.sac_or_discard(p, fodder(g, p, *types, src), *nonland)? {
+                Ok(i) => perm_value(g, i) * 0.8,
+                Err(h) => card_worth(g, p, &pl.cards[pl.hand[h] as usize]).max(1.0),
+            }
+        }
         ResCost::Mana(m) => {
             if !g.can_pay(p, m) {
                 return None;

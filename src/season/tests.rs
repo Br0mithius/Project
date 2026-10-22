@@ -196,10 +196,7 @@ fn imported_pool_cards_were_not_claimed_before() {
         .collect();
     let real = Collection::new(
         "real.txt".into(),
-        fdn.iter()
-            .step_by(2)
-            .map(|c| (c.name.clone(), 1))
-            .collect(),
+        fdn.iter().step_by(2).map(|c| (c.name.clone(), 1)).collect(),
     );
     let s = simulate(db(), &rules_at_session(2), 3, Some(&real), &Pins::default());
     assert!(s.held_back > 0);
@@ -211,7 +208,12 @@ fn imported_pool_cards_were_not_claimed_before() {
         .collect();
     assert!(!early.is_empty(), "the other half can still be claimed");
     for c in &early {
-        assert_eq!(real.owned(c), 0, "{} claimed in Session 1 but still in the pool", c);
+        assert_eq!(
+            real.owned(c),
+            0,
+            "{} claimed in Session 1 but still in the pool",
+            c
+        );
     }
 }
 

@@ -1846,7 +1846,7 @@ On entering:
       -> Your Relic left the battlefield
       -> Opp B's Bear left the battlefield
 ABILITIES:
-  Enters [may; may pays Sacrifice { types: 2, other: false } for effects 0..]: "when ~ enters, you may sacrifice an artifact or discard a nonland card. when you do, ~ deals 2 damage to any target."
+  Enters [may; may pays SacrificeOrDiscard(2, true) for effects 0..]: "when ~ enters, you may sacrifice an artifact or discard a nonland card. when you do, ~ deals 2 damage to any target."
       -> You: graveyard +1
       -> Opp B: graveyard +1
       -> Your Relic left the battlefield
@@ -5258,7 +5258,7 @@ On entering (attached to your Bear):
 ABILITIES:
   Static: "equipped creature gets +1/+1."
       (static: shown under "On entering")
-  CombatDamage: "whenever equipped creature deals combat damage to a player, create a treasure token."
+  Event(CombatDamageAny, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever equipped creature deals combat damage to a player, create a treasure token."
       -> You gets Treasure token
 
 Golgari Guildgate |  | Land — Gate
@@ -6165,7 +6165,7 @@ ABILITIES:
 
 Hydraulic Helper | {1}{U} | Artifact Creature — Robot | 2/3
 TEXT: Defender / {T}: Add {U}. This mana can't be spent to cast a nonartifact spell.
-SIM: keywords defender; makes mana (colour mask 0b000010, 1 at a time)
+SIM: keywords defender; makes mana (colour mask 0b000010, 1 at a time); that mana only for artifact spells or abilities of sources
 On entering:
       itself: 2/3 defender
       -> (nothing changes)
@@ -6677,7 +6677,7 @@ On entering:
       -> You: hand +1, library -1, graveyard +1
       -> Your Relic left the battlefield
 ABILITIES:
-  Enters [may; may pays SacrificeOrDiscard(2) for effects 0..]: "when ~ enters, you may sacrifice an artifact or discard a card. if you do, draw a card."
+  Enters [may; may pays SacrificeOrDiscard(2, false) for effects 0..]: "when ~ enters, you may sacrifice an artifact or discard a card. if you do, draw a card."
       -> You: hand +1, library -1, graveyard +1
       -> Your Relic left the battlefield
       if the cost is paid -> You: hand +1, library -1
@@ -7135,7 +7135,10 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Back: Spell: "exile two target creatures and/or lands you control, then return them to the battlefield under their owner's control."
-      -> (nothing changes)
+      -> Your Mountain left the battlefield
+      -> Your Forest left the battlefield
+      -> You gets Forest
+      -> You gets Mountain
 
 Lake-town Toymaker | {3}{W} | Creature — Human Artificer | 3/4
 TEXT: At the beginning of combat on your turn, if you've drawn two or more cards this turn, another target creature you control gets +3/+0 and gains first strike until end of turn.
@@ -8617,7 +8620,7 @@ On entering (attached to your Bear):
 ABILITIES:
   Static: "equipped creature gets +2/+2 and has trample."
       (static: shown under "On entering")
-  CombatDamage: "whenever equipped creature deals combat damage to a player, choose a creature type. create a treasure token for each creature you control of that type."
+  Event(CombatDamageAny, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever equipped creature deals combat damage to a player, choose a creature type. create a treasure token for each creature you control of that type."
       -> You gets Treasure token
 
 Ordeal of Nylea | {1}{G} | Enchantment — Aura
@@ -12942,8 +12945,10 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Event(OtherEnters, Filter { yours: Some(true), types: 2, not_types: 0, subtype: None, other: true, nontoken: true, token: false, restr: Restr(nontoken) }) [may; may pays Mana(Mana { generic: 2, pips: [0, 0, 0, 0, 0], x: false, colorless: 0, hybrid: [0, 0, 0] }) for effects 0..]: "whenever another nontoken artifact you control enters, you may pay {2}. if you do, create a token that's a copy of it. if the token isn't a creature, it becomes a 2/2 robot villain creature in addition to its other types."
-      -> (nothing changes)
-      if the cost is paid -> You gets Ultron, Artificial Malevolence (token copy) 2/4
+      -> Your Plains: tapped
+      -> Your Island: tapped
+      -> You gets Bear (token copy) 2/2
+      if the cost is paid -> You gets Bear (token copy) 2/2
 
 Uncharted Haven |  | Land
 TEXT: Uncharted Haven enters tapped. / As Uncharted Haven enters, choose a color. / {T}: Add one mana of the chosen color.
@@ -13346,7 +13351,7 @@ ABILITIES:
 Vision of Love | {1}{R} | Instant
 TEXT: You may sacrifice an artifact or discard a card. If you do, draw two cards.
 ABILITIES:
-  Spell [may; may pays SacrificeOrDiscard(2) for effects 0..]: "you may sacrifice an artifact or discard a card. if you do, draw two cards."
+  Spell [may; may pays SacrificeOrDiscard(2, false) for effects 0..]: "you may sacrifice an artifact or discard a card. if you do, draw two cards."
       -> You: hand +2, library -2, graveyard +1
       -> Your Relic left the battlefield
       if the cost is paid -> You: hand +2, library -2

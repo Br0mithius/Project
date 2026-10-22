@@ -83,6 +83,7 @@ pub const RULES_MODELLED: &[&str] = &[
     "extra turn",
     "ends the turn",
     "can't block this turn",
+    "puts a land from hand onto the battlefield",
     "shuffles itself into its library",
     "gives itself to an opponent",
     "assigns combat damage by toughness",
@@ -197,7 +198,7 @@ impl<'a> Game<'a> {
         if let Some(m) = measure {
             let m = m.trim_start_matches("the ");
             let n = if m.starts_with("number of ") {
-                self.count_of(me, ctx.src, m)
+                self.count_lki(ctx, me, m)
             } else if m.starts_with("your life total") {
                 Some(self.players[me].life)
             } else if m.starts_with("amount of life you gained this turn") {
@@ -255,7 +256,7 @@ impl<'a> Game<'a> {
             }
         }
         if let Some(rest) = t.split("for each ").nth(1) {
-            if let Some(k) = self.count_of(me, ctx.src, rest) {
+            if let Some(k) = self.count_lki(ctx, me, rest) {
                 // The amount per thing counted ("+2/+0 for each", "a Treasure for each").
                 let per = (a.n / 3).max(1);
                 return (per * k).max(0);
@@ -263,7 +264,7 @@ impl<'a> Game<'a> {
         }
         let after = t.split("number of").nth(1).unwrap_or("");
         let n = if !after.is_empty() {
-            if let Some(k) = self.count_of(me, ctx.src, after.trim()) {
+            if let Some(k) = self.count_lki(ctx, me, after.trim()) {
                 k
             } else if after.contains("counters") {
                 self.src_perm(ctx)
@@ -290,6 +291,26 @@ impl<'a> Game<'a> {
             a.n
         };
         n.max(0)
+    }
+
+    /// `count_of` for a resolving ability: counters on a source that has left (sacrificed as a
+    /// cost: Ravenous Amulet's soul counters) are read from its last known information (CR
+    /// 608.2h).
+    fn count_lki(&self, ctx: &Ctx, me: usize, phrase: &str) -> Option<i32> {
+        if let (None, Some(s)) = (ctx.src.and_then(|id| self.idx(id)), &ctx.snap) {
+            let p = phrase
+                .split(['.', ',', ';', '"', '('])
+                .next()
+                .unwrap_or("")
+                .trim();
+            if p.contains("+1/+1 counter on ~") || p.contains("counter on it") {
+                return Some(s.counters.max(0) as i32);
+            }
+            if p.ends_with(" counter on ~") || p.ends_with(" counters on ~") {
+                return Some(s.other_counters.max(0) as i32);
+            }
+        }
+        self.count_of(me, ctx.src, phrase)
     }
 
     /// Counts what a "for each ..." / "the number of ..." phrase names, for player `me`
@@ -831,6 +852,10 @@ impl<'a> Game<'a> {
         if w.poison > 0 {
             self.players[me].poison = self.players[me].poison.saturating_add(w.poison);
         }
+        if self.log.is_some() {
+            let d = self.perm_desc(&self.perms[i]);
+            self.note(|| format!("  P{} pays the ward of {}", me, d));
+        }
         true
     }
 
@@ -1203,6 +1228,20 @@ impl<'a> Game<'a> {
             }
             return;
         }
+        // "When you cast this spell, copy it X times. You may choose new targets for the
+        // copies" (Photon Blast Barrage): X copies, each resolving on its own (state-based
+        // actions in between, so a copy doesn't hit a creature an earlier one killed). (The
+        // parser's stand-in effects - the spell's effects twice - are only for its value.)
+        if ab.trig == Trig::Spell && ab.text.contains("copy it x times") {
+            let times = ctx.x.or(self.cur_x).unwrap_or(0).clamp(0, 20);
+            if let Some(spell) = self.casting {
+                self.note(|| format!("P{} copies the spell {} times (X = {})", me, times, times));
+                for _ in 0..times {
+                    self.copy_spell(me, spell);
+                }
+            }
+            return;
+        }
         self.last_targets.clear();
         self.last_ctrl = None;
         self.targeted = false;
@@ -1220,6 +1259,8 @@ impl<'a> Game<'a> {
                 0
             };
             let mut modes = ai::choose_modes(self, &ctx, ab, used);
+            // Chosen modes happen in the order printed (CR 700.2).
+            modes.sort_unstable();
             // "You may pay {1} up to three times. When you do, choose up to that many"
             // (Hawkeye's Trick Arrows): {1} per mode, the ones worth it; none unpaid.
             if let Some(rest) = ab.text.split("you may pay {").nth(1) {
@@ -1455,16 +1496,17 @@ impl<'a> Game<'a> {
                 self.sacrifice(i);
                 Some(Some(snap))
             }
-            ResCost::SacrificeOrDiscard(types) => {
-                if let Some(i) = ai::fodder(self, me, *types, src) {
-                    let snap = self.perms[i].clone();
-                    self.sacrifice(i);
-                    Some(Some(snap))
-                } else if !self.players[me].hand.is_empty() {
-                    self.discard(me);
-                    Some(None)
-                } else {
-                    None
+            ResCost::SacrificeOrDiscard(types, nonland) => {
+                match self.sac_or_discard(me, ai::fodder(self, me, *types, src), *nonland)? {
+                    Ok(i) => {
+                        let snap = self.perms[i].clone();
+                        self.sacrifice(i);
+                        Some(Some(snap))
+                    }
+                    Err(h) => {
+                        self.discard_slot(me, h);
+                        Some(None)
+                    }
                 }
             }
             ResCost::SacrificeSelf => {
@@ -1541,7 +1583,10 @@ impl<'a> Game<'a> {
                 self.resolve_pending(pend.clone());
                 self.sba();
             }
+            // ("Whenever one or more creatures die" triggers once for a wrath.)
+            let from = self.pending.len();
             self.resolve_pending(pend);
+            self.batch_one_or_more(from);
             self.sba();
         }
     }
@@ -1743,7 +1788,12 @@ impl<'a> Game<'a> {
         i
     }
 
-    pub fn make_item(&mut self, ctrl: usize, kind: &str) {
+    pub fn make_item(&mut self, ctrl: usize, kind: &str) -> u32 {
+        self.make_item_tapped(ctrl, kind, false)
+    }
+
+    /// `make_item`, entering tapped or not; returns the token's id.
+    pub fn make_item_tapped(&mut self, ctrl: usize, kind: &str, tapped: bool) -> u32 {
         let tok = match kind {
             "treasure" | "powerstone" | "gold" => Tok::Treasure,
             "food" => Tok::Food,
@@ -1770,7 +1820,10 @@ impl<'a> Game<'a> {
         };
         let i = self.new_perm(ctrl, ctrl, None, tok);
         self.perms[i].sick = false;
+        self.perms[i].tapped = tapped;
+        let id = self.perms[i].id;
         self.after_enter(i);
+        id
     }
 
     /// Discards a card the player chooses (the worst one).
@@ -2638,7 +2691,25 @@ impl<'a> Game<'a> {
                 }
                 if to.kind == Kind::AnyTarget || to.whose == Whose::Theirs || to.whose == Whose::Any
                 {
-                    match ai::damage_target(self, ctx, to, n) {
+                    let mut hit = ai::damage_target(self, ctx, to, n);
+                    // A required target (CR 601.2c: chosen on casting, so there is one): when
+                    // nothing dies to it, the best of the opponents' legal targets still takes
+                    // the damage (Magnificent End's tapped creature, Helicarrier Strike's
+                    // attacker).
+                    if matches!(hit, ai::Hit::None) && !text.contains("up to ") {
+                        let t1 = Target { count: 1, ..*to };
+                        let best = self
+                            .candidates(ctx, &t1, true)
+                            .into_iter()
+                            .filter(|&i| self.perms[i].ctrl as usize != me)
+                            .max_by(|&a, &b| {
+                                ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
+                            });
+                        if let Some(i) = best {
+                            hit = ai::Hit::Perm(self.perms[i].id);
+                        }
+                    }
+                    match hit {
                         ai::Hit::Player(o) => {
                             self.note(|| format!("    {} damage aimed at P{}", n, o));
                             self.hurt_player(ctx, o, n)
@@ -2798,6 +2869,9 @@ impl<'a> Game<'a> {
                 let harmful = t.whose != Whose::Yours;
                 // "Its owner puts it on their choice of the top or bottom of their library":
                 // the owner takes the top, to draw it again.
+                // "Second from the top or on the bottom" (Trickster's Stratagem): the owner
+                // takes second from the top (drawn a turn later than the top).
+                let second = text.contains("second from the top");
                 let to = if text.contains("top or bottom") || text.contains("from the top") {
                     Zone::Library(true)
                 } else {
@@ -2824,7 +2898,18 @@ impl<'a> Game<'a> {
                                 self.hurt_player(ctx, o, dmg);
                             }
                         } else {
+                            let o = self.perms[i].owner as usize;
+                            let card = self.perms[i].card.filter(|r| r.0 as usize == o);
                             self.leave(i, to, false);
+                            // Put on top, then under the card that was on top.
+                            let lib = &mut self.players[o].library;
+                            if second
+                                && lib.len() >= 2
+                                && card.is_some_and(|r| lib.last() == Some(&r.1))
+                            {
+                                let k = lib.len();
+                                lib.swap(k - 1, k - 2);
+                            }
                         }
                         n += 1;
                     }
@@ -3033,6 +3118,18 @@ impl<'a> Game<'a> {
                 } else {
                     self.draw(me, n);
                 }
+            }
+            // Rummage: "discard a card, then draw a card" (Hawkeye's Boomerang) - the
+            // discard first (the new card can't be the one discarded; an empty hand still
+            // draws).
+            Effect::Loot
+                if text.contains("discard a card, then draw a card")
+                    && !text.contains("connive")
+                    && !text.contains("recruit") =>
+            {
+                self.discard(me);
+                self.draw(me, 1);
+                self.last_drawn = 1;
             }
             Effect::Loot => {
                 let connive = text.contains(" connive");
@@ -3302,12 +3399,12 @@ impl<'a> Game<'a> {
                 } else {
                     kind.clone()
                 };
+                // "Create X tapped Treasure tokens" (Smaug, Long-Bodied Grey Dog): they can't
+                // be tapped for mana until their controller's next untap step.
+                let tapped = text.contains(&format!("tapped {}", kind));
                 let mut made = Vec::new();
                 for _ in 0..n.min(10) {
-                    self.make_item(to, &kind);
-                    if let Some(x) = self.perms.last() {
-                        made.push(x.id);
-                    }
+                    made.push(self.make_item_tapped(to, &kind, tapped));
                 }
                 // "... named Sturdy Shield ... Attach it to ~" (U.S.Agent).
                 if kind.starts_with("equipment") && text.contains("attach it to ~") {
@@ -4175,8 +4272,31 @@ impl<'a> Game<'a> {
                         // "Exile (another / up to one) target creature you control": not
                         // itself.
                         let src = ctx.src.filter(|_| text.contains("target"));
-                        ai::blink_choice(self, me, src, blink_types(text))
+                        let types = blink_types(text);
+                        ai::blink_choice(self, me, src, types)
                             .filter(|&i| !done.contains(&self.perms[i].id))
+                            .or_else(|| {
+                                // "Two target ...": two of them whenever two are legal - the
+                                // other one a tapped land (it comes back untapped) if nothing
+                                // gains more.
+                                (times == 2).then_some(())?;
+                                (0..self.perms.len())
+                                    .filter(|&i| {
+                                        let x = &self.perms[i];
+                                        x.ctrl as usize == me
+                                            && x.tok == Tok::None
+                                            && x.commander == 0
+                                            && x.card.is_some()
+                                            && Some(x.id) != src
+                                            && !done.contains(&x.id)
+                                            && (x.is(types)
+                                                || types & T_CREATURE != 0 && x.is_creature())
+                                    })
+                                    .max_by_key(|&i| {
+                                        let x = &self.perms[i];
+                                        (x.tapped && x.is(T_LAND), !x.is_creature())
+                                    })
+                            })
                     };
                     let Some(i) = target else { return };
                     let x = self.perms[i].clone();
@@ -4885,7 +5005,11 @@ impl<'a> Game<'a> {
         };
         self.note(|| format!("  P{} copies {}", me, c.name));
         for (ai, a) in abilities.into_iter().flatten().enumerate() {
-            if a.trig == Trig::Spell && !a.effects.contains(&Effect::Copy) {
+            // (A copy isn't cast: "when you cast this spell" doesn't trigger again.)
+            if a.trig == Trig::Spell
+                && !a.effects.contains(&Effect::Copy)
+                && !a.text.starts_with("when you cast this spell")
+            {
                 self.pending.push(Pending {
                     ctrl: me as u8,
                     source: None,
@@ -4980,6 +5104,15 @@ impl<'a> Game<'a> {
             if let Some(i) = pick {
                 models.extend(card_of(&self.perms[i].clone()));
             }
+        } else if text.contains("copy of it")
+            && text.contains(" enters")
+            && ctx.subject.is_some_and(|s| Some(s) != ctx.src)
+        {
+            // "Whenever another nontoken artifact you control enters, ... create a token
+            // that's a copy of it" (Ultron): the permanent that entered, not the source.
+            if let Some(i) = ctx.subject.and_then(|s| self.idx(s)) {
+                models.extend(card_of(&self.perms[i].clone()));
+            }
         } else {
             // "A copy of it / of ~ / of them": the card itself.
             match (self.src_perm(ctx), ctx.card_ref) {
@@ -4993,6 +5126,21 @@ impl<'a> Game<'a> {
             text.contains("at the beginning of the end step") && text.contains("sacrifice");
         let not_legendary = text.contains("isn't legendary") || text.contains("aren't legendary");
         let nightmare = text.contains("nightmare in addition");
+        // "If the token isn't a creature, it becomes a 2/2 Robot Villain creature in addition
+        // to its other types" (Ultron).
+        let becomes: Option<(i16, i16, Vec<String>)> = text
+            .split("isn't a creature, it becomes a ")
+            .nth(1)
+            .and_then(|rest| {
+                let (pt, rest) = rest.split_once(' ')?;
+                let (p, t) = pt.split_once('/')?;
+                let kinds = rest.split(" creature").next().unwrap_or("");
+                Some((
+                    p.parse().ok()?,
+                    t.parse().ok()?,
+                    kinds.split_whitespace().map(str::to_string).collect(),
+                ))
+            });
         let n = if self.doubles(me, "token") { n * 2 } else { n };
         let mut made = Vec::new();
         for (r, model) in &models {
@@ -5013,6 +5161,12 @@ impl<'a> Game<'a> {
                 }
                 if nightmare {
                     x.subtypes.push("nightmare".into());
+                }
+                if let Some((p, t, kinds)) = becomes.as_ref().filter(|_| !x.is_creature()) {
+                    x.types |= T_CREATURE;
+                    x.base_p = *p;
+                    x.base_t = *t;
+                    x.subtypes.extend(kinds.iter().cloned());
                 }
                 x.sac_at_end = sac_at_end;
                 let id = x.id;
@@ -5197,6 +5351,21 @@ impl<'a> Game<'a> {
                 self.end_turn = true;
                 self.fog = true;
                 self.pending.clear();
+            }
+            "puts a land from hand onto the battlefield" => {
+                // The land in hand that makes the most colours.
+                let pl = &self.players[me];
+                let pick = (0..pl.hand.len())
+                    .filter(|&h| pl.cards[pl.hand[h] as usize].is(T_LAND))
+                    .max_by_key(|&h| pl.cards[pl.hand[h] as usize].produces.count_ones());
+                if let Some(h) = pick {
+                    let c = self.players[me].hand.remove(h);
+                    if let Some(i) = self.enter_card(me, c, me, false) {
+                        if text.contains("onto the battlefield tapped") {
+                            self.perms[i].tapped = true;
+                        }
+                    }
+                }
             }
             "can't block this turn" => {
                 let t = Target {
