@@ -1685,6 +1685,60 @@ fn instant_speed_plays_at_end_of_turn_and_in_combat() {
     assert!(g.idx(giant).is_none(), "removal on the attacker");
 }
 
+/// Removal's target floor: Hour of Defeat isn't spent on a 2/2 token - not in the main
+/// phase, not at the end of the turn, not on the token attacking - and waits in hand until
+/// a threat worth it shows up, then kills that.
+fn removal_floor_game(floor_off: bool) -> (bool, bool) {
+    let db = db();
+    let d = deck(&db, &["Swamp", "Hour of Defeat"]);
+    let foes = prep(&[card(
+        "Giant",
+        "{4}{G}",
+        "Creature — Giant",
+        "",
+        Some(("6", "6")),
+    )]);
+    ai::FLOOR_OFF.with(|f| f.set(if floor_off { 1 } else { 0 }));
+    let mut g = game(&[&d, &foes]);
+    lands(&mut g, 0, 4, 'B');
+    g.players[0].hand.push(1);
+    let small = token(&mut g, 1, 2);
+    g.recalc();
+    g.active = 0;
+    ai::main_phase(&mut g, 0, false);
+    ai::main_phase(&mut g, 0, true);
+    g.active = 1;
+    let at = vec![Attack {
+        attacker: small,
+        def: Def::Player(0),
+        blockers: vec![],
+        blocked: false,
+    }];
+    ai::before_blocks(&mut g, 0, &at);
+    ai::end_of_turn(&mut g, 0, true);
+    let held = g.idx(small).is_some() && g.players[0].hand.len() == 1;
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    let giant = put(&mut g, 1, 0);
+    ai::end_of_turn(&mut g, 0, true);
+    let fired = g.idx(giant).is_none() && g.idx(small).is_some();
+    ai::FLOOR_OFF.with(|f| f.set(0));
+    (held, fired)
+}
+
+#[test]
+fn removal_waits_for_a_threat_worth_it() {
+    let (held, fired) = removal_floor_game(false);
+    assert!(
+        held,
+        "Hour of Defeat stays in hand while a 2/2 token is all there is"
+    );
+    assert!(fired, "and kills the 6/6 when it arrives");
+    let (held, _) = removal_floor_game(true);
+    assert!(!held, "without the floor it goes at the token");
+}
+
 // ------------------------------------------------------------ card readings (league cards)
 
 /// Resolves ability `k` of card `idx` (player 0's list) as if it triggered or was activated

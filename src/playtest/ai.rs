@@ -83,7 +83,12 @@ fn engine_value(abilities: &[SimAbility]) -> f32 {
                 a.effects.iter().map(effect_value).sum()
             }
         } else if a.modal {
-            a.effects.iter().map(effect_value).fold(0.0, f32::max)
+            let best = a.effects.iter().map(effect_value).fold(0.0, f32::max);
+            // Hawkeye's Trick Arrows: each mode is paid for ({1}), at half a point a mana.
+            match paid_modes(a) {
+                Some((n, _)) => (best - 0.5 * n as f32).max(0.0),
+                None => best,
+            }
         } else {
             a.effects.iter().map(effect_value).sum()
         };
@@ -91,6 +96,14 @@ fn engine_value(abilities: &[SimAbility]) -> f32 {
             Trig::Phase { .. } => 2.5,
             Trig::Event(..) => 1.5,
             Trig::Attacks | Trig::CombatDamage => 1.2,
+            // Paid by removing +1/+1 counters it has to build up first (Ramos' five for
+            // ten mana): an occasional burst that also shrinks it, not a repeatable
+            // ability (as the deck builder rates it, `value::ability_value`). Measured: at
+            // the usual activated rate Ramos' mana counted 8 points (two 4/4s' worth): game
+            // logs showed it cast ahead of the commander and first in line for the table's
+            // removal, and Ramos played 1.4 win-rate points worse than the same Dragon
+            // without the mana ability (0.35 with this rate).
+            Trig::Activated { extra, .. } if extra.remove_plus && extra.remove >= 3 => 0.35,
             Trig::Activated {
                 sac_self: false,
                 mana,
@@ -1397,6 +1410,80 @@ fn is_reactive_only(c: &SimCard) -> bool {
         })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: seats (a bit each) playing without the removal target floor.
+    pub static FLOOR_OFF: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn floor_on(p: usize) -> bool {
+    FLOOR_OFF.with(|f| f.get() & (1 << p) == 0)
+}
+
+#[cfg(not(test))]
+fn floor_on(_: usize) -> bool {
+    true
+}
+
+/// When the target floor gives way: a card that would otherwise rot - a full hand (the
+/// next draw discards), the late game - or when `p` is fighting for its life.
+fn floor_relaxed(g: &Game, p: usize) -> bool {
+    g.players[p].hand.len() >= 7 || g.round >= 10 || g.players[p].life <= 8
+}
+
+/// Removal's target floor: is permanent `i` (an opponent's) worth one of `p`'s removal
+/// cards? A commander or planeswalker; a big body (4+ power, or worth a vanilla 4/4); an
+/// evasive attacker; an engine (a permanent whose abilities keep paying off); a creature
+/// that threatens a real chunk of our life; or the table's biggest threat. Anything else
+/// (a 1/1 token, a vanilla 2/2) isn't: the card waits in hand for a target worth it.
+/// When the card would rot (`floor_relaxed`), anything but small fry is fair game.
+///
+/// It applies to removal spells in hand (which can wait), not to "when ~ enters" triggers
+/// (now or never). Measured (one seat with the floor against three without, 2 x 20,000
+/// paired games, a Thanos deck with five removal spells): +0.06 ± 0.03 win-rate points -
+/// the old valuation already held most removal for bigger targets; the floor stops the
+/// rest (a removal spell on a 2/2 token at the end of a turn, or on a small attacker).
+/// Valuing removal of a worthy target higher instead (0.6 of its worth, not 0.375)
+/// measured -0.9.
+pub(crate) fn worth_removing(g: &Game, p: usize, i: usize) -> bool {
+    if !floor_on(p) {
+        return true;
+    }
+    let x = &g.perms[i];
+    let v = perm_value(g, i);
+    if floor_relaxed(g, p) {
+        return v >= 2.5 || x.commander > 0;
+    }
+    if x.commander > 0 || x.is(T_PLANESWALKER) || v >= 6.0 {
+        return true;
+    }
+    let abilities = g.abilities_of(x);
+    if x.is_creature() {
+        let power = x.p.max(0) as i32 * if x.has(DOUBLE_STRIKE) { 2 } else { 1 };
+        let evasive = x.has(FLYING | MENACE | UNBLOCKABLE | FEAR | INTIMIDATE | SKULK);
+        let life = g.players[p].life;
+        if power >= 4
+            || evasive && power >= 2
+            || engine_value(abilities) >= 2.0
+            || power >= 3 && power * 5 >= life
+        {
+            return true;
+        }
+    } else if engine_value(abilities) >= 1.5 {
+        return true;
+    }
+    // The table's biggest threat: the most valuable permanent any opponent has.
+    v >= 4.0
+        && !g.perms.iter().enumerate().any(|(j, y)| {
+            j != i
+                && y.ctrl as usize != p
+                && !y.is(T_LAND)
+                && g.players[y.ctrl as usize].alive
+                && perm_value(g, j) > v
+        })
+}
+
 /// Removing permanent `i` is worth less when it's a commander (it comes back, for more
 /// mana) or its controller is about to die anyway.
 fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
@@ -1431,6 +1518,20 @@ pub(crate) fn effect_now(
     text: &str,
     src: Option<u32>,
     card_restr: Restr,
+) -> f32 {
+    effect_now_with(g, p, e, text, src, card_restr, false)
+}
+
+/// `effect_now`; with `floor`, one-for-one removal counts only targets worth a removal card
+/// (`worth_removing`).
+fn effect_now_with(
+    g: &Game,
+    p: usize,
+    e: &Effect,
+    text: &str,
+    src: Option<u32>,
+    card_restr: Restr,
+    floor: bool,
 ) -> f32 {
     let ctx = Ctx {
         ctrl: p,
@@ -1475,9 +1576,14 @@ pub(crate) fn effect_now(
                 })
                 .sum()
         } else {
+            // A removal spell only counts a target worth the card (`worth_removing`).
             cands
                 .iter()
-                .filter(|&&i| g.perms[i].ctrl as usize != p && kill(&g.perms[i]))
+                .filter(|&&i| {
+                    g.perms[i].ctrl as usize != p
+                        && kill(&g.perms[i])
+                        && !(removal && floor && !worth_removing(g, p, i))
+                })
                 .map(|&i| {
                     perm_value(g, i)
                         * weight(g, p, g.perms[i].ctrl as usize)
@@ -1790,6 +1896,12 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
 
 /// Value of an ability's effects for `p` now (modal: the best mode).
 fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
+    ability_now_with(g, p, a, src, false)
+}
+
+/// `ability_now`; with `floor`, one-for-one removal counts only targets worth a removal
+/// card (`worth_removing`) - for a spell cast from the hand, which can wait for one.
+fn ability_now_with(g: &Game, p: usize, a: &SimAbility, src: Option<u32>, floor: bool) -> f32 {
     if a.modal {
         let two = a.text.contains("choose two");
         let mut v: Vec<f32> = a
@@ -1800,7 +1912,7 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
                 let (text, cr) = a.mode_text(m);
                 a.effects[r]
                     .iter()
-                    .map(|e| effect_now(g, p, e, text, src, cr))
+                    .map(|e| effect_now_with(g, p, e, text, src, cr, floor))
                     .sum()
             })
             .collect();
@@ -1814,7 +1926,7 @@ fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
     } else {
         a.effects
             .iter()
-            .map(|e| effect_now(g, p, e, &a.text, src, a.card_restr))
+            .map(|e| effect_now_with(g, p, e, &a.text, src, a.card_restr, floor))
             .sum()
     }
 }
@@ -2097,7 +2209,8 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
                 other => g.cond_holds(other, p, None),
             };
             if ok {
-                v += ability_now(g, p, a, None);
+                // Removal waits for a target worth the card.
+                v += ability_now_with(g, p, a, None, true);
             }
         }
         // Card advantage aside, a sorcery that does nothing now waits.
@@ -3580,6 +3693,10 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
             let Some(i) = g.idx(at.attacker) else {
                 continue;
             };
+            // Only at a target worth the card, unless the swing takes a third of our life.
+            if !worth_removing(g, d, i) && total * 3 < life {
+                continue;
+            }
             let pl = &g.players[d];
             let Some(&h) = cards
                 .iter()
@@ -3663,6 +3780,11 @@ fn combat_removal(g: &mut Game, p: usize, attacks: &[Attack]) -> bool {
     let total: i32 = through_me.iter().map(|x| x.1).sum();
     let mut best: Option<(f32, usize, u32)> = None;
     let consider = |g: &Game, gain: f32, target: usize, best: &mut Option<(f32, usize, u32)>| {
+        // A target below the floor only when the fight swings a lot on it (a creature of
+        // ours saved, much damage kept off us).
+        if gain < 6.0 && !worth_removing(g, p, target) {
+            return;
+        }
         let pl = &g.players[p];
         if let Some(&h) = cards
             .iter()
@@ -4816,14 +4938,20 @@ fn stops_a_blocker(ab: &SimAbility, r: &std::ops::Range<usize>) -> bool {
 
 /// What attacking with `a` is worth through its own triggers - "whenever ~ attacks" and,
 /// without vigilance, "whenever ~ becomes tapped" - with `mana` to pay for them (Hawkeye's
-/// Trick Arrows: the paid modes worth it, as the resolver picks them, less what they cost).
-/// Also whether a paid mode can stop a blocker (Net), which the attack plan counts by
-/// predicting the blocks without that blocker (see `group_value`).
-pub(crate) fn attack_trigger_value(g: &Game, a: usize, mana: u32) -> (f32, bool) {
+/// Trick Arrows: the paid modes worth their mana, as the resolver picks them, less what
+/// that mana would have cast after combat - the price `modes_worth_paying` weighs).
+///
+/// A mode that stops a blocker (Net) isn't counted on: the resolver uses it when the attack
+/// meets a blocker worth stopping (`net_target`). Measured on a Thanos deck, 20,000 paired
+/// games on each of two seeds: Hawkeye played 1.2 win-rate points worse than the same 2/2
+/// first strike, reach without arrows while the attack plan priced the arrows at a flat
+/// half point a mana and predicted the blocks without the blocker its Net would stop; 0.5
+/// worse with the arrows priced as the resolver prices them; level (+0.0) with the Net
+/// left out of the plan too.
+pub(crate) fn attack_trigger_value(g: &Game, a: usize, mana: u32) -> f32 {
     let x = &g.perms[a];
     let p = x.ctrl as usize;
     let mut v = 0.0;
-    let mut net = false;
     for (k, ab) in g.abilities_of(x).iter().enumerate() {
         let fires = match &ab.trig {
             Trig::Attacks => !(ab.once_per_turn && k < 32 && x.fired & (1 << k) != 0),
@@ -4841,11 +4969,9 @@ pub(crate) fn attack_trigger_value(g: &Game, a: usize, mana: u32) -> (f32, bool)
             v += ability_now(g, p, ab, Some(x.id)).max(0.0);
             continue;
         };
-        let groups = ab.mode_groups();
         let mut ranked: Vec<f32> = Vec::new();
-        for (m, r) in groups.iter().enumerate() {
+        for (m, r) in ab.mode_groups().iter().enumerate() {
             if stops_a_blocker(ab, r) {
-                net = true;
                 continue;
             }
             let (t, cr) = ab.mode_text(m);
@@ -4854,15 +4980,22 @@ pub(crate) fn attack_trigger_value(g: &Game, a: usize, mana: u32) -> (f32, bool)
                 .map(|e| effect_now(g, p, e, t, Some(x.id), cr))
                 .sum();
             if mv >= 0.5 * n as f32 {
-                ranked.push(mv - 0.5 * n as f32);
+                ranked.push(mv);
             }
         }
         ranked.sort_by(|a, b| b.partial_cmp(a).unwrap());
-        let afford = (mana / n.max(1)) as usize;
-        v += ranked.iter().take(most.min(afford)).sum::<f32>();
-        net &= afford > 0;
+        let afford = ((mana / n.max(1)) as usize).min(most);
+        // The modes worth their mana: what paying for `k` of them costs is the spells that
+        // mana would have cast after combat (and half a point a mana at least).
+        let (mut best, mut sum) = (0.0f32, 0.0f32);
+        for (i, mv) in ranked.iter().take(afford).enumerate() {
+            sum += mv;
+            let m = n * (i as u32 + 1);
+            best = best.max(sum - post_combat_loss(g, p, m).max(0.5 * m as f32));
+        }
+        v += best;
     }
-    (v, net)
+    v
 }
 
 /// The value of sending `group` at opponent `o`, predicting `o`'s blocks with the blocking
@@ -4886,10 +5019,9 @@ fn group_value(g: &Game, o: usize, w: f32, group: &[usize]) -> (f32, Vec<usize>,
     let open = !g.perms.iter().any(|x| {
         x.ctrl as usize == o && x.is_creature() && !x.tapped && !x.locked && !x.has(CANT_BLOCK)
     });
-    // The attackers' own attack triggers, and whether one of them can stop a blocker.
+    // The attackers' own attack triggers.
     let me = g.perms[group[0]].ctrl as usize;
     let mut trig = vec![0.0; group.len()];
-    let mut net = false;
     if group.iter().any(|&a| {
         g.abilities_of(&g.perms[a])
             .iter()
@@ -4897,76 +5029,45 @@ fn group_value(g: &Game, o: usize, w: f32, group: &[usize]) -> (f32, Vec<usize>,
     }) {
         let mana = g.mana_available(me);
         for (k, &a) in group.iter().enumerate() {
-            let (v, n) = attack_trigger_value(g, a, mana);
-            trig[k] = v;
-            net |= n;
+            trig[k] = attack_trigger_value(g, a, mana);
         }
     }
     // Damage counts for how much it shortens the defender's clock (as at 20 life: x1; at
     // 10: x1.33; at 40: x0.83).
     let w = w * (1.0 + 10.0 / g.players[o].life.max(1) as f32) / 1.5;
-    let score = |blocks: &[(u32, u32)]| -> (f32, Vec<usize>) {
-        let mut value = 0.0;
-        let mut bad = Vec::new();
-        for (k, &a) in group.iter().enumerate() {
-            let at = &g.perms[a];
-            let mut bl: Vec<usize> = blocks
-                .iter()
-                .filter(|(_, x)| *x == at.id)
-                .filter_map(|(b, _)| g.idx(*b))
-                .collect();
-            if at.has(MENACE) && bl.len() == 1 {
-                bl.clear();
-            }
-            if bl.is_empty() {
-                value +=
-                    (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32 * 0.6 * w
-                        + trig[k];
-                continue;
-            }
-            // Blocked: what dies on each side, and what tramples over.
-            let c = clash(g, a, &bl);
-            let killed: f32 = c.dead.iter().map(|&b| perm_value(g, b)).sum();
-            let net = killed + c.through as f32 * 0.6 * w + trig[k]
-                - if c.att_dies { perm_value(g, a) } else { 0.0 };
-            if c.att_dies && net < 0.0 && !g.must_attack(a) {
-                bad.push(a);
-            }
-            value += net;
-        }
-        (value, bad)
-    };
     let blocks = if open {
         Vec::new()
     } else {
         declare_blocks(g, o, &attacks)
     };
-    let (mut value, mut bad) = score(&blocks);
-    let mut nb = blocks.len();
-    if net && !blocks.is_empty() {
-        // An attack trigger can stop one blocker (Hawkeye's Net, {1}): the blocks without
-        // the one whose absence helps us most.
-        let mut stop: Vec<usize> = blocks.iter().filter_map(|(b, _)| g.idx(*b)).collect();
-        stop.sort_unstable();
-        stop.dedup();
-        for b in stop {
-            let Some((_, plan)) = plan_blocks(g, o, &attacks, false, Some(b)) else {
-                continue;
-            };
-            let bl: Vec<(u32, u32)> = plan
-                .pairs
-                .iter()
-                .map(|&(x, a)| (g.perms[x].id, g.perms[a].id))
-                .collect();
-            let (v, bd) = score(&bl);
-            if v - 0.5 > value {
-                value = v - 0.5;
-                bad = bd;
-                nb = bl.len();
-            }
+    let mut value = 0.0;
+    let mut bad = Vec::new();
+    for (k, &a) in group.iter().enumerate() {
+        let at = &g.perms[a];
+        let mut bl: Vec<usize> = blocks
+            .iter()
+            .filter(|(_, x)| *x == at.id)
+            .filter_map(|(b, _)| g.idx(*b))
+            .collect();
+        if at.has(MENACE) && bl.len() == 1 {
+            bl.clear();
         }
+        if bl.is_empty() {
+            value += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32 * 0.6 * w
+                + trig[k];
+            continue;
+        }
+        // Blocked: what dies on each side, and what tramples over.
+        let c = clash(g, a, &bl);
+        let killed: f32 = c.dead.iter().map(|&b| perm_value(g, b)).sum();
+        let net = killed + c.through as f32 * 0.6 * w + trig[k]
+            - if c.att_dies { perm_value(g, a) } else { 0.0 };
+        if c.att_dies && net < 0.0 && !g.must_attack(a) {
+            bad.push(a);
+        }
+        value += net;
     }
-    (value, bad, nb)
+    (value, bad, blocks.len())
 }
 
 /// During our combat, before blocks: the creature of a player we attack whose not blocking
