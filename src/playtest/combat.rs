@@ -159,6 +159,7 @@ impl<'a> Game<'a> {
         // can't be paid for stays home.
         if self.rule_anywhere(R_ATTACK_TAX) {
             let mut keep = Vec::new();
+            let n = declared.len();
             for (id, def) in declared {
                 let tax = match def {
                     Def::Player(d) => self.attack_tax(d),
@@ -167,6 +168,10 @@ impl<'a> Game<'a> {
                 if tax == 0 || self.pay(a, &Mana::generic(tax)) {
                     keep.push((id, def));
                 }
+            }
+            let unpaid = n - keep.len();
+            if unpaid > 0 {
+                self.note(|| format!("P{} {} attacker(s) stay home: attack tax unpaid", a, unpaid));
             }
             declared = keep;
         }
