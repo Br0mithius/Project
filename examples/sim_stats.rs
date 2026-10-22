@@ -74,13 +74,17 @@ fn main() {
     // ---------------------------------------------------------------- play
     let mut played: Vec<Game> = Vec::new();
     for k in 0..games {
+        // Opponents and their seats are drawn at random for each game (seeded): fixed
+        // neighbours would confound the per-deck rates. Our seat rotates.
+        let mut picks: Vec<usize> = (1..=n).collect();
+        Rng::new(0x5EA7_0000 + k).shuffle(&mut picks);
         let decks: Vec<usize> = match &me {
             Some(_) => {
-                let mut ids: Vec<usize> = (0..3).map(|i| 1 + (k as usize + i) % n).collect();
+                let mut ids = picks[..3].to_vec();
                 ids.insert(k as usize % 4, 0);
                 ids
             }
-            None => (0..4).map(|i| 1 + (k as usize + i) % n).collect(),
+            None => picks[..4].to_vec(),
         };
         let table: Vec<&Prepared> = decks.iter().map(|&d| deck_of(d)).collect();
         let mut g =
@@ -135,8 +139,11 @@ fn main() {
     let mut seat_w = [0f64; 4];
     let mut seat_ours = [(0f64, 0f64); 4];
     for g in &played {
-        let w = g.stats.winner.unwrap_or(0);
-        seat_w[w.min(3)] += 1.0;
+        // (A draw - the last players out together - is a win for nobody.)
+        let w = g.stats.winner.unwrap_or(usize::MAX);
+        if w < 4 {
+            seat_w[w] += 1.0;
+        }
         if let Some(s) = g.decks.iter().position(|&d| d == 0) {
             seat_ours[s].1 += 1.0;
             if w == s {
@@ -208,7 +215,7 @@ fn main() {
         }
     }
     println!(
-        "rounds: avg {:.1} | hit MAX_ROUNDS ({}) {} | last players out together (no true draw is modelled; the active player 'wins') {}",
+        "rounds: avg {:.1} | hit MAX_ROUNDS ({}) {} | last players out together (a draw: nobody wins) {}",
         rsum / total,
         MAX_ROUNDS,
         pct(timeouts, total),

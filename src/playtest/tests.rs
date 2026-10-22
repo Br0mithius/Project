@@ -582,7 +582,16 @@ fn sagas_plans_and_jace() {
             "Plains",
         ],
     );
-    let mut g = game(&[&d, &d]);
+    let bears = prep(&[card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    )]);
+    let mut g = game(&[&d, &bears]);
+    // (Academic Ascent's "target creature" needs a creature to target.)
+    put(&mut g, 1, 0);
     lands(&mut g, 0, 6, 'U');
     lands(&mut g, 0, 2, 'W');
     // Saga: chapter I on entering; it's gone after its last chapter.
@@ -669,7 +678,7 @@ fn adventures_and_power_up() {
         .position(|a| matches!(a.trig, Trig::PowerUp(_)))
         .unwrap();
     let today = g.activation_cost(0, i, k).unwrap().total();
-    g.perms[i].born = 0;
+    g.perms[i].entered_turn = false;
     let later = g.activation_cost(0, i, k).unwrap().total();
     assert_eq!(
         later,
@@ -1305,7 +1314,7 @@ fn self_reductions_equip_flashback_and_modes() {
     let mut g = game(&[&d, &d]);
     let viv = put(&mut g, 0, 9);
     let i = g.idx(viv).unwrap();
-    g.perms[i].born = 0;
+    g.perms[i].entered_turn = false;
     let k = ability_of(&g, viv, |a| matches!(a.trig, Trig::PowerUp(_)));
     assert_eq!(g.activation_cost(0, i, k).unwrap().total(), 7);
     put(&mut g, 0, 8);
@@ -2107,10 +2116,15 @@ fn transforming_cards_turn_into_their_back_face() {
             "King T'Challa",
             "Jennifer Walters",
             "Lightning Strike",
+            "Forest",
+            "Plains",
+            "Island",
         ],
     );
     let mut g = game(&[&d, &d]);
-    lands(&mut g, 0, 6, 'R');
+    // ({2}{R}{R}{G}{G} and {4}{W}{U}: the colours are paid as such.)
+    lands(&mut g, 0, 4, 'R');
+    lands(&mut g, 0, 2, 'G');
     let bruce = put(&mut g, 0, 1);
     // Only the front face is cast.
     g.players[0].hand.push(1);
@@ -2133,6 +2147,8 @@ fn transforming_cards_turn_into_their_back_face() {
     assert_eq!(perm(&g, bruce).counters, 1);
     // Black Panther: double strike, and all damage to him is prevented.
     untap_all(&mut g);
+    lands(&mut g, 0, 1, 'W');
+    lands(&mut g, 0, 1, 'U');
     let tc = put(&mut g, 0, 2);
     let k = ability(&d, 2, "transform");
     assert!(g.activate(0, tc, k));
@@ -2692,7 +2708,7 @@ fn mechanism_cards_play_whole_games() {
         let mut table: Vec<&Prepared> = vec![&opp[0], &opp[1], &opp[2]];
         table.insert(k % 4, &me);
         let w = play_game(&table, &rules, &mut rng);
-        assert!(w < 4);
+        assert!(w < 4 || w == super::NO_WINNER);
     }
 }
 
@@ -2955,4 +2971,904 @@ fn ronin_sacrifices_only_its_own_equipment() {
     );
     assert!(g.idx(bear).is_some(), "the Bear survives");
     assert!(g.idx(dragon).is_none(), "the 4/4 gets -4/-4");
+}
+
+// ------------------------------------------------------------ rules audit regressions
+
+/// Real cards by name; "Plains", "Island", "Swamp", "Mountain" and "Forest" are basics.
+fn deck(db: &CardDb, names: &[&str]) -> Prepared {
+    let basics = [
+        ("Plains", 'W'),
+        ("Island", 'U'),
+        ("Swamp", 'B'),
+        ("Mountain", 'R'),
+        ("Forest", 'G'),
+    ];
+    let cards: Vec<Card> = names
+        .iter()
+        .map(|n| match basics.iter().find(|b| b.0 == *n) {
+            Some(b) => Card::basic_land(b.0, b.1),
+            None => db
+                .get(n)
+                .unwrap_or_else(|| panic!("{} not in db", n))
+                .clone(),
+        })
+        .collect();
+    prep(&cards)
+}
+
+/// The index of the first ability of permanent `id` whose text contains `what`.
+fn ab_with(g: &Game, id: u32, what: &str) -> usize {
+    let x = perm(g, id);
+    g.abilities_of(x)
+        .iter()
+        .position(|a| a.text.contains(what))
+        .unwrap_or_else(|| panic!("no ability with {:?}", what))
+}
+
+fn tapped_lands(g: &Game, p: usize) -> usize {
+    g.perms
+        .iter()
+        .filter(|x| x.ctrl as usize == p && x.is(T_LAND) && x.tapped)
+        .count()
+}
+
+#[test]
+fn whenever_you_attack_triggers_once_per_combat() {
+    let db = db();
+    // Misty Mountains Raider: "whenever you attack, amass Goblins 2" - one attack, one Army
+    // with two counters (it was amassed twice).
+    let d = deck(&db, &["Misty Mountains Raider", "Agent 13, Sharon Carter"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    g.combat(0);
+    assert!(g.players[0].attacked_this_turn);
+    let army: Vec<&Perm> = g.perms.iter().filter(|x| x.tok == Tok::Army).collect();
+    assert_eq!(army.len(), 1);
+    assert_eq!(army[0].counters, 2, "amassed 2 once");
+    // Agent 13: "whenever a creature you control attacks alone, investigate" - one Clue.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    g.combat(0);
+    assert!(g.players[0].attacked_this_turn);
+    let clues = g.perms.iter().filter(|x| x.tok == Tok::Clue).count();
+    assert_eq!(clues, 1);
+}
+
+#[test]
+fn activated_abilities_cost_their_colours() {
+    let db = db();
+    // The Mind Stone: "{5}{W}, {T}: Harness ~" needs white mana, and the Stone taps for
+    // the cost, so its own {W} can't pay for it.
+    let d = deck(&db, &["The Mind Stone", "Mountain", "Plains"]);
+    let mut g = game(&[&d, &d]);
+    let ms = put(&mut g, 0, 0);
+    for _ in 0..6 {
+        put(&mut g, 0, 1);
+    }
+    let k = ab_with(&g, ms, "harness");
+    let cost = g.activation_cost(0, g.idx(ms).unwrap(), k).unwrap();
+    assert_eq!((cost.generic, cost.pips), (5, [1, 0, 0, 0, 0]));
+    assert!(!g.activate(0, ms, k), "six Mountains and the Stone itself");
+    assert_eq!(tapped_lands(&g, 0), 0, "nothing was paid");
+    assert!(!perm(&g, ms).tapped);
+    put(&mut g, 0, 2);
+    assert!(g.activate(0, ms, k));
+    assert!(perm(&g, ms).powered && perm(&g, ms).tapped);
+    assert_eq!(tapped_lands(&g, 0), 6, "{{5}}{{W}} from the lands");
+}
+
+#[test]
+fn filter_lands_command_tower_and_conditional_lands() {
+    let db = db();
+    let mut d = deck(
+        &db,
+        &[
+            "Command Tower",
+            "Surveillance Room",
+            "Baxter Building",
+            "Gleaming Bastion",
+            "Forest",
+            "Misty Knight, Hero for Hire",
+        ],
+    );
+    d.commanders = vec![(5, 1)];
+    let mut g = game(&[&d, &d]);
+    // Command Tower: the commander's colours (Misty Knight: red) only.
+    let t = put(&mut g, 0, 0);
+    assert!(g.can_pay(0, &Mana::parse("{R}")));
+    assert!(!g.can_pay(0, &Mana::parse("{U}")));
+    let i = g.idx(t).unwrap();
+    g.perms[i].tapped = true;
+    // Filters: {C} alone; "{1}, {T}: Add one mana of any color" isn't free fixing.
+    let s = put(&mut g, 0, 1);
+    assert!(g.can_pay(0, &Mana::parse("{1}")));
+    assert!(!g.can_pay(0, &Mana::parse("{B}")));
+    let i = g.idx(s).unwrap();
+    g.perms[i].tapped = true;
+    let b = put(&mut g, 0, 2);
+    assert!(g.can_pay(0, &Mana::parse("{C}")));
+    assert!(!g.can_pay(0, &Mana::parse("{G}")));
+    let i = g.idx(b).unwrap();
+    g.perms[i].tapped = true;
+    // Gleaming Bastion: {W}/{U} the turn it entered or with a basic land.
+    let gb = put(&mut g, 0, 3);
+    assert!(g.can_pay(0, &Mana::parse("{W}")), "entered this turn");
+    let i = g.idx(gb).unwrap();
+    g.perms[i].entered_turn = false;
+    assert!(
+        !g.can_pay(0, &Mana::parse("{W}")),
+        "a later turn, no basic land"
+    );
+    assert!(g.can_pay(0, &Mana::parse("{C}")));
+    put(&mut g, 0, 4);
+    assert!(g.can_pay(0, &Mana::parse("{W}")), "with a Forest");
+    // A colourless commander: Command Tower makes nothing.
+    let mut d2 = deck(&db, &["Command Tower", "Ultron Drone"]);
+    d2.commanders = vec![(1, 1)];
+    let mut g = game(&[&d2, &d2]);
+    put(&mut g, 0, 0);
+    assert!(!g.can_pay(0, &Mana::generic(1)));
+}
+
+#[test]
+fn nobody_skips_the_first_draw_in_multiplayer() {
+    assert!(!skips_first_draw(4, 1, 0));
+    assert!(!skips_first_draw(3, 1, 0));
+    assert!(skips_first_draw(2, 1, 0), "the two-player starting player");
+    assert!(!skips_first_draw(2, 1, 1));
+    assert!(!skips_first_draw(2, 2, 0));
+}
+
+#[test]
+fn bifur_doubles_dwarf_triggers_with_an_enduring_story() {
+    let db = db();
+    let d = deck(&db, &["Bifur, Melodic Rider", "Ultron Drone"]);
+    let counters = |g: &Game| -> i16 {
+        g.perms
+            .iter()
+            .filter(|x| x.ctrl == 0)
+            .map(|x| x.counters)
+            .sum()
+    };
+    // Without an enduring story: Bifur's "when ~ enters, put a +1/+1 counter on target
+    // creature" once.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    put(&mut g, 0, 0);
+    assert!(!g.players[0].enduring_story);
+    assert_eq!(counters(&g), 1);
+    // Three artifacts: an enduring story, and the Dwarf's trigger happens twice.
+    let mut g = game(&[&d, &d]);
+    for _ in 0..3 {
+        put(&mut g, 0, 1);
+    }
+    assert!(g.players[0].enduring_story);
+    put(&mut g, 0, 0);
+    assert_eq!(counters(&g), 2);
+}
+
+#[test]
+fn dwalins_hone_counters_grant_power() {
+    let db = db();
+    let d = deck(&db, &["Dwalin, Weaponmaster", "Captain America's Shield"]);
+    let mut g = game(&[&d, &d]);
+    let shield = put(&mut g, 0, 1);
+    let dwalin = put(&mut g, 0, 0);
+    assert_eq!(perm(&g, shield).hone, 1, "a hone counter on each Equipment");
+    let i = g.idx(shield).unwrap();
+    g.perms[i].attached = Some(dwalin);
+    g.recalc();
+    let x = perm(&g, dwalin);
+    assert_eq!((x.p, x.t), (3, 9), "2/1 +1/+0 (hone) +0/+8 (Shield)");
+}
+
+#[test]
+fn an_additional_combat_phase_happens() {
+    let db = db();
+    // Aurelia: "whenever ~ attacks for the first time each turn, ... after this phase,
+    // there is an additional combat phase" - she hits twice.
+    let d = deck(&db, &["Aurelia, the Warleader", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![1; 30];
+    put(&mut g, 0, 0);
+    let life = g.players[1].life;
+    g.take_turn(0, false);
+    assert_eq!(life - g.players[1].life, 6);
+}
+
+#[test]
+fn counts_read_from_the_game_not_typical_values() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Ramos, Dragon Engine",
+            "Ultron Drone",
+            "Lightning Strike",
+            "Misty Knight, Hero for Hire",
+            "Mountain",
+            "Stature, Size Shifter",
+            "Island",
+        ],
+    );
+    // Ramos: a counter per colour of the spell (colourless: none).
+    let mut g = game(&[&d, &d]);
+    let r = put(&mut g, 0, 0);
+    g.on_cast(0, &d.cards[1]);
+    g.run_pending();
+    assert_eq!(perm(&g, r).counters, 0);
+    g.on_cast(0, &d.cards[2]);
+    g.run_pending();
+    assert_eq!(perm(&g, r).counters, 1);
+    // Misty Knight: "draw a card for each card you've discarded this turn" - one.
+    let mut g = game(&[&d, &d]);
+    let mk = put(&mut g, 0, 3);
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![4];
+    let k = ab_with(&g, mk, "discard a card");
+    assert!(g.activate(0, mk, k));
+    assert_eq!(g.players[0].hand.len(), 1);
+    // Stature: power-up {X}{U}{U} pays X and puts X counters.
+    let mut g = game(&[&d, &d]);
+    let st = put(&mut g, 0, 5);
+    let i = g.idx(st).unwrap();
+    g.perms[i].entered_turn = false;
+    lands(&mut g, 0, 2, 'U');
+    let k = ab_with(&g, st, "put x");
+    assert!(g.activation_cost(0, i, k).is_none(), "X = 0 does nothing");
+    lands(&mut g, 0, 2, 'U');
+    assert!(g.activate(0, st, k));
+    assert_eq!(perm(&g, st).counters, 2);
+    assert_eq!(tapped_lands(&g, 0), 4);
+}
+
+#[test]
+fn balin_deals_the_cards_discarded() {
+    let db = db();
+    let d = deck(&db, &["Balin, Loremaster", "Ultron Drone", "Mountain"]);
+    for (hand, dealt) in [(vec![2u16, 2, 2], 3), (vec![2u16], 0)] {
+        let mut g = game(&[&d, &d]);
+        for _ in 0..2 {
+            put(&mut g, 0, 1);
+        }
+        g.players[0].hand = hand;
+        let life = g.players[1].life;
+        put(&mut g, 0, 0);
+        assert!(g.players[0].enduring_story);
+        assert_eq!(life - g.players[1].life, dealt);
+    }
+}
+
+#[test]
+fn connive_counts_only_nonland_discards() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "A.I.M. Scientists",
+            "Island",
+            "Ultron Drone",
+            "Trickster's Stratagem",
+        ],
+    );
+    // Draws an Island and discards it: no counter.
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![1; 10];
+    let a = put(&mut g, 0, 0);
+    assert_eq!(perm(&g, a).counters, 0);
+    // Draws a Drone and discards it: a counter.
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![2; 10];
+    let a = put(&mut g, 0, 0);
+    assert_eq!(perm(&g, a).counters, 1);
+    // "Up to one target creature you control connives" with no creature: no loot.
+    let mut g = game(&[&d, &d]);
+    let foe = put(&mut g, 1, 2);
+    lands(&mut g, 0, 4, 'U');
+    g.players[0].hand = vec![3];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(foe).is_none());
+    assert_eq!(
+        (g.players[0].hand.len(), g.players[0].library.len()),
+        (0, 30)
+    );
+}
+
+#[test]
+fn magnificent_end_cast_for_less_hits_a_tapped_creature() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Magnificent End",
+            "Plains",
+            "Ultron Drone",
+            "Ramos, Dragon Engine",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    let drone = put(&mut g, 1, 2);
+    let ramos = put(&mut g, 1, 3);
+    let i = g.idx(drone).unwrap();
+    g.perms[i].tapped = true;
+    lands(&mut g, 0, 2, 'W');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()), "{{1}}{{W}}");
+    assert!(g.idx(drone).is_none(), "the tapped creature");
+    assert!(g.idx(ramos).is_some(), "not the untapped one");
+}
+
+#[test]
+fn doc_samson_adds_one_counter_of_each_kind() {
+    let db = db();
+    let d = deck(&db, &["Doc Samson, Super Psychiatrist", "Ultron Drone"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let drone = put(&mut g, 0, 1);
+    let i = g.idx(drone).unwrap();
+    g.add_counters(i, 2);
+    assert_eq!(perm(&g, drone).counters, 3);
+    let i = g.idx(drone).unwrap();
+    g.add_other_counters(i, 1);
+    assert_eq!(perm(&g, drone).other_counters, 2);
+    // Not on an opponent's permanent.
+    let theirs = put(&mut g, 1, 1);
+    let i = g.idx(theirs).unwrap();
+    g.add_counters(i, 2);
+    assert_eq!(perm(&g, theirs).counters, 2);
+}
+
+#[test]
+fn robot_domination_sees_creature_cards_from_anywhere() {
+    let db = db();
+    let d = deck(&db, &["Robot Domination", "Ultron Drone", "Island"]);
+    let mut g = game(&[&d, &d]);
+    let rd = put(&mut g, 0, 0);
+    let life = g.players[0].life;
+    // A creature card discarded: draw, lose 1 life, a plan counter.
+    g.put_discarded(0, 1);
+    g.run_pending();
+    assert_eq!(g.players[0].hand.len(), 1);
+    assert_eq!(g.players[0].life, life - 1);
+    assert_eq!(perm(&g, rd).other_counters, 1);
+    // Milled: a land does nothing, a creature card does.
+    g.players[0].library.push(2);
+    g.mill(0, 1);
+    g.run_pending();
+    assert_eq!(perm(&g, rd).other_counters, 1);
+    g.players[0].library.push(1);
+    g.mill(0, 1);
+    g.run_pending();
+    assert_eq!(perm(&g, rd).other_counters, 2);
+}
+
+#[test]
+fn the_masters_of_evil_tutors_a_plan_from_the_hand() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "The Masters of Evil",
+            "Robot Domination",
+            "Ultron Drone",
+            "Swamp",
+            "Mountain",
+        ],
+    );
+    assert_eq!(d.cards[0].cycling, Some((2, "plan".to_string())));
+    // On the battlefield the ability can't be used.
+    let mut g = game(&[&d, &d]);
+    let m = put(&mut g, 0, 0);
+    lands(&mut g, 0, 3, 'B');
+    let k = ab_with(&g, m, "search your library");
+    assert!(g.activation_cost(0, g.idx(m).unwrap(), k).is_none());
+    // From the hand: {1}{B}, the card itself, a Plan.
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![2, 1, 2, 2];
+    g.players[0].hand = vec![0];
+    lands(&mut g, 0, 2, 'R');
+    assert!(!g.cycle(0, 0), "no black mana");
+    lands(&mut g, 0, 1, 'B');
+    assert!(g.cycle(0, 0));
+    assert_eq!(g.players[0].hand, vec![1]);
+    assert_eq!(g.players[0].graveyard, vec![0]);
+}
+
+#[test]
+fn captain_americas_shield_taps_a_defending_players_creature() {
+    let db = db();
+    let d = deck(
+        &db,
+        &["Captain America's Shield", "Ultron Drone", "Red Hulk"],
+    );
+    let mut g = game(&[&d, &d, &d]);
+    let att = put(&mut g, 0, 1);
+    let shield = put(&mut g, 0, 0);
+    let i = g.idx(shield).unwrap();
+    g.perms[i].attached = Some(att);
+    let small = put(&mut g, 1, 1);
+    let hulk = put(&mut g, 2, 2);
+    let i = g.idx(att).unwrap();
+    g.perms[i].attacking = true;
+    g.ext.attack_def = vec![(att, 1)];
+    let snap = perm(&g, att).clone();
+    g.emit_about(Ev::EachAttacker, 0, &snap);
+    g.run_pending();
+    assert!(perm(&g, small).tapped, "the defending player's creature");
+    assert!(!perm(&g, hulk).tapped, "not another player's");
+}
+
+#[test]
+fn desolation_of_smaugs_mana_is_only_for_dragons() {
+    let db = db();
+    let d = deck(&db, &["Desolation of Smaug", "Mountain", "Ultron Drone"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'R');
+    g.players[0].hand = vec![0, 2];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(
+        g.players[0].pool, 0,
+        "no mana left for anything but a Dragon"
+    );
+    assert_eq!(g.players[0].hand, vec![2]);
+}
+
+#[test]
+fn spells_need_their_targets() {
+    let db = db();
+    let d = deck(&db, &["Helicarrier Strike", "Plains", "Ultron Drone"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'W');
+    g.players[0].hand = vec![0];
+    let foe = put(&mut g, 1, 2);
+    assert!(
+        !g.can_cast(0, Src::Hand(0), CastOpts::default()),
+        "no attacking or blocking creature"
+    );
+    let i = g.idx(foe).unwrap();
+    g.perms[i].attacking = true;
+    assert!(g.can_cast(0, Src::Hand(0), CastOpts::default()));
+}
+
+#[test]
+fn tokens_keep_their_quoted_abilities() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Redcap Gutter-Dweller",
+            "Ka-Zar of the Savage Land",
+            "Forest",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    // "Create two 1/1 black Rat creature tokens with 'This creature can't block.'"
+    put(&mut g, 0, 0);
+    let rats: Vec<&Perm> = g.perms.iter().filter(|x| x.tok == Tok::Creature).collect();
+    assert_eq!(rats.len(), 2);
+    assert!(rats.iter().all(|x| x.has(CANT_BLOCK)));
+    // Zabu: legendary, and grows on landfall.
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    let zabu = |g: &Game| -> Vec<u32> {
+        g.perms
+            .iter()
+            .filter(|x| x.tok == Tok::Creature && x.is(T_LEGENDARY))
+            .map(|x| x.id)
+            .collect()
+    };
+    let z = zabu(&g);
+    assert_eq!(z.len(), 1);
+    put(&mut g, 0, 2);
+    assert_eq!(perm(&g, z[0]).counters, 1, "landfall");
+    // A second Ka-Zar: the legend rule keeps one Zabu.
+    put(&mut g, 0, 1);
+    assert_eq!(zabu(&g).len(), 1);
+}
+
+#[test]
+fn hawkeyes_arrows_cost_mana() {
+    let db = db();
+    let d = deck(&db, &["Hawkeye, Master Marksman", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    let h = put(&mut g, 0, 0);
+    let life = g.players[1].life;
+    let i = g.idx(h).unwrap();
+    g.perms[i].tapped = true;
+    g.emit(Ev::Tapped, 0, Some(h));
+    g.run_pending();
+    assert_eq!(g.players[1].life, life, "no mana: no arrows");
+    lands(&mut g, 0, 1, 'R');
+    g.emit(Ev::Tapped, 0, Some(h));
+    g.run_pending();
+    assert_eq!(tapped_lands(&g, 0), 1, "{{1}} paid for an arrow");
+}
+
+#[test]
+fn enrage_triggers_once_per_combat_damage_step() {
+    let db = db();
+    let d = deck(&db, &["Red Hulk", "Ultron Drone"]);
+    let mut g = game(&[&d, &d]);
+    let hulk = put(&mut g, 0, 0);
+    let a = put(&mut g, 1, 1);
+    let b = put(&mut g, 1, 1);
+    let at = vec![Attack {
+        attacker: hulk,
+        def: Def::Player(1),
+        blockers: vec![a, b],
+        blocked: true,
+    }];
+    g.damage_step(0, &at, false);
+    g.run_pending();
+    assert_eq!(
+        perm(&g, hulk).counters,
+        1,
+        "dealt damage once (two blockers)"
+    );
+}
+
+#[test]
+fn the_master_of_lake_town_mills_whoever_lost_life() {
+    let db = db();
+    let d = deck(&db, &["The Master of Lake-town", "Island"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    g.lose_life(1, 2);
+    g.run_pending();
+    assert_eq!(g.players[1].library.len(), 28, "that player, that many");
+    assert_eq!(g.players[0].library.len(), 30);
+}
+
+#[test]
+fn combat_damage_bookkeeping() {
+    let d = prep(&[
+        card(
+            "Leech",
+            "{1}{B}",
+            "Creature — Bat",
+            "Lifelink",
+            Some(("3", "1")),
+        ),
+        card("Ox", "{3}{W}", "Creature — Ox", "", Some(("2", "6"))),
+        card(
+            "Sage",
+            "{3}{U}",
+            "Legendary Planeswalker — Sage",
+            "+1: Draw a card.",
+            None,
+        ),
+    ]);
+    // Lifelink: damage a shield counter prevents gains nothing.
+    let mut g = game(&[&d, &d, &d]);
+    let leech = put(&mut g, 0, 0);
+    let ox = put(&mut g, 1, 1);
+    let i = g.idx(ox).unwrap();
+    g.perms[i].shield = 1;
+    let life = g.players[0].life;
+    let at = vec![Attack {
+        attacker: leech,
+        def: Def::Player(1),
+        blockers: vec![ox],
+        blocked: true,
+    }];
+    g.damage_step(0, &at, false);
+    assert_eq!(g.players[0].life, life, "prevented: no life");
+    // A planeswalker hit by a lifelinker: loyalty down, life up.
+    let mut g = game(&[&d, &d, &d]);
+    let leech = put(&mut g, 0, 0);
+    let sage = put(&mut g, 1, 2);
+    let (life, loyalty) = (g.players[0].life, perm(&g, sage).loyalty);
+    let at = vec![Attack {
+        attacker: leech,
+        def: Def::Walker(sage),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(0, &at, false);
+    assert_eq!(g.players[0].life, life + 3);
+    assert_eq!(perm(&g, sage).loyalty, loyalty - 3);
+    // Commander damage counts for the commander's owner, whoever controls it.
+    let mut g = game(&[&d, &d, &d]);
+    let cmd = put(&mut g, 0, 1);
+    let i = g.idx(cmd).unwrap();
+    g.perms[i].commander = 1;
+    g.perms[i].ctrl = 1;
+    let at = vec![Attack {
+        attacker: cmd,
+        def: Def::Player(2),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(1, &at, false);
+    assert_eq!(g.players[2].cmd_damage[0][1], 2, "P0's commander");
+    assert_eq!(g.players[2].cmd_damage[1][1], 0);
+}
+
+#[test]
+fn infinity_stone_and_graveyard_hate() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "The Mind Stone",
+            "Plains",
+            "Angel of Finality",
+            "Ultron Drone",
+        ],
+    );
+    // The Mind Stone's "∞" end step flicker needs it harnessed, and never takes a land.
+    let mut g = game(&[&d, &d]);
+    let ms = put(&mut g, 0, 0);
+    let land = put(&mut g, 0, 1);
+    let angel = put(&mut g, 0, 2);
+    g.players[1].graveyard = vec![3, 3];
+    g.phase_triggers(0, Phase::End);
+    assert!(g.idx(angel).is_some(), "not harnessed: nothing happens");
+    let i = g.idx(ms).unwrap();
+    g.perms[i].powered = true;
+    g.phase_triggers(0, Phase::End);
+    assert!(g.idx(land).is_some(), "a land isn't a nonland permanent");
+    assert!(g.idx(angel).is_none(), "the Angel was flickered");
+    // Angel of Finality: "exile target player's graveyard".
+    assert!(g.players[1].graveyard.is_empty());
+}
+
+#[test]
+fn enters_tapped_doesnt_untap_and_vehicles() {
+    let db = db();
+    let d = deck(
+        &db,
+        &[
+            "Whiplash, Vengeful Engineer",
+            "Enchanted River's Grasp",
+            "Ultron Drone",
+            "Great Gilded Boat",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    // "Whiplash enters tapped."
+    let i = g.enter_card(0, 0, 0, false).unwrap();
+    assert!(g.perms[i].tapped);
+    // Enchanted River's Grasp: the creature loses its abilities and stays tapped.
+    let drone = put(&mut g, 1, 2);
+    let i = g.enter_card(0, 1, 0, false).unwrap();
+    g.perms[i].attached = Some(drone);
+    g.run_pending();
+    g.sba();
+    let x = perm(&g, drone);
+    assert!(x.tapped);
+    assert!(x.blank && g.abilities_of(x).is_empty());
+    assert!(!x.locked, "it can still block");
+    // A Vehicle that arrived this turn, crewed, still can't attack.
+    let boat = g.enter_card(0, 3, 0, false).unwrap();
+    let boat = g.perms[boat].id;
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 2);
+    assert!(g.crew(0, boat));
+    let i = g.idx(boat).unwrap();
+    assert!(g.perms[i].is_creature() && !g.can_attack(i));
+}
+
+// ------------------------------------------------------------ casting and mana decisions
+
+fn dump_log(g: &Game) {
+    for l in g.log.iter().flatten() {
+        eprintln!("{}", l);
+    }
+}
+
+#[test]
+fn ai_plays_the_tapped_land_on_a_quiet_turn() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Bloodfell Caves").unwrap().clone(),
+        card("Ogre", "{3}{B}", "Creature — Ogre", "", Some(("4", "4"))),
+        card("Bear", "{2}{B}", "Creature — Bear", "", Some(("3", "3"))),
+        card("Elf", "{2}{G}", "Creature — Elf", "", Some(("3", "3"))),
+    ]);
+    // Two lands out, a 4-drop and an off-colour 3-drop in hand: an untapped land's mana
+    // would go unused.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].hand = vec![0, 1, 2, 4];
+    ai::main_phase(&mut g, 0, false);
+    assert!(
+        g.perms.iter().any(|x| x.card == Some((0, 1))),
+        "Bloodfell Caves played on the quiet turn"
+    );
+    // With a 3-drop to cast, the untapped land comes down and the Bear is cast.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'B');
+    g.players[0].hand = vec![0, 1, 3];
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 3))), "Bear cast");
+    assert!(g.players[0].hand.contains(&1), "the tapped land waits");
+}
+
+#[test]
+fn ai_casts_with_its_mana_creature_instead_of_attacking() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        Card::basic_land("Swamp", 'B'),
+        db.get("Undercover Skrull").unwrap().clone(),
+        card("Bear", "{2}{B}", "Creature — Bear", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'G');
+    lands(&mut g, 0, 1, 'B');
+    put(&mut g, 0, 2);
+    g.players[0].hand = vec![3];
+    // Before combat: the 3-drop needs the Skrull's mana, so it's cast now (the Skrull
+    // would otherwise attack and the Bear stay in hand).
+    ai::main_phase(&mut g, 0, false);
+    assert!(
+        g.perms.iter().any(|x| x.card == Some((0, 3))),
+        "Bear cast before combat with the Skrull's mana"
+    );
+}
+
+#[test]
+fn ai_pays_big_costs_from_big_sources_and_floats_the_rest() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Doc Samson, Super Psychiatrist").unwrap().clone(),
+        card(
+            "Imp",
+            "{1}",
+            "Artifact Creature — Imp",
+            "",
+            Some(("1", "1")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'B');
+    let doc = put(&mut g, 0, 1);
+    // {1}: the Swamp pays, not Doc Samson's five.
+    assert!(g.pay(0, &Mana::generic(1)));
+    assert!(!perm(&g, doc).tapped, "Doc Samson isn't tapped for {{1}}");
+    // {2} needs Doc Samson (X = his power): what's left over floats in the pool.
+    let made = perm(&g, doc).p as u8;
+    assert!(made >= 3);
+    assert!(g.pay(0, &Mana::generic(2)));
+    assert_eq!(g.players[0].pool, made - 2, "surplus mana floats");
+    assert!(g.can_pay(0, &Mana::generic(made as u32 - 2)));
+}
+
+#[test]
+fn ai_uses_thanos_power_up_the_turn_he_enters() {
+    let db = db();
+    let d = prep(&[
+        db.get("Thanos, the Mad Titan").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Plains", 'W'),
+        Card::basic_land("Swamp", 'B'),
+        Card::basic_land("Island", 'U'),
+        Card::basic_land("Forest", 'G'),
+        Card::basic_land("Wastes", 'C'),
+        card("Troll", "{2}{G}", "Creature — Troll", "", Some(("4", "4"))),
+        card(
+            "Golem",
+            "{3}",
+            "Artifact Creature — Golem",
+            "",
+            Some(("4", "4")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    for k in 1..=6 {
+        put(&mut g, 0, k);
+    }
+    g.players[0].command = vec![(0, 0)];
+    // A 3-drop competes for the mana left after Thanos.
+    g.players[0].hand = vec![8];
+    let masque = put(&mut g, 1, 7);
+    let masque2 = put(&mut g, 1, 7);
+    g.log = Some(Vec::new());
+    ai::main_phase(&mut g, 0, false);
+    let thanos = g.perms.iter().find(|x| x.card == Some((0, 0)));
+    if thanos.is_none_or(|t| !t.powered) {
+        dump_log(&g);
+    }
+    assert!(thanos.is_some_and(|t| t.powered), "cast and powered up");
+    assert!(g.idx(masque).is_none() && g.idx(masque2).is_none());
+}
+
+#[test]
+fn ai_does_not_fire_the_parity_wipe_at_a_net_loss() {
+    let db = db();
+    let d = prep(&[
+        db.get("Thanos, the Mad Titan").unwrap().clone(),
+        Card::basic_land("Wastes", 'C'),
+        Card::basic_land("Plains", 'W'),
+        Card::basic_land("Island", 'U'),
+        Card::basic_land("Swamp", 'B'),
+        Card::basic_land("Mountain", 'R'),
+        Card::basic_land("Forest", 'G'),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+        card("Troll", "{2}{G}", "Creature — Troll", "", Some(("4", "4"))),
+    ]);
+    let mut g = Game::new(&[&d, &d, &d, &d], &Rules::default(), Rng::new(7));
+    for p in g.players.iter_mut() {
+        p.hand.clear();
+        p.library = vec![0; 30];
+        p.command.clear();
+    }
+    g.round = 6;
+    for k in 1..=6 {
+        put(&mut g, 0, k);
+    }
+    let thanos = put(&mut g, 0, 0);
+    let i = g.idx(thanos).unwrap();
+    g.perms[i].born = 1;
+    g.perms[i].entered_turn = false;
+    // Odd kills my Troll for one opponent's Rat; even kills nothing (and the power-up still
+    // puts two counters on Thanos).
+    let troll = put(&mut g, 0, 8);
+    let rat = put(&mut g, 1, 7);
+    ai::main_phase(&mut g, 0, false);
+    assert!(g.idx(troll).is_some(), "no wipe of my 4/4 for a 1/1");
+    assert!(g.idx(rat).is_some());
+}
+
+#[test]
+fn ai_does_not_cast_demonic_pact_without_a_way_out() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Demonic Pact").unwrap().clone(),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    g.players[0].hand = vec![1];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(g.players[0].hand, vec![1], "Demonic Pact stays in hand");
+}
+
+#[test]
+fn filter_lands_turn_other_mana_into_any_colour() {
+    let db = db();
+    let d = prep(&[
+        db.get("Surveillance Room").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let room = put(&mut g, 0, 0);
+    assert!(
+        !g.can_pay(0, &Mana::parse("{B}")),
+        "alone it only makes {{C}}"
+    );
+    assert!(g.can_pay(0, &Mana::generic(1)));
+    let mountain = put(&mut g, 0, 1);
+    // The Mountain's {R} pays the filter's {1}: one {B}, and nothing else.
+    assert!(g.can_pay(0, &Mana::parse("{B}")));
+    assert!(!g.can_pay(0, &Mana::parse("{1}{B}")));
+    assert!(g.pay(0, &Mana::parse("{B}")));
+    assert!(perm(&g, room).tapped && perm(&g, mountain).tapped);
+}
+
+#[test]
+fn ai_uses_abilities_that_work_from_the_hand() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        db.get("Sureshot Sower").unwrap().clone(),
+        card(
+            "Drake",
+            "{3}{U}",
+            "Creature — Drake",
+            "Flying",
+            Some(("4", "4")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 4, 'G');
+    let drake = put(&mut g, 1, 2);
+    g.players[0].hand = vec![1];
+    ai::main_phase(&mut g, 0, false);
+    assert!(g.idx(drake).is_none(), "{{3}}{{G}}, discard Sureshot Sower");
+    assert!(g.players[0].graveyard.contains(&1));
 }

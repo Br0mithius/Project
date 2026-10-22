@@ -30,7 +30,7 @@ impl<'a> Game<'a> {
                     .perms
                     .iter()
                     .any(|e| e.is(T_EQUIPMENT) && e.attached == Some(x.id)),
-            entered: !probe && x.born == self.round && x.sick,
+            entered: !probe && x.entered_turn,
             damaged: x.damage > 0,
             dealt: x.dealt_damage,
         }

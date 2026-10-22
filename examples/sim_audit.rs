@@ -44,11 +44,14 @@ fn main() {
     std::fs::write(out.join("decks.txt"), decks).unwrap();
     let n = gauntlet.len();
     for k in 0..games {
+        // Opponents and their seats are drawn at random for each game (seeded).
+        let mut picks: Vec<usize> = (1..=n).collect();
+        Rng::new(0x5EA7_0000 + k).shuffle(&mut picks);
         let (table, ids, header): (Vec<&Prepared>, Vec<usize>, String) = match &me {
             Some(me) => {
                 let mut table: Vec<&Prepared> =
-                    (0..3).map(|i| &gauntlet[(k as usize + i) % n]).collect();
-                let mut ids: Vec<usize> = (0..3).map(|i| 1 + (k as usize + i) % n).collect();
+                    picks[..3].iter().map(|&d| &gauntlet[d - 1]).collect();
+                let mut ids: Vec<usize> = picks[..3].to_vec();
                 let seat = k as usize % 4;
                 table.insert(seat, me);
                 ids.insert(seat, 0);
@@ -61,7 +64,7 @@ fn main() {
                 (table, ids, h)
             }
             None => {
-                let ids: Vec<usize> = (0..4).map(|i| 1 + (k as usize + i) % n).collect();
+                let ids: Vec<usize> = picks[..4].to_vec();
                 let table = ids.iter().map(|&d| &gauntlet[d - 1]).collect();
                 (table, ids, format!("GAME {} | league opponents only", k))
             }
@@ -82,7 +85,11 @@ fn main() {
         }
         text += &format!(
             "RESULT: winner seat {} after {} rounds; life {:?}; poison {:?}\n",
-            winner,
+            if winner == playtest::NO_WINNER {
+                "none (a draw)".to_string()
+            } else {
+                winner.to_string()
+            },
             g.round,
             g.players.iter().map(|p| p.life).collect::<Vec<_>>(),
             g.players.iter().map(|p| p.poison).collect::<Vec<_>>()

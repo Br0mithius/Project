@@ -98,6 +98,14 @@ pub const R_OPP_DIE_EXILE: u32 = 1 << 24;
 /// "Prevent all noncombat damage that would be dealt to other creatures you control"
 /// (Crystal Barricade).
 pub const R_PREVENT_NONCOMBAT: u32 = 1 << 25;
+/// "If you would put one or more counters on a permanent you control, put that many plus one
+/// of each of those kinds of counters on that permanent instead" (Doc Samson).
+pub const R_EXTRA_ANY_COUNTER: u32 = 1 << 26;
+/// "As long as you have an enduring story, if an ability of a Dwarf you control triggers,
+/// that ability triggers an additional time" (Bifur, Melodic Rider).
+pub const R_DWARF_TRIGGERS_TWICE: u32 = 1 << 27;
+/// "You may play lands from the top of your library" (Ka-Zar of the Savage Land).
+pub const R_LANDS_FROM_TOP: u32 = 1 << 28;
 
 /// The rule-changing statics in a face's rules text (card name as "~").
 pub fn rules_of(text: &str) -> u32 {
@@ -126,6 +134,10 @@ pub fn rules_of(text: &str) -> u32 {
             R_OPP_NO_CAST_MY_TURN,
         ),
         ("you may play lands from your graveyard", R_LANDS_FROM_GY),
+        (
+            "you may play lands from the top of your library",
+            R_LANDS_FROM_TOP,
+        ),
         (
             "you may play a land and cast a permanent spell",
             R_LANDS_FROM_GY,
@@ -170,6 +182,14 @@ pub fn rules_of(text: &str) -> u32 {
             R_OPP_CREATURES_TAPPED,
         ),
         ("that many plus one +1/+1 counters", R_EXTRA_COUNTER),
+        (
+            "put that many plus one of each of those kinds of counters",
+            R_EXTRA_ANY_COUNTER,
+        ),
+        (
+            "if an ability of a dwarf you control triggers, that ability triggers an additional time",
+            R_DWARF_TRIGGERS_TWICE,
+        ),
         (
             "aren't put into their owners' graveyards for having 0 loyalty",
             R_WALKERS_STAY,
@@ -423,6 +443,9 @@ pub enum Ev {
     Blocks,
     /// One creature attacking ("whenever a white creature you control attacks"), per attacker.
     EachAttacker,
+    /// Cards put into a graveyard from anywhere - dying, discarded, milled ("whenever one or
+    /// more creature cards are put into your graveyard from anywhere"): about the card.
+    ToGraveyard,
     Other,
 }
 
@@ -490,7 +513,10 @@ pub enum Trig {
     },
     Event(Ev, Filter),
     Activated {
+        /// Mana symbols in the cost ({X} left out).
         mana: u8,
+        /// The mana cost itself, colours included ({X} left out: see `ActCost::x`).
+        cost: Mana,
         tap: bool,
         sac_self: bool,
         sac_other: bool,
@@ -838,6 +864,8 @@ pub enum Cond {
     GainedLifeAtLeast(i32),
     /// You've cast a noncreature spell this turn.
     CastNoncreatureThisTurn,
+    /// The source has been harnessed (an Infinity Stone's "∞" ability).
+    Harnessed,
     /// Can't be checked: happens this often.
     Chance(f32),
     /// The other branch of an "X. If <c>, Y instead" / "X if <c>. Otherwise, Y" pair.
@@ -1004,6 +1032,17 @@ pub struct SimCard {
     pub toxic: u8,
     /// Colours a land (or mana ability) makes.
     pub produces: u8,
+    /// Colours it makes only if it entered this turn or its controller has a basic land
+    /// (Gleaming Bastion).
+    pub cond_produces: u8,
+    /// Its mana is "of any color in your commander's color identity" (Command Tower).
+    pub mana_identity: bool,
+    /// The creature token it creates when that has abilities in quotes or a name ("create
+    /// Zabu, a legendary 2/2 green Cat creature token with \"Landfall — ...\""): those
+    /// abilities, keywords and the legendary type (CR 111.4).
+    pub token: Option<Box<SimCard>>,
+    /// Colour identity (WUBRG bits).
+    pub identity: u8,
     pub mana_amount: u8,
     pub enters_tapped: bool,
     /// "Enters tapped unless you control a planeswalker / two or more other lands".
@@ -1019,6 +1058,9 @@ pub struct SimCard {
     /// Cycling cost and what it finds: "" = draws a card, "land" = a basic land, or a
     /// land type / creature type ("mountain", "halfling").
     pub cycling: Option<(u8, String)>,
+    /// A coloured cycling-like cost: "{1}{B}, Discard this card: Search your library for a
+    /// Plan card" (The Masters of Evil) is played as typecycling for {1}{B}.
+    pub cycling_mana: Option<Mana>,
     pub flashback: Option<Mana>,
     /// "Flashback—{1}{U/R}{U/R}, Discard a card".
     pub flashback_discard: bool,
@@ -1061,6 +1103,10 @@ pub struct SimCard {
     pub hexproof_from: u8,
     /// What it makes of the permanent it's attached to.
     pub attached_sets: Option<AttachedSets>,
+    /// "Enchanted creature loses all abilities" (without new base power and toughness).
+    pub attached_blank: bool,
+    /// "Enchanted creature doesn't untap during its controller's untap step".
+    pub attached_no_untap: bool,
     /// "Equip abilities you activate that target this creature cost {2} less" (Dwarven
     /// Mauler).
     pub equip_target_less: u8,
@@ -1919,6 +1965,9 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 ),
                 Event::OtherEnters(what) => (Ev::OtherEnters, what.as_str()),
                 Event::Landfall => (Ev::Landfall, "a land you control"),
+                Event::Death if trigger_part(t).contains("graveyard from anywhere") => {
+                    (Ev::ToGraveyard, trigger_part(t))
+                }
                 Event::Death => (Ev::Death, trigger_part(t)),
                 Event::GainLife => (Ev::GainLife, "you"),
                 // "Whenever an opponent draws ...", "whenever a player draws ...".
@@ -2005,6 +2054,10 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             {
                 f.yours = Some(true);
             }
+            if kind == Ev::ToGraveyard {
+                // Cards: tokens never go to a graveyard.
+                f.nontoken = true;
+            }
             if kind == Ev::NoncombatDamage {
                 // "an opponent is dealt noncombat damage": the event is about the opponent.
                 f.yours = Some(false);
@@ -2055,6 +2108,7 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         // The parser counts each {X} as 2; the game picks X when it's activated.
         When::Activated(c) => Trig::Activated {
             mana: c.mana.saturating_sub(2 * act_cost(t).x as u32).min(255) as u8,
+            cost: act_mana(t, c.mana.saturating_sub(2 * act_cost(t).x as u32)),
             tap: c.tap,
             sac_self: c.sacrifice && !c.discard,
             sac_other: c.sacrifice_other,
@@ -2110,6 +2164,105 @@ fn types_in(phrase: &str) -> u16 {
     bits
 }
 
+/// The card types a flicker may exile ("exile up to one other target nonland permanent you
+/// control", "exile two target creatures and/or lands you control"): `0xFFFF` for any.
+pub fn blink_types(text: &str) -> u16 {
+    let clause = text
+        .split("exile ")
+        .nth(1)
+        .unwrap_or("")
+        .split([',', '.'])
+        .next()
+        .unwrap_or("");
+    if clause.contains("nonland permanent") {
+        return 0xFFFF & !T_LAND;
+    }
+    let mut t = 0;
+    for (w, bit) in [
+        ("creature", T_CREATURE),
+        ("artifact", T_ARTIFACT),
+        ("enchantment", T_ENCHANTMENT),
+        ("planeswalker", T_PLANESWALKER),
+        ("land", T_LAND),
+    ] {
+        if clause.contains(w) && !clause.contains(&format!("non{}", w)) {
+            t |= bit;
+        }
+    }
+    if t == 0 { 0xFFFF } else { t }
+}
+
+/// What a card's "... : Add ..." lines make (see `mana_lines`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ManaLines {
+    /// Colours (and `COLORLESS`) of the lines that cost only {T}, always usable.
+    pub free: u8,
+    /// Colours of "{T}: Add {W} or {U}. Activate only if this land entered this turn or if
+    /// you control a basic land".
+    pub cond: u8,
+    /// A mana ability costs mana besides {T} (a filter: "{1}, {T}: Add one mana of any
+    /// color").
+    pub costed: bool,
+    /// "Add one mana of any color in your commander's color identity" (Command Tower).
+    pub identity: bool,
+}
+
+/// Reads a card's mana abilities line by line (lowercase text, reminders dropped).
+pub fn mana_lines(own_text: &str) -> ManaLines {
+    let mut m = ManaLines::default();
+    for line in own_text.lines() {
+        let Some((cost, effect)) = line.split_once(": ") else {
+            continue;
+        };
+        if !effect.starts_with("add ") {
+            continue;
+        }
+        let what = effect.split(". ").next().unwrap_or(effect);
+        let mut colours = 0u8;
+        if what.contains("mana of any") || what.contains("any combination of colors") {
+            colours = 0b11111;
+        }
+        for sym in crate::card::symbols_in(what) {
+            match crate::card::COLORS
+                .iter()
+                .position(|c| sym.len() == 1 && sym.starts_with(*c))
+            {
+                Some(i) => colours |= 1 << i,
+                None if sym == "C" => colours |= COLORLESS,
+                None => {}
+            }
+        }
+        if what.contains("commander's color identity") {
+            m.identity = true;
+        }
+        let paid = crate::card::symbols_in(cost)
+            .iter()
+            .any(|s| !matches!(s.as_str(), "T" | "Q"));
+        if paid {
+            m.costed = true;
+        } else if line.contains("entered this turn or if you control a basic land") {
+            m.cond |= colours & 0b11111;
+        } else if crate::card::symbols_in(cost).iter().any(|s| s == "T") {
+            m.free |= colours;
+        }
+    }
+    m
+}
+
+/// The mana part of an activated ability's cost ("{2}{w}, {t}, sacrifice ~: ..."), its
+/// colours included (CR 602.2b) and {X} left out (chosen when it's activated). `n` is the
+/// parser's count of its mana symbols: if the two readings disagree, `n` generic.
+pub fn act_mana(text: &str, n: u32) -> Mana {
+    let cost = text.split(':').next().unwrap_or("");
+    let syms: String = crate::card::symbols_in(cost)
+        .into_iter()
+        .filter(|s| !matches!(s.as_str(), "T" | "Q" | "X" | "E"))
+        .map(|s| format!("{{{}}}", s))
+        .collect();
+    let m = Mana::parse(&syms);
+    if m.total() == n { m } else { Mana::generic(n) }
+}
+
 /// The parts of an activated ability's cost beyond mana, {T}, sacrifices, discards and life.
 fn act_cost(text: &str) -> ActCost {
     let cost = text.split(": ").next().unwrap_or("");
@@ -2158,7 +2311,11 @@ fn act_cost(text: &str) -> ActCost {
             }
         } else if p.starts_with("exile ~ from your graveyard") {
             a.from_graveyard = true;
-        } else if p.starts_with("exile ~ from your hand") {
+        } else if p.starts_with("exile ~ from your hand")
+            || p == "discard ~"
+            || p == "discard this card"
+        {
+            // ("{1}{B}, Discard this card: ..." works from the hand only.)
             a.from_hand = true;
         } else if p == "exile ~" {
             a.exile_self = true;
@@ -3049,6 +3206,70 @@ fn text_kw(text: &str) -> u32 {
 
 /// The abilities of the emblems loyalty abilities give ("[-10]: You get an emblem with
 /// "Creatures you control get +2/+2."").
+/// The creature token a card creates, when it has abilities in quotes or is legendary
+/// ("create a 1/1 black Rat creature token with \"This creature can't block.\"", "create
+/// Zabu, a legendary 2/2 green Cat creature token with \"Landfall — ...\""), compiled as a
+/// card of its own (its name, types, keywords and abilities).
+fn token_card(card: &Card) -> Option<SimCard> {
+    let text = crate::card::strip_reminder(&card.oracle_text);
+    let text = text.split("// Back face:").next().unwrap_or("");
+    for line in text.lines() {
+        let Some(c) = line.find("reate ") else {
+            continue;
+        };
+        let rest = &line[c + 6..];
+        let Some(t) = rest.find(" token") else {
+            continue;
+        };
+        let head = &rest[..t];
+        if !head.contains("creature") {
+            continue;
+        }
+        // "Zabu, a legendary 2/2 green Cat creature".
+        let name = head
+            .split_once(", a legendary ")
+            .map(|(n, _)| n.trim().to_string())
+            .filter(|n| !n.is_empty() && n.split(' ').count() <= 4);
+        // The quoted abilities after "token(s) with".
+        let quoted: Vec<&str> = rest[t..]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|q| !q.trim().is_empty())
+            .collect();
+        if quoted.is_empty() && name.is_none() {
+            continue;
+        }
+        // Its creature types: the capitalised words after the name ("Cat", "Rat").
+        let after_name = head.split_once(", a legendary ").map_or(head, |(_, r)| r);
+        let subtypes: String = after_name
+            .split_whitespace()
+            .filter(|w| w.chars().next().is_some_and(|c| c.is_uppercase()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        // "This token" / "this creature" is the token itself ("~" once read).
+        let own = name.clone().unwrap_or_else(|| "Qqtoken".into());
+        let text = quoted
+            .join("\n")
+            .replace("This token", &own)
+            .replace("this token", &own)
+            .replace("This creature", &own)
+            .replace("this creature", &own);
+        let fake = Card {
+            name: own,
+            type_line: format!(
+                "{}Token Creature — {}",
+                if name.is_some() { "Legendary " } else { "" },
+                subtypes
+            ),
+            oracle_text: text,
+            ..Default::default()
+        };
+        return Some(compile(&fake));
+    }
+    None
+}
+
 fn emblems_of(card: &Card, quoted: &[(u16, String)]) -> Vec<(u16, SimAbility)> {
     let mut out = Vec::new();
     for (k, text) in quoted {
@@ -3176,6 +3397,10 @@ pub fn compile(card: &Card) -> SimCard {
             colors |= 1 << i;
         }
     }
+    // A hybrid symbol is both its colours ({R/W}: red and white - CR 202.2d).
+    for &h in &cost.hybrid {
+        colors |= h;
+    }
     let kw_words = &parsed.keywords;
     let mut kw = keyword_bits(kw_words) | text_kw(&own_text);
     // A line of its own: "This creature can't block." (`own_text` has the card as "~"; a
@@ -3209,15 +3434,28 @@ pub fn compile(card: &Card) -> SimCard {
         .filter(|k| k.starts_with("protection"))
         .fold(0, |m, k| m | color_bits(k));
     let mut abilities = compile_abilities(parsed);
-    // "Enchanted creature loses all abilities and is a 1/1 Skeleton": it can still attack
-    // and block (`AttachedSets`), it isn't locked.
+    // "Enchanted creature loses all abilities and is a 1/1 Skeleton", "... loses all
+    // abilities and doesn't untap": it can still attack and block (`AttachedSets`,
+    // `attached_blank`, `attached_no_untap`), it isn't locked.
     for a in abilities.iter_mut().filter(|a| {
         a.trig == Trig::Static
             && (a.text.starts_with("enchanted") || a.text.starts_with("equipped"))
-            && a.text.contains("base power and toughness")
+            && (a.text.contains("base power and toughness")
+                || (a.text.contains("loses all abilities")
+                    || a.text.contains("doesn't untap")
+                    || a.text.contains("can't become untapped"))
+                    && !a.text.contains("can't attack")
+                    && !a.text.contains("can't block"))
     }) {
         a.effects.retain(|e| !matches!(e, Effect::Lock { .. }));
     }
+    // A line about what it's attached to ("enchanted creature loses all abilities").
+    let attached_line = |s: &str| {
+        own_text.lines().map(str::trim).any(|l| {
+            (l.starts_with("enchanted creature") || l.starts_with("equipped creature"))
+                && l.contains(s)
+        })
+    };
     // The front face's mana (a back face's "{T}: Add {R} or {G}" token isn't this card's).
     let front_card = Card {
         oracle_text: card
@@ -3273,9 +3511,26 @@ pub fn compile(card: &Card) -> SimCard {
     {
         produces = 0b11111;
     }
+    // A mana ability that costs more than {T} ("{1}, {T}: Add one mana of any color" - a
+    // filter, Baxter Building's "{4}, {T}: Add four mana") or works only sometimes
+    // ("activate only if this land entered this turn or if you control a basic land") isn't
+    // a free source of its colours (CR 605, 106.1): only the plain "{T}: Add ..." lines are.
+    let lines = mana_lines(&own_text);
+    if (land_mana || mana_ability) && (lines.costed || lines.cond != 0) && lines.free != 0 {
+        produces = lines.free;
+    }
     let mana_amount = abilities
         .iter()
-        .filter(|a| matches!(a.trig, Trig::Activated { tap: true, .. }))
+        .filter(|a| {
+            matches!(
+                a.trig,
+                Trig::Activated {
+                    tap: true,
+                    mana: 0,
+                    ..
+                }
+            )
+        })
         .flat_map(|a| a.effects.iter())
         .find_map(|e| match e {
             Effect::AddMana(n) => Some(n.n.clamp(1, 4) as u8),
@@ -3452,8 +3707,21 @@ pub fn compile(card: &Card) -> SimCard {
         protection,
         toxic: kw_num("toxic").unwrap_or(0),
         produces,
+        cond_produces: if land_mana || mana_ability {
+            lines.cond
+        } else {
+            0
+        },
+        mana_identity: lines.identity,
+        token: token_card(card).map(Box::new),
+        identity: card.identity().0 & 0b11111,
         mana_amount,
-        enters_tapped: front_text.contains("enters tapped") && !front_text.contains("unless"),
+        // A land's "this land enters tapped"; another permanent's own line "~ enters tapped."
+        enters_tapped: if types & T_LAND != 0 {
+            front_text.contains("enters tapped") && !front_text.contains("unless")
+        } else {
+            own_line("~ enters tapped.") || own_line("this creature enters tapped.")
+        },
         enters_tapped_unless: enters_tapped_unless(&own_text),
         no_untap: own_text.contains("~ doesn't untap during your untap step"),
         behold_untapped: front_text.contains("you may behold a jace. if you don't"),
@@ -3482,6 +3750,7 @@ pub fn compile(card: &Card) -> SimCard {
             };
             (digits.parse().unwrap_or(2), find)
         }),
+        cycling_mana: None,
         flashback: keyword_cost(kw_words, "flashback"),
         flashback_discard: kw_words
             .iter()
@@ -3529,6 +3798,12 @@ pub fn compile(card: &Card) -> SimCard {
         } else {
             None
         },
+        attached_blank: types & (T_AURA | T_EQUIPMENT) != 0
+            && attached_line("loses all abilities")
+            && !attached_line("base power and toughness"),
+        attached_no_untap: types & (T_AURA | T_EQUIPMENT) != 0
+            && (attached_line("doesn't untap during its controller's untap step")
+                || attached_line("can't become untapped")),
         power_up_less,
         extra_cost: extra_cost_of(&abilities),
         mana_ability,
@@ -3568,6 +3843,63 @@ pub fn compile(card: &Card) -> SimCard {
         .iter()
         .find_map(|a| a.text.split("you can't cast ~ unless ").nth(1))
         .map(cond_from);
+    // "∞ — At the beginning of your end step, ...": only once the Stone is harnessed.
+    let infinity: Vec<&str> = own_text
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("∞"))
+        .map(|l| l.trim_start_matches([' ', '—', '-']).trim())
+        .collect();
+    for a in sc.abilities.iter_mut() {
+        let head: String = a
+            .text
+            .trim_start_matches(['∞', ' ', '—', '-'])
+            .chars()
+            .take(40)
+            .collect();
+        if !head.is_empty() && infinity.iter().any(|l| l.starts_with(&head)) {
+            a.cond = Cond::Harnessed;
+        }
+    }
+    // "{1}{B}, Discard this card: Search your library for a Plan card, reveal it, put it into
+    // your hand" - from the hand, like typecycling (The Masters of Evil).
+    if sc.cycling.is_none() {
+        let hand_tutor = sc.abilities.iter().find_map(|a| match &a.trig {
+            Trig::Activated {
+                mana, cost, extra, ..
+            } if extra.from_hand
+                && !a.text.contains("exile ~")
+                && a.effects == [Effect::Tutor]
+                && a.text.contains("put it into your hand") =>
+            {
+                let what = a
+                    .text
+                    .split("search your library for a")
+                    .nth(1)?
+                    .trim_start_matches('n')
+                    .trim_start()
+                    .split(" card")
+                    .next()?
+                    .to_string();
+                Some((*mana, what, *cost))
+            }
+            _ => None,
+        });
+        if let Some((n, what, cost)) = hand_tutor {
+            sc.cycling = Some((n, what));
+            sc.cycling_mana = Some(cost);
+        }
+    }
+    // Cost lines ("this spell costs {3} less to cast if it targets a tapped creature", "as an
+    // additional cost to cast ~, ..."), read above, are how it's cast, not what it does.
+    if sc.types & T_PLANESWALKER == 0 {
+        sc.abilities.retain(|a| {
+            !(a.trig == Trig::Spell
+                && a.effects.is_empty()
+                && (a.text.starts_with("~ costs {")
+                    || a.text.starts_with("this spell costs {")
+                    || a.text.starts_with("as an additional cost to cast ~")))
+        });
+    }
     sc.spell_targets = spell_targets(&sc.abilities, sc.types, sc.harmful_aura);
     sc.spend_only = spend_only_of(&sc.abilities);
     if sc.spend_only.is_some() {

@@ -177,12 +177,23 @@ impl<'a> Game<'a> {
                 .map(|i| f(&self.perms[i]))
                 .or_else(|| self.src_perm(ctx).map(|x| f(&x)))
         };
-        // What X is: "where X is ...", "equal to ...", or a count "for each ...".
+        // What X is: "where X is ...", "equal to ...", or a count "for each ...". A sentence
+        // read as an ability of its own ("draw X cards, where X is the number of cards
+        // discarded this way. If you have an enduring story, ~ deals X damage") has its X
+        // defined in the sentence it was split from.
         let measure = t
             .split("where x is ")
             .nth(1)
             .or_else(|| t.split(" x is ").nth(1))
-            .or_else(|| t.split(" equal to ").nth(1));
+            .or_else(|| t.split(" equal to ").nth(1))
+            .or_else(|| {
+                let head = trigger_part(t);
+                ctx.card?
+                    .abilities
+                    .iter()
+                    .filter(|a| a.text != t && has_x(t) && trigger_part(&a.text) == head)
+                    .find_map(|a| a.text.split("where x is ").nth(1))
+            });
         if let Some(m) = measure {
             let m = m.trim_start_matches("the ");
             let n = if m.starts_with("number of ") {
@@ -334,6 +345,15 @@ impl<'a> Game<'a> {
         }
         if p.contains("discarded this way") {
             return Some(self.last_discarded);
+        }
+        // "A +1/+1 counter for each of that spell's colors" (Ramos): colourless is none.
+        if p.contains("that spell's color") {
+            return Some(
+                self.ext
+                    .cast_probe
+                    .as_ref()
+                    .map_or(0, |x| (x.colors & 0b11111).count_ones() as i32),
+            );
         }
         if p.contains("destroyed this way") {
             return Some(self.last_destroyed);
@@ -639,10 +659,37 @@ impl<'a> Game<'a> {
                 me
             }
         });
+        // "Tap target creature defending player controls": the player the attacker (the one
+        // the trigger is about) attacks.
+        let defending = if text.contains("defending player") && !self.ext.attack_def.is_empty() {
+            let ad = &self.ext.attack_def;
+            ctx.subject
+                .or(src_id)
+                .and_then(|s| ad.iter().find(|a| a.0 == s))
+                .or_else(|| ad.iter().all(|a| a.1 == ad[0].1).then(|| &ad[0]))
+                .map(|a| a.1 as usize)
+        } else {
+            None
+        };
+        // A spell cast for less because it targets a tapped (attacking) creature targets one.
+        let must = if src_id.is_none() && harmful && !t.mass {
+            self.ext.must_target
+        } else {
+            0
+        };
         let mut out = Vec::new();
         for (i, x) in self.perms.iter().enumerate() {
             if t.kind == Kind::Artifact && text.contains("target equipment") && !x.is(T_EQUIPMENT) {
                 continue;
+            }
+            if defending.is_some_and(|d| x.ctrl as usize != d) {
+                continue;
+            }
+            match must {
+                1 if !x.tapped => continue,
+                2 if !x.attacking => continue,
+                3 if !x.attacking || x.is_token() => continue,
+                _ => {}
             }
             if other_than && Some(x.id) == attached {
                 continue;
@@ -912,10 +959,9 @@ impl<'a> Game<'a> {
             let owner = self.perms[i].ctrl as usize;
             if owner != ctx.ctrl {
                 if !self.pay_ward(ctx.ctrl, i) {
-                    self.note(|| {
-                        "    (the target's ward isn't paid: that part is countered)".into()
-                    });
-                    continue; // countered by ward
+                    self.note(|| "    (the target's ward isn't paid: it's countered)".into());
+                    self.ext.ward_countered = true;
+                    return Vec::new();
                 }
                 if harmful && ai::protect(self, owner, id) {
                     // The owner answered with protection; check the target is still legal.
@@ -1001,6 +1047,28 @@ impl<'a> Game<'a> {
             return;
         };
         let src_idx = pend.source.and_then(|id| self.idx(id));
+        // "Put a +1/+1 counter on him. When you do, he deals damage ..." (Red Hulk): no counter
+        // can go on a creature that has left the battlefield, so nothing happens.
+        if src_idx.is_none()
+            && pend.source.is_some()
+            && ab.text.contains(". when you do,")
+            && [
+                "counter on him",
+                "counter on her",
+                "counter on ~",
+                "counter on it",
+            ]
+            .iter()
+            .any(|w| {
+                ab.text
+                    .split(". when you do,")
+                    .next()
+                    .unwrap_or("")
+                    .contains(w)
+            })
+        {
+            return;
+        }
         // The creature the event was about, as it is or as it last was (if it died).
         let subject = pend.subject.and_then(|id| {
             self.idx(id)
@@ -1036,6 +1104,8 @@ impl<'a> Game<'a> {
         let about = pend.subject.and_then(|id| {
             if id == u32::MAX {
                 self.ext.cast_probe.as_ref().map(|x| x.ctrl as usize)
+            } else if let Some(o) = subject_player(id) {
+                Some(o)
             } else {
                 subject.as_ref().map(|x| x.ctrl as usize)
             }
@@ -1126,6 +1196,11 @@ impl<'a> Game<'a> {
                     None => false,
                 };
         } else if ab.optional && !ai::wants_optional(self, &ctx, ab) {
+            // ("You may discard your hand. ... X is the number of cards discarded this way":
+            // none.)
+            if ab.text.contains("discard your hand") {
+                self.last_discarded = 0;
+            }
             return;
         }
         self.last_targets.clear();
@@ -1144,7 +1219,45 @@ impl<'a> Game<'a> {
             } else {
                 0
             };
-            let modes = ai::choose_modes(self, &ctx, ab, used);
+            let mut modes = ai::choose_modes(self, &ctx, ab, used);
+            // "You may pay {1} up to three times. When you do, choose up to that many"
+            // (Hawkeye's Trick Arrows): {1} per mode, the ones worth it; none unpaid.
+            if let Some(rest) = ab.text.split("you may pay {").nth(1) {
+                if ab.text.contains("up to three times") || ab.text.contains("up to two times") {
+                    let n: u32 = rest
+                        .split('}')
+                        .next()
+                        .and_then(|d| d.parse().ok())
+                        .unwrap_or(1);
+                    let most = if ab.text.contains("up to three times") {
+                        3
+                    } else {
+                        2
+                    };
+                    let mut ranked: Vec<(f32, usize)> = groups
+                        .iter()
+                        .enumerate()
+                        .map(|(m, r)| {
+                            let (t, cr) = ab.mode_text(m);
+                            let v: f32 = ab.effects[r.clone()]
+                                .iter()
+                                .map(|e| ai::effect_now(self, me, e, t, ctx.src, cr))
+                                .sum();
+                            (v, m)
+                        })
+                        .filter(|(v, _)| *v >= 0.5 * n as f32)
+                        .collect();
+                    ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                    modes.clear();
+                    for (_, m) in ranked.into_iter().take(most) {
+                        if !self.pay(me, &Mana::generic(n)) {
+                            break;
+                        }
+                        modes.push(m);
+                    }
+                    modes.sort_unstable();
+                }
+            }
             if self.log.is_some() {
                 let texts: Vec<String> = modes
                     .iter()
@@ -1208,8 +1321,14 @@ impl<'a> Game<'a> {
             .as_ref()
             .filter(|g| g.top)
             .and_then(|_| self.players[me].library.last().map(|&c| (me as u8, c)));
+        self.ext.ward_countered = false;
         for (k, text, card_restr) in picks {
             if !self.players[me].alive {
+                return;
+            }
+            // A target's ward wasn't paid: the whole spell or ability is countered (CR
+            // 702.21a).
+            if std::mem::take(&mut self.ext.ward_countered) {
                 return;
             }
             // "You gain 1 life if this is the first time this ability has resolved this
@@ -1417,9 +1536,92 @@ impl<'a> Game<'a> {
             let a = self.active as u8;
             let k = self.pending.iter().position(|p| p.ctrl == a).unwrap_or(0);
             let pend = self.pending.remove(k);
+            // Bifur: the Dwarf's ability triggered an additional time.
+            if self.triggers_twice(&pend) {
+                self.resolve_pending(pend.clone());
+                self.sba();
+            }
             self.resolve_pending(pend);
             self.sba();
         }
+    }
+
+    /// The ability a pending trigger or activation would resolve.
+    pub(crate) fn pending_ability(&self, pend: &Pending) -> Option<&'a SimAbility> {
+        if pend.card.1 == NO_CARD {
+            let perm = pend.snapshot.as_ref().or_else(|| {
+                pend.source
+                    .and_then(|id| self.idx(id))
+                    .map(|i| &self.perms[i])
+            })?;
+            return self.abilities_of(perm).get(pend.ability as usize);
+        }
+        let c = self.card(pend.card);
+        if pend.ability >= EMBLEM_BASE {
+            return c
+                .emblems
+                .get((pend.ability - EMBLEM_BASE) as usize)
+                .map(|e| &e.1);
+        }
+        let transformed = pend
+            .source
+            .and_then(|id| self.idx(id))
+            .map(|i| &self.perms[i])
+            .or(pend.snapshot.as_ref())
+            .is_some_and(|x| x.transformed && x.card == Some(pend.card));
+        match (&c.back, pend.back || transformed) {
+            (Some(b), true) => b.abilities.get(pend.ability as usize),
+            _ => c.abilities.get(pend.ability as usize),
+        }
+    }
+
+    /// "As long as you have an enduring story, if an ability of a Dwarf you control triggers,
+    /// that ability triggers an additional time" (Bifur, Melodic Rider): is `pend` such a
+    /// triggered ability?
+    fn triggers_twice(&self, pend: &Pending) -> bool {
+        let p = pend.ctrl as usize;
+        if self.rules[p % 8] & R_DWARF_TRIGGERS_TWICE == 0
+            || !self.players[p].enduring_story
+            || pend.card.1 == NO_CARD
+            || pend.ability >= EMBLEM_BASE
+            || pend.from_graveyard
+        {
+            return false;
+        }
+        // The source as it is, or as it last was (a "dies" trigger looks back).
+        let Some(src) = pend
+            .source
+            .and_then(|id| self.idx(id))
+            .map(|i| &self.perms[i])
+            .or(pend.snapshot.as_ref())
+            .or_else(|| {
+                pend.source
+                    .and_then(|id| self.dead.iter().rev().find(|x| x.id == id))
+            })
+        else {
+            return false;
+        };
+        if src.ctrl as usize != p || !src.subtypes.iter().any(|s| s == "dwarf") {
+            return false;
+        }
+        let c = self.card(pend.card);
+        let abilities = match (&c.back, pend.back || src.transformed) {
+            (Some(b), true) => &b.abilities,
+            _ => &c.abilities,
+        };
+        abilities.get(pend.ability as usize).is_some_and(|ab| {
+            matches!(
+                ab.trig,
+                Trig::Enters
+                    | Trig::Dies
+                    | Trig::Attacks
+                    | Trig::CombatDamage
+                    | Trig::Phase { .. }
+                    | Trig::Event(..)
+                    | Trig::Chapter(_)
+                    | Trig::Reflexive
+            )
+        })
     }
 
     pub(crate) fn add_counters(&mut self, i: usize, n: i32) {
@@ -1429,8 +1631,8 @@ impl<'a> Game<'a> {
             self.last_countered.push(id);
         }
         let n = if self.doubles(p, "counter") { n * 2 } else { n };
-        // Yoshimaru: "that many plus one".
-        let n = n + i32::from(n > 0 && self.rules[p % 8] & R_EXTRA_COUNTER != 0);
+        // Yoshimaru, Doc Samson: "that many plus one".
+        let n = n + self.extra_counters(p, n);
         self.perms[i].counters += n as i16;
         if n > 0 {
             self.perms[i].countered_turn = true;
@@ -1439,8 +1641,24 @@ impl<'a> Game<'a> {
         self.emit_about(Ev::Counters, p, &snap);
     }
 
+    /// Counters added on top of `n` +1/+1 counters put on a permanent player `p` controls
+    /// ("that many plus one": Yoshimaru for +1/+1 counters, Doc Samson for any kind).
+    pub(crate) fn extra_counters(&self, p: usize, n: i32) -> i32 {
+        if n <= 0 {
+            return 0;
+        }
+        let r = self.rules[p % 8];
+        i32::from(r & R_EXTRA_COUNTER != 0) + i32::from(r & R_EXTRA_ANY_COUNTER != 0)
+    }
+
     /// Plan, lore and other counters; fires "when the Nth counter is put" abilities.
     pub fn add_other_counters(&mut self, i: usize, n: i16) {
+        // Doc Samson: "that many plus one of each of those kinds of counters".
+        let n = if n > 0 && self.rules[self.perms[i].ctrl as usize % 8] & R_EXTRA_ANY_COUNTER != 0 {
+            n + 1
+        } else {
+            n
+        };
         let before = self.perms[i].other_counters;
         self.perms[i].other_counters += n;
         let after = self.perms[i].other_counters;
@@ -1887,6 +2105,7 @@ impl<'a> Game<'a> {
     pub fn put_discarded(&mut self, p: usize, c: u16) {
         self.players[p].graveyard.push(c);
         self.emit(Ev::Discard, p, None);
+        self.to_graveyard(p, &[c]);
         let card = &self.players[p].cards[c as usize];
         for (k, a) in card.abilities.iter().enumerate() {
             if a.text.starts_with("when you discard ~") {
@@ -1914,12 +2133,15 @@ impl<'a> Game<'a> {
             let (tag, left) = (self.cause_tag(), self.players[p].library.len());
             self.note(|| format!("  P{} mills {} (library {}){}", p, n, left, tag));
         }
+        let mut milled = Vec::new();
         for _ in 0..n {
             if let Some(c) = self.players[p].library.pop() {
                 self.players[p].graveyard.push(c);
                 self.players[p].px.milled_turn += 1;
+                milled.push(c);
             }
         }
+        self.to_graveyard(p, &milled);
     }
 
     /// Fetches a land from the library (one adding a colour the hand needs).
@@ -1991,12 +2213,13 @@ impl<'a> Game<'a> {
         };
         self.last_excess = n - lethal.max(0) as i32;
         x.hurt_by = ctx.src.unwrap_or(0);
-        self.damage_perm(i, n as i16, deathtouch);
+        let dealt = self.damage_perm(i, n as i16, deathtouch);
         if let Some(s) = self.src_idx(ctx) {
             self.perms[s].dealt_damage = true;
         }
-        if src.is_some_and(|s| s.has(LIFELINK) && s.is_creature()) {
-            self.gain_life(ctx.ctrl, n);
+        // (Prevented damage isn't dealt: no life for lifelink.)
+        if dealt > 0 && src.is_some_and(|s| s.has(LIFELINK) && s.is_creature()) {
+            self.gain_life(ctx.ctrl, dealt as i32);
         }
     }
 
@@ -2812,9 +3035,27 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Loot => {
+                let connive = text.contains(" connive");
+                self.ext.connive_nonland = false;
+                // "Then up to one target creature you control connives" with no creature to
+                // choose: nothing connives (CR 702.157).
+                if connive {
+                    let clause = text
+                        .split(". ")
+                        .find(|s| s.contains(" connive"))
+                        .unwrap_or(text);
+                    if clause.contains("target ")
+                        && !self
+                            .perms
+                            .iter()
+                            .any(|x| x.ctrl as usize == me && x.is_creature())
+                    {
+                        return;
+                    }
+                }
                 // "If a creature you control would connive, instead you draw a card, then that
                 // creature connives" (Leader).
-                if text.contains("connive")
+                if connive
                     && self.controls_static(me, None, |t| {
                         t.contains("would connive, instead you draw a card")
                     })
@@ -2824,6 +3065,15 @@ impl<'a> Game<'a> {
                 self.draw(me, 1);
                 let before = self.players[me].graveyard.len();
                 self.discard(me);
+                // Connive: the +1/+1 counter only for a nonland card discarded.
+                if connive {
+                    let pl = &self.players[me];
+                    self.ext.connive_nonland = pl
+                        .graveyard
+                        .get(before)
+                        .or(pl.exile.last().filter(|_| pl.graveyard.len() == before))
+                        .is_some_and(|&c| !pl.cards[c as usize].is(T_LAND));
+                }
                 // Recruit: a nonland card discarded makes a 1/1 Human Soldier.
                 if text.contains("recruit") {
                     if let Some(&c) = self.players[me].graveyard.get(before) {
@@ -2886,6 +3136,14 @@ impl<'a> Game<'a> {
                     }
                 } else {
                     self.discard(me);
+                }
+            }
+            // "Whenever a player loses life, that player mills that many cards" (The Master of
+            // Lake-town): the player who lost it, the life lost.
+            Effect::Mill { amount } if text.contains("that player mills") => {
+                let n = self.x_value(ctx, amount);
+                if let Some(o) = ctx.about.filter(|&o| self.players[o].alive) {
+                    self.mill(o, n);
                 }
             }
             Effect::Mill { amount } => {
@@ -2966,10 +3224,26 @@ impl<'a> Game<'a> {
                 }
                 let mut made = Vec::new();
                 let artifact = text.contains("artifact creature token");
+                // Abilities in quotes, a name ("Zabu, a legendary ... token"): the card's token.
+                let quoted = ctx
+                    .card_ref
+                    .filter(|_| text.contains('"') || text.contains(", a legendary "))
+                    .filter(|&r| self.card(r).token.is_some());
                 for _ in 0..n.min(20) {
                     let i = self.make_token(me, *power, *toughness, kw, subs.clone());
                     if artifact {
                         self.perms[i].types |= T_ARTIFACT;
+                    }
+                    if let Some(r) = quoted {
+                        let t = self
+                            .card(r)
+                            .token
+                            .as_deref()
+                            .map_or((0, 0), |t| (t.kw, t.types));
+                        let x = &mut self.perms[i];
+                        x.tok_src = Some(r);
+                        x.kw |= t.0;
+                        x.types |= t.1 & T_LEGENDARY;
                     }
                     made.push(self.perms[i].id);
                     if text.contains("tapped and attacking")
@@ -3082,6 +3356,11 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+            // Connive's counter: only if a nonland card was discarded (see `Effect::Loot`).
+            Effect::PlusCounters { .. }
+                if text.contains(" connive")
+                    && !text.contains("+1/+1 counter")
+                    && !self.ext.connive_nonland => {}
             Effect::PlusCounters { amount, to } => {
                 let n = self.x_value(ctx, amount);
                 if to.mass {
@@ -3296,6 +3575,40 @@ impl<'a> Game<'a> {
                 // Mana abilities of permanents are mana sources; this is one-off mana (rituals,
                 // triggered "add" effects).
                 let k = self.x_value(ctx, n).max(1);
+                // "Spend this mana only to cast Dragon spells" (Desolation of Smaug): only such
+                // a spell, cast now - the mana is gone when the phase ends (CR 106.4, 106.6).
+                if let Some(rule) = text
+                    .split("spend this mana only to cast ")
+                    .nth(1)
+                    .filter(|_| !text.starts_with("{t}"))
+                {
+                    let what = rule
+                        .split(" spell")
+                        .next()
+                        .unwrap_or("")
+                        .trim_start_matches("a ")
+                        .trim_start_matches("an ")
+                        .trim();
+                    let fits = |c: &SimCard| match what {
+                        "creature" => c.is(T_CREATURE),
+                        "artifact" => c.is(T_ARTIFACT),
+                        "instant or sorcery" => c.is(T_INSTANT | T_SORCERY),
+                        w => c.has_subtype(w.trim_end_matches('s')),
+                    };
+                    let before = self.players[me].pool;
+                    self.players[me].pool = before.saturating_add(k.clamp(0, 255) as u8);
+                    let pl = &self.players[me];
+                    let pick = (0..pl.hand.len())
+                        .filter(|&h| fits(&pl.cards[pl.hand[h] as usize]))
+                        .filter(|&h| self.can_cast(me, super::Src::Hand(h), Default::default()))
+                        .max_by_key(|&h| pl.cards[pl.hand[h] as usize].mv);
+                    if let Some(h) = pick {
+                        self.cast(me, super::Src::Hand(h), Default::default());
+                    }
+                    // What's left of it can't pay for anything else.
+                    self.players[me].pool = self.players[me].pool.min(before);
+                    return;
+                }
                 self.players[me].pool = self.players[me].pool.saturating_add(k as u8);
             }
             // "Draw a card, then discard a card. If you discard a land card this way, put it
@@ -3829,6 +4142,9 @@ impl<'a> Game<'a> {
                     if x.is(T_PLANESWALKER) && x.loyalty > 0 {
                         x.loyalty += 1;
                     }
+                    if x.hone > 0 {
+                        x.hone += 1;
+                    }
                     if x.other_counters > 0 && !x.is(T_SAGA) {
                         self.add_other_counters(i, 1);
                     }
@@ -3859,7 +4175,7 @@ impl<'a> Game<'a> {
                         // "Exile (another / up to one) target creature you control": not
                         // itself.
                         let src = ctx.src.filter(|_| text.contains("target"));
-                        ai::blink_choice(self, me, src)
+                        ai::blink_choice(self, me, src, blink_types(text))
                             .filter(|&i| !done.contains(&self.perms[i].id))
                     };
                     let Some(i) = target else { return };
@@ -4296,6 +4612,15 @@ impl<'a> Game<'a> {
                         "stun" => self.perms[i].stun += amt as u8,
                         k if KEYWORDS.iter().any(|(w, _)| *w == k) => {
                             self.perms[i].kw |= keyword_bits(&[k.to_string()]);
+                        }
+                        "hone" if amt > 0 => {
+                            let before = self.perms[i].other_counters;
+                            self.add_other_counters(i, amt as i16);
+                            if let Some(i) = self.idx(id) {
+                                let added = self.perms[i].other_counters - before;
+                                self.perms[i].hone += added.max(0);
+                            }
+                            self.recalc();
                         }
                         _ if amt > 0 => self.add_other_counters(i, amt as i16),
                         _ => {}
@@ -5161,10 +5486,11 @@ impl<'a> Game<'a> {
                     if o == me {
                         self.last_discarded = hand.len() as i32;
                     }
-                    for c in hand {
+                    for &c in &hand {
                         self.players[o].graveyard.push(c);
                         self.emit(Ev::Discard, o, None);
                     }
+                    self.to_graveyard(o, &hand);
                 }
             }
             // "You lose life equal to the number of cards drawn this way".
@@ -5224,6 +5550,8 @@ impl<'a> Game<'a> {
                 };
                 if label == "exiles a graveyard" {
                     let gy = std::mem::take(&mut self.players[o].graveyard);
+                    let n = gy.len();
+                    self.note(|| format!("  P{}'s graveyard is exiled ({} cards)", o, n));
                     self.players[o].exile.extend(gy);
                 } else {
                     let n = if text.contains("up to two") { 2 } else { 1 };
