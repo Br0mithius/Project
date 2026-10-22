@@ -94,7 +94,7 @@ pub fn effect_value(e: &Effect) -> f32 {
                 }
         }
         Effect::GainLife(n) => n.value() * 0.12,
-        Effect::Drain { amount, each } => amount.value() * if *each { 1.0 } else { 0.4 },
+        Effect::Drain { amount, each } => amount.value() * if *each { 1.0 } else { 0.5 },
         Effect::AddMana(n) => n.value() * 0.5,
         Effect::FetchLand { battlefield } => {
             if *battlefield {
@@ -146,6 +146,8 @@ fn times(a: &Ability) -> f32 {
         Some(When::Attacks) => 1.5,
         Some(When::CombatDamage) => 1.2,
         Some(When::EachTurn) => 2.2,
+        // "Whenever ~ becomes tapped": a creature taps to attack most turns (Hawkeye).
+        Some(When::Event(_)) if a.text.contains("whenever ~ becomes tapped") => 1.0 + 1.5 * 0.7,
         Some(When::Event(_)) => 1.0 + 1.5 * a.rate(),
         // `rate` already falls with the ability's mana cost.
         Some(When::Activated(c)) => {
@@ -243,6 +245,11 @@ pub fn ability_value(a: &Ability) -> f32 {
             1
         };
         let mut best: Vec<f32> = per.iter().copied().filter(|v| *v > 0.0).collect();
+        // A mode the parser leaves to the simulator's rules: "target creature can't block
+        // this turn" on an attack trigger takes a key blocker (a flyer) out of the fight.
+        if a.text.contains("target creature can't block this turn") {
+            best.push(0.8);
+        }
         best.sort_by(|x, y| y.partial_cmp(x).unwrap());
         let picked: f32 = if several > 1 {
             best.iter().take(several).map(|v| v * 0.75).sum()
