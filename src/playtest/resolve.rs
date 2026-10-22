@@ -829,6 +829,8 @@ impl<'a> Game<'a> {
         if !self.ward_payable(me, x) {
             return false;
         }
+        // (Described now: paying may sacrifice permanents and move `i`.)
+        let desc = self.log.is_some().then(|| self.perm_desc(&self.perms[i]));
         if w.discard_or_mana {
             if !self.pay(me, &mana) {
                 self.discard(me);
@@ -852,8 +854,7 @@ impl<'a> Game<'a> {
         if w.poison > 0 {
             self.players[me].poison = self.players[me].poison.saturating_add(w.poison);
         }
-        if self.log.is_some() {
-            let d = self.perm_desc(&self.perms[i]);
+        if let Some(d) = desc {
             self.note(|| format!("  P{} pays the ward of {}", me, d));
         }
         true
