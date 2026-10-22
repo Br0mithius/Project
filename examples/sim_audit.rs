@@ -3,7 +3,8 @@
 //! `cargo run --release --example sim_audit -- <data dir> "<commander>" <colours> <out dir> [games] [--gauntlet]`
 //! (or a deck file such as `decks/thanos.txt` in place of the commander, with "-" for colours).
 //! With `--gauntlet` the tables are the league opponents only (the commander and colours are
-//! then ignored; pass "-" for them).
+//! then ignored; pass "-" for them). The league is the one the app uses for that data folder
+//! (its rules.json, or the upcoming session); `--session N` picks another session.
 use msh_deckbuilder::analysis::{self, Rng};
 use msh_deckbuilder::card::ColorSet;
 use msh_deckbuilder::db::*;
@@ -12,15 +13,23 @@ use msh_deckbuilder::playtest::{self, Prepared};
 fn main() {
     let all: Vec<String> = std::env::args().collect();
     let gauntlet_only = all.iter().any(|a| a == "--gauntlet");
-    let args: Vec<&String> = all.iter().filter(|a| !a.starts_with("--")).collect();
+    let session = msh_deckbuilder::league::session_arg(&all);
+    // Positional arguments: everything but the flags (and `--session`'s number).
+    let args: Vec<&String> = all
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| !a.starts_with("--") && !(*i > 0 && all[i - 1] == "--session"))
+        .map(|(_, a)| a)
+        .collect();
     let dir = std::path::PathBuf::from(args[1]);
     let out = std::path::PathBuf::from(args[4]);
     let games: u64 = args.get(5).and_then(|g| g.parse().ok()).unwrap_or(20);
     let mut db = CardDb::load(&dir.join("cards.json")).unwrap();
     db.attach_ratings(&dir);
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
-    let mut rules = Rules::default();
-    rules.data_dir = Some(dir.clone());
+    // The same league the app plays: rules.json or the upcoming session, with the data
+    // folder's imported pool, pins and cached season.
+    let rules = msh_deckbuilder::league::app_rules(&dir, session);
     let me = (!gauntlet_only).then(|| {
         // A deck file plays that exact list (pass "-" for the colours).
         if args[2].ends_with(".txt") {
@@ -35,7 +44,10 @@ fn main() {
     });
     let gauntlet = playtest::gauntlet(&db, &rules, 2026);
     std::fs::create_dir_all(&out).unwrap();
-    let mut decks = String::new();
+    let mut decks = format!(
+        "{}\n",
+        msh_deckbuilder::opponents::league_header(&db, &rules, 2026)
+    );
     for (k, d) in me.iter().chain(gauntlet.iter()).enumerate() {
         let k = if me.is_some() { k } else { k + 1 };
         decks += &format!(
