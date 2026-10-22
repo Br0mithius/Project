@@ -437,7 +437,12 @@ impl<'a> Game<'a> {
                 continue;
             };
             let x = self.perms[ai_].clone();
-            let blockers: Vec<usize> = at.blockers.iter().filter_map(|b| self.idx(*b)).collect();
+            let mut blockers: Vec<usize> =
+                at.blockers.iter().filter_map(|b| self.idx(*b)).collect();
+            if blockers.len() > 1 {
+                // The attacking player orders the blockers for damage (CR 510.1c).
+                blockers = ai::damage_order(self, ai_, &blockers);
+            }
             let power = self.combat_power(&x);
             if strikes(&x) && power > 0 {
                 if !at.blocked {

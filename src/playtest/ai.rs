@@ -2249,7 +2249,7 @@ pub fn main_phase(g: &mut Game, p: usize, post: bool) {
         }
         let opts: Vec<(f32, u32, Act)> = options(g, p, post)
             .into_iter()
-            .filter(|o| !failed.contains(&format!("{:?}", o.2)))
+            .filter(|o| failed.is_empty() || !failed.contains(&format!("{:?}", o.2)))
             .collect();
         if opts.is_empty() {
             return;
@@ -2588,11 +2588,34 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
             return;
         }
     }
-    // Instant removal on the biggest attacker coming at us.
-    if let Some(&(id, pw)) = incoming.iter().max_by_key(|x| x.1) {
-        if pw >= 4 || pw as i32 * 3 >= life {
-            if let Some(h) = hand_find(g, d, is_instant_removal) {
-                cast_instant(g, d, h, Some(id), "removal on the biggest attacker");
+    // Instant removal on the attacker whose death helps most: its value plus how much
+    // better our blocks get without it (a lethal swing counts for a lot).
+    if let Some(h) = hand_find(g, d, is_instant_removal) {
+        let mine: Vec<Attack> = attacks
+            .iter()
+            .filter(|at| g.def_player(at.def) == Some(d))
+            .cloned()
+            .collect();
+        let base = plan_blocks(g, d, &mine, false).map_or(0.0, |x| x.0);
+        let mut best: Option<(f32, u32)> = None;
+        for at in &mine {
+            let Some(i) = g.idx(at.attacker) else {
+                continue;
+            };
+            let rest: Vec<Attack> = mine
+                .iter()
+                .filter(|x| x.attacker != at.attacker)
+                .cloned()
+                .collect();
+            let without = plan_blocks(g, d, &rest, false).map_or(0.0, |x| x.0);
+            let gain = without - base + perm_value(g, i);
+            if best.is_none_or(|b| gain > b.0) {
+                best = Some((gain, at.attacker));
+            }
+        }
+        if let Some((gain, id)) = best {
+            if gain >= 4.5 {
+                cast_instant(g, d, h, Some(id), "removal on the attacker that hurts most");
             }
         }
     }
@@ -2778,12 +2801,570 @@ pub(crate) fn fight(a: &Perm, b: &Perm) -> (bool, bool) {
     (attacker_dies, blocker_dies)
 }
 
+/// Blocker `b` survives attacker `a` even after a small pump (a +2 trick), or can't be hurt.
+fn safe_margin(a: &Perm, b: &Perm) -> bool {
+    b.t - b.damage - a.p >= 2 || b.has(FIRST_STRIKE | DEATHTOUCH | INDESTRUCTIBLE | NO_DAMAGE)
+}
+
 fn dmg_of(g: &Game, x: &Perm) -> i32 {
     g.combat_power(x).max(0) as i32 * if x.has(DOUBLE_STRIKE) { 2 } else { 1 }
 }
 
-/// How `d` blocks: kill-and-survive first, good trades, double blocks on big threats,
-/// chump blocks only to stay alive. Careful about tricks when the attacker has mana up.
+/// What happens when attacker `a` is blocked by `bl` (no tricks): whether the attacker dies,
+/// which blockers die (the attacker assigns its damage to kill the most valuable blockers it
+/// can, first strike and double strike included), and the damage that tramples over.
+/// Unblocked, all of its damage goes through.
+pub(crate) struct Clash {
+    pub att_dies: bool,
+    pub dead: Vec<usize>,
+    pub through: i32,
+}
+
+pub(crate) fn clash(g: &Game, a: usize, bl: &[usize]) -> Clash {
+    let at = &g.perms[a];
+    let total = dmg_of(g, at);
+    if bl.is_empty() {
+        return Clash {
+            att_dies: false,
+            dead: Vec::new(),
+            through: total,
+        };
+    }
+    let first = |x: &Perm| x.has(FIRST_STRIKE | DOUBLE_STRIKE);
+    let immune = |x: &Perm| x.has(INDESTRUCTIBLE | NO_DAMAGE);
+    let pw = |x: &Perm| g.combat_power(x).max(0) as i32;
+    let a_hp = (at.t - at.damage).max(1) as i32;
+    let need = |x: &Perm| {
+        if at.has(DEATHTOUCH) {
+            1
+        } else {
+            (x.t - x.damage).max(1) as i32
+        }
+    };
+    // Blockers that strike first may kill the attacker before it deals any damage.
+    if !first(at) && !immune(at) {
+        let (sum, dt) = bl
+            .iter()
+            .map(|&b| &g.perms[b])
+            .filter(|x| first(x) && pw(x) > 0)
+            .fold((0, false), |(s, d), x| (s + pw(x), d || x.has(DEATHTOUCH)));
+        if sum >= a_hp || dt {
+            return Clash {
+                att_dies: true,
+                dead: Vec::new(),
+                through: 0,
+            };
+        }
+    }
+    // The attacker kills the most valuable blockers it can.
+    let sorted: Vec<usize>;
+    let order: &[usize] = if bl.len() > 1 {
+        let mut v = bl.to_vec();
+        v.sort_by(|&x, &y| perm_value(g, y).partial_cmp(&perm_value(g, x)).unwrap());
+        sorted = v;
+        &sorted
+    } else {
+        bl
+    };
+    let mut budget = total;
+    let mut first_hit = if first(at) { pw(at) } else { 0 };
+    let mut dead = Vec::new();
+    let mut silenced = Vec::new();
+    for &b in order {
+        let x = &g.perms[b];
+        let n = need(x);
+        if n <= budget {
+            budget -= n;
+            if !immune(x) {
+                dead.push(b);
+                // Killed in the first-strike step: it never hits back.
+                if n <= first_hit && !first(x) {
+                    first_hit -= n;
+                    silenced.push(b);
+                }
+            }
+        }
+    }
+    let through = if at.has(TRAMPLE) {
+        (total - bl.iter().map(|&b| need(&g.perms[b])).sum::<i32>()).max(0)
+    } else {
+        0
+    };
+    let (sum, dt) = bl
+        .iter()
+        .filter(|b| !silenced.contains(b))
+        .map(|&b| &g.perms[b])
+        .fold((0, false), |(s, d), x| {
+            let p = pw(x) * if x.has(DOUBLE_STRIKE) { 2 } else { 1 };
+            (s + p, d || (x.has(DEATHTOUCH) && p > 0))
+        });
+    Clash {
+        att_dies: !immune(at) && (sum >= a_hp || dt),
+        dead,
+        through,
+    }
+}
+
+/// The order in which attacker `a` deals damage to its blockers `bl`: the most valuable
+/// blockers it can kill first (as `clash` predicts), then the rest.
+pub fn damage_order(g: &Game, a: usize, bl: &[usize]) -> Vec<usize> {
+    let mut order = clash(g, a, bl).dead;
+    let mut rest: Vec<usize> = bl.iter().copied().filter(|b| !order.contains(b)).collect();
+    rest.sort_by(|&x, &y| perm_value(g, y).partial_cmp(&perm_value(g, x)).unwrap());
+    order.extend(rest);
+    order
+}
+
+/// Damage that may come at `d` from the opponents who act between the active player `active`
+/// and `d`'s next turn (most of each one's power: they may well pick us).
+fn danger_before_turn(g: &Game, d: usize, active: usize) -> i32 {
+    let n = g.players.len();
+    let mut sum = 0;
+    let mut o = (active + 1) % n;
+    while o != d && o != active {
+        if g.players[o].alive {
+            sum += g
+                .perms
+                .iter()
+                .filter(|x| x.ctrl as usize == o && x.is_creature() && !x.has(DEFENDER))
+                .map(|x| dmg_of(g, x))
+                .sum::<i32>();
+        }
+        o = (o + 1) % n;
+    }
+    sum * 4 / 5
+}
+
+/// The cost of going from `life` down to `after`: life is cheap while it's plentiful and
+/// dear once the next round's damage could finish us (`danger`).
+fn life_cost(life: i32, after: i32, danger: i32) -> f32 {
+    if after <= 0 {
+        return 1000.0 + (life - after) as f32;
+    }
+    let t = danger.max(3);
+    // Points lost within (lo, hi].
+    let lost = |lo: i32, hi: i32| (hi.min(life) - lo.max(after)).max(0) as f32;
+    1.5 * lost(0, t) + 0.5 * lost(t, 2 * t) + 0.15 * lost(2 * t, i32::MAX)
+}
+
+/// A block assignment being planned: (blocker, attacker) perm indices, and the reasons.
+#[derive(Clone, Default)]
+struct BlockPlan {
+    pairs: Vec<(usize, usize)>,
+    why: Vec<String>,
+}
+
+impl BlockPlan {
+    fn used(&self, b: usize) -> bool {
+        self.pairs.iter().any(|p| p.0 == b)
+    }
+    fn blocked(&self, a: usize) -> bool {
+        self.pairs.iter().any(|p| p.1 == a)
+    }
+}
+
+/// One or two blockers for one attacker.
+#[derive(Clone, Copy)]
+struct Pick {
+    b: [usize; 2],
+    n: usize,
+}
+
+impl Pick {
+    fn list(&self) -> &[usize] {
+        &self.b[..self.n]
+    }
+}
+
+/// Everything the blocking AI needs about one combat.
+struct Blocking<'g, 'a> {
+    g: &'g Game<'a>,
+    d: usize,
+    /// Attackers coming at `d`, most valuable first.
+    atts: Vec<usize>,
+    blockers: Vec<usize>,
+    /// Which blocker can block which attacker (`atts` x `blockers`, row by row).
+    able: Vec<bool>,
+    /// The attacker has mana and cards: maybe a trick.
+    wary: bool,
+    danger: i32,
+    log: bool,
+}
+
+impl Blocking<'_, '_> {
+    fn name(&self, i: usize) -> String {
+        self.g.perm_name(&self.g.perms[i])
+    }
+
+    fn can(&self, plan: &BlockPlan, a: usize) -> Vec<usize> {
+        let nb = self.blockers.len();
+        let row = self.atts.iter().position(|&x| x == a).unwrap_or(0) * nb;
+        self.blockers
+            .iter()
+            .enumerate()
+            .filter(|&(j, &b)| self.able[row + j] && !plan.used(b))
+            .map(|(_, &b)| b)
+            .collect()
+    }
+
+    /// What attacker `a` blocked by `bl` does: (creature value won minus lost, damage to
+    /// us, poison, lethal commander damage).
+    fn term(&self, a: usize, bl: &[usize]) -> (f32, i32, i32, bool) {
+        let g = self.g;
+        let x = &g.perms[a];
+        let c = if x.has(MENACE) && bl.len() == 1 {
+            clash(g, a, &[])
+        } else {
+            clash(g, a, bl)
+        };
+        let mut value = if c.att_dies { perm_value(g, a) } else { 0.0 };
+        value -= c.dead.iter().map(|&b| perm_value(g, b)).sum::<f32>();
+        if c.through == 0 {
+            return (value, 0, 0, false);
+        }
+        let pl = &g.players[self.d];
+        let poison = x.card.map_or(0, |r| g.card(r).toxic as i32);
+        let cmd = x.commander > 0
+            && pl.cmd_damage[x.ctrl as usize][x.commander as usize % 3] + c.through >= 21;
+        (value, c.through, poison, cmd)
+    }
+
+    fn terms(&self, plan: &BlockPlan) -> Vec<(f32, i32, i32, bool)> {
+        let mut bl = Vec::new();
+        self.atts
+            .iter()
+            .map(|&a| {
+                bl.clear();
+                bl.extend(plan.pairs.iter().filter(|p| p.1 == a).map(|p| p.0));
+                self.term(a, &bl)
+            })
+            .collect()
+    }
+
+    /// (creature value won minus lost, our life afterwards, lethal) from the attackers' terms.
+    fn total(&self, terms: &[(f32, i32, i32, bool)]) -> (f32, i32, bool) {
+        self.total_with(terms, usize::MAX, (0.0, 0, 0, false))
+    }
+
+    /// `total` with attacker `k`'s term replaced by `tk`.
+    fn total_with(
+        &self,
+        terms: &[(f32, i32, i32, bool)],
+        k: usize,
+        tk: (f32, i32, i32, bool),
+    ) -> (f32, i32, bool) {
+        let pl = &self.g.players[self.d];
+        let (mut value, mut dmg, mut poison, mut cmd) = (0.0, 0, 0, false);
+        for (j, t) in terms.iter().enumerate() {
+            let t = if j == k { &tk } else { t };
+            value += t.0;
+            dmg += t.1;
+            poison += t.2;
+            cmd |= t.3;
+        }
+        let after = pl.life - dmg;
+        (
+            value,
+            after,
+            after <= 0 || pl.poison as i32 + poison >= 10 || cmd,
+        )
+    }
+
+    fn outcome(&self, plan: &BlockPlan) -> (f32, i32, bool) {
+        self.total(&self.terms(plan))
+    }
+
+    fn score_of(&self, terms: &[(f32, i32, i32, bool)]) -> f32 {
+        self.score_with(terms, usize::MAX, (0.0, 0, 0, false))
+    }
+
+    /// `score_of` with attacker `k`'s term replaced by `tk`.
+    fn score_with(
+        &self,
+        terms: &[(f32, i32, i32, bool)],
+        k: usize,
+        tk: (f32, i32, i32, bool),
+    ) -> f32 {
+        let (value, after, lethal) = self.total_with(terms, k, tk);
+        let life = self.g.players[self.d].life;
+        value - life_cost(life, after, self.danger) - if lethal { 1000.0 } else { 0.0 }
+    }
+
+    /// Value blocks on `atts` (most valuable first): kill and survive, good trades, double
+    /// blocks on big threats, free blocks.
+    fn value_pass(&self, plan: &mut BlockPlan, atts: &[usize]) {
+        let g = self.g;
+        let wary = self.wary;
+        for &a in atts {
+            let at = &g.perms[a];
+            let menace = at.has(MENACE);
+            let can = self.can(plan, a);
+            // 1. Kill it and live (with a margin if they might have a trick).
+            let safe = can
+                .iter()
+                .copied()
+                .filter(|&b| {
+                    let (ad, bd) = fight(at, &g.perms[b]);
+                    let margin_ok = !wary
+                        || g.perms[b].t - at.p >= 2
+                        || g.perms[b].has(FIRST_STRIKE | DEATHTOUCH);
+                    ad && !bd && margin_ok
+                })
+                .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
+            if let (Some(b), false) = (safe, menace) {
+                if self.log {
+                    plan.why.push(format!(
+                        "{} blocked by {}: kills it and survives",
+                        self.name(a),
+                        self.name(b)
+                    ));
+                }
+                plan.pairs.push((b, a));
+                continue;
+            }
+            // 2. A trade that favours us.
+            let av = perm_value(g, a);
+            let trade = can
+                .iter()
+                .copied()
+                .filter(|&b| {
+                    let (ad, _) = fight(at, &g.perms[b]);
+                    ad && perm_value(g, b) + 0.5 <= av
+                })
+                .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
+            if let (Some(b), false) = (trade, menace) {
+                if self.log {
+                    plan.why.push(format!(
+                        "{} (v{:.1}) blocked by {} (v{:.1}): a trade in our favour",
+                        self.name(a),
+                        av,
+                        self.name(b),
+                        perm_value(g, b)
+                    ));
+                }
+                plan.pairs.push((b, a));
+                continue;
+            }
+            // 3. Double block a big threat (also answers menace).
+            if av >= 5.0 && can.len() >= 2 {
+                let mut pair: Option<(usize, usize, f32)> = None;
+                for (x, &b1) in can.iter().enumerate() {
+                    for &b2 in &can[x + 1..] {
+                        // Can they kill it at all (before the full simulation)?
+                        let (x1, x2) = (&g.perms[b1], &g.perms[b2]);
+                        let hit = |x: &Perm| {
+                            g.combat_power(x).max(0) as i32
+                                * if x.has(DOUBLE_STRIKE) { 2 } else { 1 }
+                        };
+                        if hit(x1) + hit(x2) < (at.t - at.damage) as i32
+                            && !x1.has(DEATHTOUCH)
+                            && !x2.has(DEATHTOUCH)
+                        {
+                            continue;
+                        }
+                        let c = clash(g, a, &[b1, b2]);
+                        if !c.att_dies {
+                            continue;
+                        }
+                        // The attacker kills what it can (the most valuable first); the
+                        // block is worth the attacker plus the damage it stops, now and on
+                        // its next swing.
+                        let loss: f32 = c.dead.iter().map(|&b| perm_value(g, b)).sum();
+                        let credit = dmg_of(g, at) as f32 * 1.2;
+                        if loss < av + credit && pair.is_none_or(|p| loss < p.2) {
+                            pair = Some((b1, b2, loss));
+                        }
+                    }
+                }
+                if let Some((b1, b2, loss)) = pair {
+                    if self.log {
+                        plan.why.push(format!(
+                            "{} (v{:.1}) double-blocked by {} and {} (risking v{:.1})",
+                            self.name(a),
+                            av,
+                            self.name(b1),
+                            self.name(b2),
+                            loss
+                        ));
+                    }
+                    plan.pairs.push((b1, a));
+                    plan.pairs.push((b2, a));
+                    continue;
+                }
+            }
+            // 4. A free block: the blocker survives the fight (with the trick margin), so
+            // the damage stays off us at no cost.
+            let free = can
+                .iter()
+                .copied()
+                .filter(|&b| !menace && dmg_of(g, at) > 0 && !fight(at, &g.perms[b]).1)
+                .filter(|&b| !wary || safe_margin(at, &g.perms[b]))
+                .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
+            if let Some(b) = free {
+                if self.log {
+                    plan.why.push(format!(
+                        "{} ({} power) blocked by {}: a free block (the blocker survives)",
+                        self.name(a),
+                        dmg_of(g, at),
+                        self.name(b)
+                    ));
+                }
+                plan.pairs.push((b, a));
+                continue;
+            }
+            if self.log {
+                plan.why.push(format!(
+                    "{} (v{:.1}, {} power) not blocked: {} possible blocker(s), no safe kill, good trade or free block{}",
+                    self.name(a),
+                    av,
+                    dmg_of(g, at),
+                    can.len(),
+                    if menace { " (menace)" } else { "" }
+                ));
+            }
+        }
+    }
+
+    /// Blocks for one unblocked attacker that change the outcome: each single blocker, or
+    /// the two cheapest against menace.
+    fn options(&self, plan: &BlockPlan, a: usize) -> Vec<Pick> {
+        let mut can = self.can(plan, a);
+        if !self.g.perms[a].has(MENACE) {
+            return can.into_iter().map(|b| Pick { b: [b, b], n: 1 }).collect();
+        }
+        can.sort_by(|&x, &y| {
+            perm_value(self.g, x)
+                .partial_cmp(&perm_value(self.g, y))
+                .unwrap()
+        });
+        if can.len() >= 2 {
+            vec![Pick {
+                b: [can[0], can[1]],
+                n: 2,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Chump blocks and trades that keep us alive and out of danger: for each unblocked
+    /// attacker (most damage first), the block that improves the plan's score the most.
+    fn protect_pass(&self, plan: &mut BlockPlan) -> Vec<(f32, i32, i32, bool)> {
+        let g = self.g;
+        let mut open: Vec<usize> = self
+            .atts
+            .iter()
+            .copied()
+            .filter(|&a| !plan.blocked(a))
+            .collect();
+        open.sort_by_key(|&a| -dmg_of(g, &g.perms[a]));
+        let mut terms = self.terms(plan);
+        let mut cur = self.score_of(&terms);
+        for a in open {
+            let k = self.atts.iter().position(|&x| x == a).unwrap();
+            let mut best: Option<(f32, Pick, (f32, i32, i32, bool))> = None;
+            for bl in self.options(plan, a) {
+                let t = self.term(a, bl.list());
+                let s = self.score_with(&terms, k, t);
+                if best.as_ref().is_none_or(|x| s > x.0) {
+                    best = Some((s, bl, t));
+                }
+            }
+            match best {
+                Some((s, bl, t)) if s > cur => {
+                    if self.log {
+                        let (_, before, lethal) = self.outcome(plan);
+                        let names: Vec<String> = bl.list().iter().map(|&b| self.name(b)).collect();
+                        plan.why.push(format!(
+                            "{} ({} power) blocked by {}: {} (life {} -> {}, danger {})",
+                            self.name(a),
+                            dmg_of(g, &g.perms[a]),
+                            names.join(" and "),
+                            if lethal {
+                                "the unblocked damage would be lethal"
+                            } else {
+                                "keeps our life out of danger"
+                            },
+                            g.players[self.d].life,
+                            before,
+                            self.danger
+                        ));
+                    }
+                    for &b in bl.list() {
+                        plan.pairs.push((b, a));
+                    }
+                    terms[k] = t;
+                    cur = s;
+                }
+                _ => {
+                    if self.log && self.outcome(plan).2 {
+                        plan.why.push(format!(
+                            "{} would be lethal but can't be blocked usefully",
+                            self.name(a)
+                        ));
+                    }
+                }
+            }
+        }
+        terms
+    }
+
+    /// Survival first: block the biggest hitters (with the blocker that loses least) until
+    /// the rest can't put us in danger, then value blocks with what's left.
+    fn survival_plan(&self) -> (BlockPlan, Vec<(f32, i32, i32, bool)>) {
+        let g = self.g;
+        let life = g.players[self.d].life;
+        let mut plan = BlockPlan::default();
+        let mut by_dmg = self.atts.clone();
+        by_dmg.sort_by_key(|&a| -dmg_of(g, &g.perms[a]));
+        let mut rem: i32 = by_dmg.iter().map(|&a| dmg_of(g, &g.perms[a])).sum();
+        let mut rest = Vec::new();
+        for a in by_dmg {
+            let dmg = dmg_of(g, &g.perms[a]);
+            if life - rem > self.danger.max(3) {
+                rest.push(a);
+                continue;
+            }
+            let mut best: Option<(f32, Pick, i32)> = None;
+            for bl in self.options(&plan, a) {
+                let c = clash(g, a, bl.list());
+                let net = if c.att_dies { perm_value(g, a) } else { 0.0 }
+                    - c.dead.iter().map(|&b| perm_value(g, b)).sum::<f32>();
+                if best.as_ref().is_none_or(|x| net > x.0) {
+                    best = Some((net, bl, c.through));
+                }
+            }
+            match best {
+                Some((_, bl, through)) => {
+                    if self.log {
+                        let names: Vec<String> = bl.list().iter().map(|&b| self.name(b)).collect();
+                        plan.why.push(format!(
+                            "survival first: {} ({} power) blocked by {}",
+                            self.name(a),
+                            dmg,
+                            names.join(" and ")
+                        ));
+                    }
+                    for &b in bl.list() {
+                        plan.pairs.push((b, a));
+                    }
+                    rem -= dmg - through;
+                }
+                None => rest.push(a),
+            }
+        }
+        rest.sort_by(|&x, &y| perm_value(g, y).partial_cmp(&perm_value(g, x)).unwrap());
+        self.value_pass(&mut plan, &rest);
+        let terms = self.protect_pass(&mut plan);
+        (plan, terms)
+    }
+}
+
+/// How `d` blocks: kill-and-survive first, good trades, double blocks on big threats, free
+/// blocks; then chump blocks and trades when the damage would kill us or leave us in reach
+/// of the next round's attacks (or, when that isn't enough, survival first: the biggest
+/// hitters get blocked before value blocks). Careful about tricks when the attacker has
+/// mana up.
 pub fn declare_blocks(g: &Game, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)> {
     declare_blocks_why(g, d, attacks, None)
 }
@@ -2793,203 +3374,230 @@ pub fn declare_blocks_why(
     g: &Game,
     d: usize,
     attacks: &[Attack],
-    mut why: Option<&mut Vec<String>>,
+    why: Option<&mut Vec<String>>,
 ) -> Vec<(u32, u32)> {
-    let name = |i: usize| g.perm_name(&g.perms[i]);
-    let mut used: Vec<u32> = Vec::new();
-    let mut out = Vec::new();
-    let mut atts: Vec<usize> = attacks.iter().filter_map(|at| g.idx(at.attacker)).collect();
-    atts.sort_by(|&x, &y| perm_value(g, y).partial_cmp(&perm_value(g, x)).unwrap());
-    let blockers: Vec<usize> = (0..g.perms.len())
-        .filter(|&i| g.perms[i].ctrl as usize == d && g.perms[i].is_creature())
-        .collect();
-    let attacker_ctrl = atts.first().map(|&i| g.perms[i].ctrl as usize).unwrap_or(0);
-    let wary = g.mana_available(attacker_ctrl) >= 2 && !g.players[attacker_ctrl].hand.is_empty();
-    let mut unblocked: Vec<usize> = Vec::new();
-    for &a in &atts {
-        let at = &g.perms[a];
-        let menace = at.has(MENACE);
-        let can: Vec<usize> = blockers
-            .iter()
-            .copied()
-            .filter(|&b| !used.contains(&g.perms[b].id) && g.can_block(b, a))
-            .collect();
-        // 1. Kill it and live (with a margin if they might have a trick).
-        let safe = can
-            .iter()
-            .copied()
-            .filter(|&b| {
-                let (ad, bd) = fight(at, &g.perms[b]);
-                let margin_ok =
-                    !wary || g.perms[b].t - at.p >= 2 || g.perms[b].has(FIRST_STRIKE | DEATHTOUCH);
-                ad && !bd && margin_ok
-            })
-            .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
-        if let (Some(b), false) = (safe, menace) {
-            if let Some(w) = why.as_deref_mut() {
-                w.push(format!(
-                    "{} blocked by {}: kills it and survives",
-                    name(a),
-                    name(b)
-                ));
-            }
-            used.push(g.perms[b].id);
-            out.push((g.perms[b].id, at.id));
-            continue;
-        }
-        // 2. A trade that favours us.
-        let av = perm_value(g, a);
-        let trade = can
-            .iter()
-            .copied()
-            .filter(|&b| {
-                let (ad, _) = fight(at, &g.perms[b]);
-                ad && perm_value(g, b) + 0.5 <= av
-            })
-            .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
-        if let (Some(b), false) = (trade, menace) {
-            if let Some(w) = why.as_deref_mut() {
-                w.push(format!(
-                    "{} (v{:.1}) blocked by {} (v{:.1}): a trade in our favour",
-                    name(a),
-                    av,
-                    name(b),
-                    perm_value(g, b)
-                ));
-            }
-            used.push(g.perms[b].id);
-            out.push((g.perms[b].id, at.id));
-            continue;
-        }
-        // 3. Double block a big threat (also answers menace).
-        if av >= 5.0 && can.len() >= 2 {
-            let mut pair: Option<(usize, usize, f32)> = None;
-            for (x, &b1) in can.iter().enumerate() {
-                for &b2 in &can[x + 1..] {
-                    let (p1, p2) = (&g.perms[b1], &g.perms[b2]);
-                    let kills =
-                        p1.p + p2.p >= at.t - at.damage || p1.has(DEATHTOUCH) || p2.has(DEATHTOUCH);
-                    if !kills || at.has(INDESTRUCTIBLE) {
-                        continue;
-                    }
-                    // The attacker kills at most one (the cheaper we choose to lose).
-                    let loss = perm_value(g, b1).min(perm_value(g, b2));
-                    if loss < av && pair.is_none_or(|p| loss < p.2) {
-                        pair = Some((b1, b2, loss));
-                    }
-                }
-            }
-            if let Some((b1, b2, loss)) = pair {
-                if let Some(w) = why.as_deref_mut() {
-                    w.push(format!(
-                        "{} (v{:.1}) double-blocked by {} and {} (risking v{:.1})",
-                        name(a),
-                        av,
-                        name(b1),
-                        name(b2),
-                        loss
-                    ));
-                }
-                used.push(g.perms[b1].id);
-                used.push(g.perms[b2].id);
-                out.push((g.perms[b1].id, at.id));
-                out.push((g.perms[b2].id, at.id));
-                continue;
-            }
-        }
-        if let Some(w) = why.as_deref_mut() {
-            w.push(format!(
-                "{} (v{:.1}, {} power) not blocked: {} possible blocker(s), no safe kill or good trade{}",
-                name(a),
-                av,
-                dmg_of(g, at),
-                can.len(),
-                if menace { " (menace)" } else { "" }
-            ));
-        }
-        unblocked.push(a);
-    }
-    // 4. Chump only if the unblocked damage would kill us (life, commander damage, poison).
-    let pl = &g.players[d];
-    let lethal = |un: &[usize]| {
-        let dmg: i32 = un.iter().map(|&a| dmg_of(g, &g.perms[a])).sum();
-        let poison: i32 = un
-            .iter()
-            .filter_map(|&a| g.perms[a].card.map(|r| g.card(r).toxic as i32))
-            .sum();
-        let cmd = un.iter().any(|&a| {
-            let x = &g.perms[a];
-            x.commander > 0
-                && pl.cmd_damage[x.ctrl as usize][x.commander as usize % 3] + dmg_of(g, x) >= 21
-        });
-        dmg >= pl.life || pl.poison as i32 + poison >= 10 || cmd
+    let Some((_, mut plan)) = plan_blocks(g, d, attacks, why.is_some()) else {
+        return Vec::new();
     };
-    unblocked.sort_by_key(|&a| -dmg_of(g, &g.perms[a]));
-    let mut k = 0;
-    while lethal(&unblocked[k..]) && k < unblocked.len() {
-        let a = unblocked[k];
-        let at = &g.perms[a];
-        let chump = blockers
-            .iter()
-            .copied()
-            .filter(|&b| !used.contains(&g.perms[b].id) && g.can_block(b, a))
-            .min_by(|&x, &y| perm_value(g, x).partial_cmp(&perm_value(g, y)).unwrap());
-        match chump {
-            Some(b) if !at.has(MENACE) => {
-                if let Some(w) = why.as_deref_mut() {
-                    w.push(format!(
-                        "{} chump-blocked by {}: the unblocked damage would be lethal",
-                        name(a),
-                        name(b)
-                    ));
-                }
-                used.push(g.perms[b].id);
-                out.push((g.perms[b].id, at.id));
-            }
-            _ => {
-                if let Some(w) = why.as_deref_mut() {
-                    w.push(format!(
-                        "{} would be lethal but can't be chump-blocked",
-                        name(a)
-                    ));
-                }
-            }
-        }
-        k += 1;
+    if let Some(w) = why {
+        w.append(&mut plan.why);
     }
-    out
+    plan.pairs
+        .iter()
+        .map(|&(b, a)| (g.perms[b].id, g.perms[a].id))
+        .collect()
 }
 
-/// Expected result of attacking opponent `o` with attacker `a`: positive is good for us.
-fn attack_gain(g: &Game, me: usize, a: usize, o: usize, taken: &[u32]) -> f32 {
-    let at = &g.perms[a];
-    let av = perm_value(g, a);
-    let w = weight(g, me, o);
+/// The blocking AI's plan against `attacks` (None when nothing attacks), with its score.
+fn plan_blocks(g: &Game, d: usize, attacks: &[Attack], log: bool) -> Option<(f32, BlockPlan)> {
+    let mut atts: Vec<usize> = attacks.iter().filter_map(|at| g.idx(at.attacker)).collect();
+    if atts.is_empty() {
+        return None;
+    }
+    atts.sort_by(|&x, &y| perm_value(g, y).partial_cmp(&perm_value(g, x)).unwrap());
     let blockers: Vec<usize> = (0..g.perms.len())
-        .filter(|&b| {
-            g.perms[b].ctrl as usize == o && !taken.contains(&g.perms[b].id) && g.can_block(b, a)
+        .filter(|&i| {
+            let x = &g.perms[i];
+            x.ctrl as usize == d && x.is_creature() && !x.tapped && !x.locked && !x.has(CANT_BLOCK)
         })
         .collect();
-    let menace = at.has(MENACE) && blockers.len() < 2;
-    // Unblocked (Jace: creatures attacking this player get -5/-0).
-    let through = (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
-    let mut worst = through as f32 * 0.6 * w;
-    if !menace {
-        for &b in &blockers {
-            let (ad, bd) = fight(at, &g.perms[b]);
-            let bv = perm_value(g, b);
-            let outcome = match (ad, bd) {
-                (true, false) => -av,                      // they eat it
-                (true, true) if bv + 0.5 <= av => bv - av, // they trade up
-                (false, false) => 0.0,                     // they block safely
-                _ => worst,                                // blocking is bad for them
-            };
-            if outcome < worst {
-                worst = outcome;
+    let attacker_ctrl = g.perms[atts[0]].ctrl as usize;
+    let wary = !g.players[attacker_ctrl].hand.is_empty() && g.mana_available(attacker_ctrl) >= 2;
+    let able = atts
+        .iter()
+        .flat_map(|&a| blockers.iter().map(move |&b| (a, b)))
+        .map(|(a, b)| g.can_block(b, a))
+        .collect();
+    let bk = Blocking {
+        g,
+        d,
+        atts,
+        blockers,
+        able,
+        wary,
+        danger: danger_before_turn(g, d, attacker_ctrl),
+        log,
+    };
+    let mut plan = BlockPlan::default();
+    bk.value_pass(&mut plan, &bk.atts);
+    let terms = bk.protect_pass(&mut plan);
+    let mut score = bk.score_of(&terms);
+    let (_, after, lethal) = bk.total(&terms);
+    if lethal || after <= bk.danger.max(3) {
+        let (alt, terms) = bk.survival_plan();
+        let s = bk.score_of(&terms);
+        if s > score + 0.5 {
+            plan = alt;
+            score = s;
+        }
+    }
+    Some((score, plan))
+}
+
+/// Damage `group` gets through to `o` if `o` blocks the biggest blockable attackers with
+/// its untapped creatures, one each (chump blocks; trample carries over).
+fn lethal_through(g: &Game, o: usize, group: &[usize], blockers: &[i16]) -> i32 {
+    let mut through: i32 = 0;
+    let mut nb = blockers.len();
+    for &a in group {
+        let at = &g.perms[a];
+        if evades_all(g, o, a) || nb == 0 {
+            through += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
+        } else {
+            nb -= 1;
+            if at.has(TRAMPLE) {
+                through += (at.p - blockers.get(nb).copied().unwrap_or(0)).max(0) as i32;
             }
         }
     }
-    worst
+    through
+}
+
+/// No creature of `o` can block attacker `a` (flying, unblockable, ...).
+fn evades_all(g: &Game, o: usize, a: usize) -> bool {
+    g.perms[a].has(FLYING | UNBLOCKABLE)
+        && !(0..g.perms.len()).any(|b| g.perms[b].ctrl as usize == o && g.can_block(b, a))
+}
+
+/// How close `o` is to winning: 1 when its board could kill someone next turn (fliers and
+/// unblockables in full, the rest at half), plus 0.6 when it is far ahead of the table.
+fn alarm(g: &Game, o: usize) -> f32 {
+    let clock: i32 = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl as usize == o && x.is_creature() && !x.has(DEFENDER))
+        .map(|x| {
+            let d = dmg_of(g, x);
+            if x.has(FLYING | UNBLOCKABLE) {
+                d
+            } else {
+                d / 2
+            }
+        })
+        .sum();
+    let weakest = g
+        .opponents(o)
+        .iter()
+        .map(|&p| g.players[p].life)
+        .min()
+        .unwrap_or(i32::MAX);
+    let mut a = if clock >= weakest { 1.0 } else { 0.0 };
+    let mut ts: Vec<f32> = (0..g.players.len())
+        .filter(|&p| g.players[p].alive)
+        .map(|p| threat(g, p))
+        .collect();
+    ts.sort_by(|x, y| y.partial_cmp(x).unwrap());
+    if ts.len() >= 2 && threat(g, o) >= ts[0] && ts[0] >= 1.6 * ts[1].max(1.0) {
+        a += 0.6;
+    }
+    a
+}
+
+/// The value of sending `group` at opponent `o`, predicting `o`'s blocks with the blocking
+/// AI: damage that gets through (weighted by how much we want to hurt `o`), creatures
+/// killed on each side. Also the attackers that would die for less than they take
+/// (`bad`), and how many blocks were predicted. `w`: how much we want to hurt `o`.
+fn group_value(g: &Game, o: usize, w: f32, group: &[usize]) -> (f32, Vec<usize>, usize) {
+    if group.is_empty() {
+        return (0.0, Vec::new(), 0);
+    }
+    let attacks: Vec<Attack> = group
+        .iter()
+        .map(|&a| Attack {
+            attacker: g.perms[a].id,
+            def: Def::Player(o),
+            blockers: Vec::new(),
+            blocked: false,
+        })
+        .collect();
+    // An open board blocks nothing (no need to ask the blocking AI).
+    let open = !g.perms.iter().any(|x| {
+        x.ctrl as usize == o && x.is_creature() && !x.tapped && !x.locked && !x.has(CANT_BLOCK)
+    });
+    let blocks = if open {
+        Vec::new()
+    } else {
+        declare_blocks(g, o, &attacks)
+    };
+    let mut value = 0.0;
+    let mut bad = Vec::new();
+    for &a in group {
+        let at = &g.perms[a];
+        let mut bl: Vec<usize> = blocks
+            .iter()
+            .filter(|(_, x)| *x == at.id)
+            .filter_map(|(b, _)| g.idx(*b))
+            .collect();
+        if at.has(MENACE) && bl.len() == 1 {
+            bl.clear();
+        }
+        if bl.is_empty() {
+            value += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32 * 0.6 * w;
+            continue;
+        }
+        // Blocked: what dies on each side, and what tramples over.
+        let c = clash(g, a, &bl);
+        let killed: f32 = c.dead.iter().map(|&b| perm_value(g, b)).sum();
+        let net =
+            killed + c.through as f32 * 0.6 * w - if c.att_dies { perm_value(g, a) } else { 0.0 };
+        if c.att_dies && net < 0.0 && !g.must_attack(a) {
+            bad.push(a);
+        }
+        value += net;
+    }
+    (value, bad, blocks.len())
+}
+
+/// The creatures the opponents in `opps` could attack with next time around: (damage, index).
+fn swings(g: &Game, opps: &[usize]) -> Vec<(i32, usize)> {
+    g.perms
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| opps.contains(&(x.ctrl as usize)) && x.is_creature() && !x.has(DEFENDER))
+        .map(|(i, x)| (dmg_of(g, x), i))
+        .filter(|x| x.0 > 0)
+        .collect()
+}
+
+/// Damage the opponents' `swings` could deal `me` before `me`'s next turn if the creatures
+/// in `out` (without vigilance) are tapped: each one weighted by the chance its controller
+/// picks us, minus what our untapped creatures can block (one attacker each).
+fn crack_back(g: &Game, me: usize, swings: &[(i32, usize)], out: &[(u32, Def)]) -> f32 {
+    // An opponent we hit this turn is more likely to hit back.
+    let mut threats: Vec<(f32, usize)> = swings
+        .iter()
+        .map(|&(d, i)| {
+            let o = g.perms[i].ctrl as usize;
+            let hit = out.iter().any(|&(_, x)| g.def_player(x) == Some(o));
+            (d as f32 * if hit { 0.5 } else { 0.25 }, i)
+        })
+        .collect();
+    threats.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+    let mut defenders: Vec<&Perm> = g
+        .perms
+        .iter()
+        .filter(|x| {
+            x.ctrl as usize == me
+                && x.is_creature()
+                && !x.has(CANT_BLOCK)
+                && (x.has(VIGILANCE) || !out.iter().any(|(id, _)| *id == x.id))
+        })
+        .collect();
+    // Ground blockers first, so fliers and reach are left for the fliers.
+    defenders.sort_by_key(|x| x.has(FLYING | REACH));
+    let mut used = vec![false; defenders.len()];
+    let mut sum = 0.0;
+    for (v, i) in threats {
+        let t = &g.perms[i];
+        let k = (0..defenders.len()).find(|&k| {
+            !used[k] && !t.has(UNBLOCKABLE) && !(t.has(FLYING) && !defenders[k].has(FLYING | REACH))
+        });
+        match k {
+            Some(k) => used[k] = true,
+            None => sum += v,
+        }
+    }
+    sum
 }
 
 /// Attacks for the active player: lethal swings first, then every attack that pays off,
@@ -3012,48 +3620,61 @@ pub fn declare_attacks_why(
         return Vec::new();
     }
     ready.sort_by(|&x, &y| g.perms[y].p.cmp(&g.perms[x].p));
-    let opps = g.opponents(me);
-    // Lethal: everything at one player whose blockers can't stop enough of it.
-    for &o in &opps {
-        let mut blockers: Vec<i16> = (0..g.perms.len())
-            .filter(|&b| {
-                g.perms[b].ctrl as usize == o
-                    && g.perms[b].is_creature()
-                    && !g.perms[b].tapped
-                    && !g.perms[b].has(CANT_BLOCK)
-            })
-            .map(|b| g.perms[b].t)
-            .collect();
-        blockers.sort();
-        // They'll block the biggest attackers that can be blocked.
-        let mut through: i32 = 0;
-        let mut nb = blockers.len();
-        for &a in &ready {
-            let at = &g.perms[a];
-            let evasive = at.has(FLYING | UNBLOCKABLE)
-                && !(0..g.perms.len()).any(|b| g.perms[b].ctrl as usize == o && g.can_block(b, a));
-            if evasive || nb == 0 {
-                through += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0);
-            } else {
-                nb -= 1;
-                if at.has(TRAMPLE) {
-                    through += (at.p - blockers.get(nb).copied().unwrap_or(0)).max(0) as i32;
-                }
+    let mut opps = g.opponents(me);
+    let mut out: Vec<(u32, Def)> = Vec::new();
+    // Lethal: the fewest attackers whose damage gets through a player's blocks, plus a spare
+    // (everything at the last opponent). The rest attack or stay home as usual.
+    'lethal: loop {
+        for &o in &opps {
+            let mut blockers: Vec<i16> = (0..g.perms.len())
+                .filter(|&b| {
+                    g.perms[b].ctrl as usize == o
+                        && g.perms[b].is_creature()
+                        && !g.perms[b].tapped
+                        && !g.perms[b].has(CANT_BLOCK)
+                })
+                .map(|b| g.perms[b].t)
+                .collect();
+            blockers.sort();
+            let life = g.players[o].life;
+            if lethal_through(g, o, &ready, &blockers) < life {
+                continue;
             }
-        }
-        if through >= g.players[o].life {
+            // Evasive attackers first, then the biggest.
+            let mut order = ready.clone();
+            order.sort_by_key(|&a| !evades_all(g, o, a));
+            let take = if opps.len() == 1 {
+                order.len()
+            } else {
+                let k = (1..=order.len())
+                    .find(|&k| lethal_through(g, o, &order[..k], &blockers) >= life)
+                    .unwrap_or(order.len());
+                (k + 1).min(order.len())
+            };
             if let Some(w) = why.as_deref_mut() {
+                let names: Vec<String> = order[..take].iter().map(|&a| name(a)).collect();
                 w.push(format!(
-                    "lethal on P{}: {} damage gets through vs life {} -> everything attacks P{}",
-                    o, through, g.players[o].life, o
+                    "lethal on P{}: {} damage gets through vs life {} -> [{}] attack P{}",
+                    o,
+                    lethal_through(g, o, &order[..take], &blockers),
+                    life,
+                    names.join(", "),
+                    o
                 ));
             }
-            return ready
-                .iter()
-                .map(|&a| (g.perms[a].id, Def::Player(o)))
-                .collect();
+            for &a in &order[..take] {
+                out.push((g.perms[a].id, Def::Player(o)));
+            }
+            ready.retain(|a| !order[..take].contains(a));
+            opps.retain(|&x| x != o);
+            if ready.is_empty() || opps.is_empty() {
+                return out;
+            }
+            continue 'lethal;
         }
+        break;
     }
+    let lethal_ids: Vec<u32> = out.iter().map(|x| x.0).collect();
     let goad_ok = |a: usize, o: usize| match g.perms[a].goad {
         Some(gd) if opps.len() > 1 => gd as usize != o,
         _ => true,
@@ -3061,12 +3682,19 @@ pub fn declare_attacks_why(
     // Group plan: send a group at one opponent, predict their blocks with the blocking AI,
     // drop attackers that would just die, and keep the best opponent's plan.
     let mut best_plan: Option<(f32, usize, Vec<usize>)> = None;
+    // (opponent, attacker) pairs the group plan dropped as dying for less.
+    let mut dropped: Vec<(usize, usize)> = Vec::new();
     // Attack taxes (Propaganda): only as many attackers as the mana pays for, and the mana
     // isn't free.
     let mana = g.mana_available(me);
     let tax_of = |o: usize| g.attack_tax(o);
+    // How much we want to hurt each opponent: the usual target weight, plus the alarm when
+    // they're about to win.
+    let wt = |o: usize| weight(g, me, o) + alarm(g, o);
+    let wts: Vec<f32> = opps.iter().map(|&o| wt(o)).collect();
+    let w_of = |o: usize| wts[opps.iter().position(|&x| x == o).unwrap_or(0)];
     for &o in &opps {
-        let w = weight(g, me, o);
+        let w = w_of(o);
         let mut group: Vec<usize> = ready.iter().copied().filter(|&a| goad_ok(a, o)).collect();
         let tax = tax_of(o);
         if tax > 0 {
@@ -3076,60 +3704,11 @@ pub fn declare_attacks_why(
             if group.is_empty() {
                 break;
             }
-            let attacks: Vec<Attack> = group
-                .iter()
-                .map(|&a| Attack {
-                    attacker: g.perms[a].id,
-                    def: Def::Player(o),
-                    blockers: Vec::new(),
-                    blocked: false,
-                })
-                .collect();
-            let blocks = declare_blocks(g, o, &attacks);
-            let mut value = 0.0;
-            let mut bad = Vec::new();
-            for &a in &group {
-                let at = &g.perms[a];
-                let av = perm_value(g, a);
-                let bl: Vec<usize> = blocks
-                    .iter()
-                    .filter(|(_, x)| *x == at.id)
-                    .filter_map(|(b, _)| g.idx(*b))
-                    .collect();
-                if bl.is_empty() {
-                    value += (dmg_of(g, at) + g.players[o].attacked_power as i32).max(0) as f32
-                        * 0.6
-                        * w;
-                    continue;
-                }
-                // Blocked: what dies on each side.
-                let (dies, killed) = if bl.len() == 1 {
-                    let (ad, bd) = fight(at, &g.perms[bl[0]]);
-                    (ad, if bd { perm_value(g, bl[0]) } else { 0.0 })
-                } else {
-                    let total: i16 = bl.iter().map(|&b| g.perms[b].p.max(0)).sum();
-                    let dt = bl.iter().any(|&b| g.perms[b].has(DEATHTOUCH));
-                    let dies = !at.has(INDESTRUCTIBLE) && (dt || total >= at.t - at.damage);
-                    let first = bl[0];
-                    let kills = at.has(DEATHTOUCH) || at.p >= g.perms[first].t;
-                    (dies, if kills { perm_value(g, first) } else { 0.0 })
-                };
-                let trample = if at.has(TRAMPLE) {
-                    (at.p - bl.iter().map(|&b| g.perms[b].t).sum::<i16>()).max(0) as f32 * 0.6 * w
-                } else {
-                    0.0
-                };
-                let net = killed + trample - if dies { av } else { 0.0 };
-                if dies && net < 0.0 && !g.must_attack(a) {
-                    bad.push(a);
-                }
-                value += net;
-            }
+            let (mut value, bad, blocked) = group_value(g, o, w, &group);
             value -= tax as f32 * 0.35 * group.len() as f32;
             if bad.is_empty() {
                 if let Some(wh) = why.as_deref_mut() {
                     let names: Vec<String> = group.iter().map(|&a| name(a)).collect();
-                    let blocked = blocks.len();
                     wh.push(format!(
                         "group vs P{} (life {}, threat {:.1}, weight {:.2}): [{}] predicted {} block(s), plan value {:.1}{}",
                         o,
@@ -3155,11 +3734,13 @@ pub fn declare_attacks_why(
                     names.join(", ")
                 ));
             }
+            dropped.extend(bad.iter().map(|&a| (o, a)));
             group.retain(|a| !bad.contains(a));
         }
     }
-    let mut out: Vec<(u32, Def)> = Vec::new();
     let mut gains: Vec<(f32, usize)> = Vec::new();
+    // Attackers sent at each opponent so far (by the group plan and the alone pass).
+    let mut sent: Vec<(usize, Vec<usize>, f32)> = Vec::new();
     if let Some((v, o, group)) = &best_plan {
         if let Some(wh) = why.as_deref_mut() {
             wh.push(format!("chosen group plan: P{} (value {:.1})", o, v));
@@ -3169,8 +3750,10 @@ pub fn declare_attacks_why(
             out.push((g.perms[a].id, Def::Player(*o)));
             gains.push((each, a));
         }
+        sent.push((*o, group.clone(), *v));
     }
-    // Everyone else: one at a time, at another player or a planeswalker.
+    // Everyone else: one at a time, at another player or a planeswalker, valued with the
+    // same block prediction as the group plan (the attacker joins what's already sent there).
     let mut spent: u32 = best_plan
         .as_ref()
         .map_or(0, |(_, o, group)| tax_of(*o) * group.len() as u32);
@@ -3181,9 +3764,23 @@ pub fn declare_attacks_why(
         let at = &g.perms[a];
         let choices: Vec<usize> = opps.iter().copied().filter(|&o| goad_ok(a, o)).collect();
         let mut best: Option<(f32, Def)> = None;
+        let mut gains_s: Vec<String> = Vec::new();
         for &o in &choices {
             let tax = tax_of(o);
-            let v = attack_gain(g, me, a, o, &[]) - tax as f32 * 0.35;
+            let (base, mut with) = match sent.iter().find(|s| s.0 == o) {
+                Some(s) => (s.2, s.1.clone()),
+                None => (0.0, Vec::new()),
+            };
+            with.push(a);
+            let v = if dropped.contains(&(o, a)) && !g.must_attack(a) {
+                // The block prediction already said it dies for less there.
+                -1.0
+            } else {
+                group_value(g, o, w_of(o), &with).0 - base - tax as f32 * 0.35
+            };
+            if why.is_some() {
+                gains_s.push(format!("P{} {:.1}", o, v));
+            }
             if (tax == 0 || spent + tax <= mana) && best.is_none_or(|b| v > b.0) {
                 best = Some((v, Def::Player(o)));
             }
@@ -3206,10 +3803,6 @@ pub fn declare_attacks_why(
             }
         }
         if let Some(wh) = why.as_deref_mut() {
-            let gains_s: Vec<String> = choices
-                .iter()
-                .map(|&o| format!("P{} {:.1}", o, attack_gain(g, me, a, o, &[])))
-                .collect();
             let verdict = match best {
                 Some((v, d)) if v > 0.2 || g.must_attack(a) => format!(
                     "attacks {}{}",
@@ -3232,6 +3825,13 @@ pub fn declare_attacks_why(
             if v > 0.2 || g.must_attack(a) {
                 if let Def::Player(o) = d {
                     spent += tax_of(o);
+                    match sent.iter_mut().find(|s| s.0 == o) {
+                        Some(s) => {
+                            s.1.push(a);
+                            s.2 += v;
+                        }
+                        None => sent.push((o, vec![a], v)),
+                    }
                 }
                 out.push((at.id, d));
                 gains.push((v, a));
@@ -3240,45 +3840,35 @@ pub fn declare_attacks_why(
     }
     // Crack-back safety: what could hit us before our next turn.
     let my_life = g.players[me].life;
-    let incoming: i32 = opps
+    let sw = swings(g, &opps);
+    // Keep creatures home (least useful attackers first) until the crack-back leaves us
+    // above a quarter of our life (at least 5). When even keeping everyone home can't do
+    // that, holding back only slows our race: keep home just what stops a lethal swing.
+    let committed: Vec<(u32, Def)> = out
         .iter()
-        .map(|&o| {
-            let others = g.opponents(o).len().max(1) as f32;
-            let power: i32 = g
-                .perms
-                .iter()
-                .filter(|x| x.ctrl as usize == o && x.is_creature() && !x.has(DEFENDER))
-                .map(|x| dmg_of(g, x))
-                .sum();
-            // They may pick us; the biggest threat to us counts in full.
-            (power as f32 * (0.5 + 0.5 / others)) as i32
-        })
-        .max()
-        .unwrap_or(0);
-    let defenders = |out: &Vec<(u32, Def)>| -> i32 {
-        g.perms
-            .iter()
-            .filter(|x| {
-                x.ctrl as usize == me
-                    && x.is_creature()
-                    && (x.has(VIGILANCE) || !out.iter().any(|(id, _)| *id == x.id))
-                    && !x.has(CANT_BLOCK)
-            })
-            .map(|x| x.p.max(1) as i32 * 2)
-            .sum()
-    };
+        .copied()
+        .filter(|(id, _)| lethal_ids.contains(id) || g.idx(*id).is_some_and(|i| g.must_attack(i)))
+        .collect();
+    let mut floor = 5f32.max(my_life as f32 * 0.25);
+    if (my_life as f32 - crack_back(g, me, &sw, &committed)) < floor {
+        floor = 1.0;
+    }
     gains.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
     let mut k = 0;
-    while incoming - defenders(&out) >= my_life * 3 / 4 && k < gains.len() {
-        let id = g.perms[gains[k].1].id;
-        if !g.must_attack(gains[k].1) {
+    while k < gains.len() {
+        let incoming = crack_back(g, me, &sw, &out);
+        if my_life as f32 - incoming >= floor {
+            break;
+        }
+        let a = gains[k].1;
+        let id = g.perms[a].id;
+        if !g.must_attack(a) && !lethal_ids.contains(&id) {
             if let Some(wh) = why.as_deref_mut() {
                 wh.push(format!(
-                    "keeps {} home: crack-back {} vs life {} with {} defence",
-                    name(gains[k].1),
+                    "keeps {} home: crack-back {:.1} vs life {}",
+                    name(a),
                     incoming,
-                    my_life,
-                    defenders(&out)
+                    my_life
                 ));
             }
             out.retain(|(x, _)| *x != id);
@@ -3290,9 +3880,22 @@ pub fn declare_attacks_why(
 
 /// After blocks: pump or protect a creature to win a fight, or push lethal damage.
 pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
-    let Some(h) = hand_find(g, p, is_trick) else {
-        return;
-    };
+    let pl = &g.players[p];
+    let tricks: Vec<usize> = (0..pl.hand.len())
+        .filter(|&h| {
+            is_trick(&pl.cards[pl.hand[h] as usize])
+                && g.can_cast(p, Src::Hand(h), CastOpts::default())
+        })
+        .collect();
+    for h in tricks {
+        if try_trick(g, p, h, attacks) {
+            return;
+        }
+    }
+}
+
+/// Casts the trick in hand slot `h` if it wins a fight or pushes lethal damage.
+fn try_trick(g: &mut Game, p: usize, h: usize, attacks: &[Attack]) -> bool {
     let c = &g.players[p].cards[g.players[p].hand[h] as usize];
     let (dp, dt, kw) = effects_of(c, false).fold((0i16, 0i16, 0u32), |acc, e| match e {
         Effect::Pump {
@@ -3343,7 +3946,7 @@ pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
             if better && perm_value(g, theirs) + perm_value(g, mine) >= 3.0 {
                 let id = g.perms[mine].id;
                 cast_instant(g, p, h, Some(id), "combat trick: wins the fight");
-                return;
+                return true;
             }
         }
         // Unblocked: pump for lethal.
@@ -3358,9 +3961,10 @@ pub fn combat_tricks(g: &mut Game, p: usize, attacks: &[Attack]) {
                 if total < g.players[d].life && total + dp as i32 >= g.players[d].life {
                     let id = g.perms[a].id;
                     cast_instant(g, p, h, Some(id), "combat trick: pump for lethal");
-                    return;
+                    return true;
                 }
             }
         }
     }
+    false
 }

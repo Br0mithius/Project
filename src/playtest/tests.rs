@@ -280,6 +280,136 @@ fn ai_blocks_for_value_and_chumps_only_to_survive() {
     assert!(!blocks.is_empty(), "chumps to survive");
 }
 
+fn attack_on(attackers: &[u32], d: usize) -> Vec<Attack> {
+    attackers
+        .iter()
+        .map(|&a| Attack {
+            attacker: a,
+            def: Def::Player(d),
+            blockers: vec![],
+            blocked: false,
+        })
+        .collect()
+}
+
+#[test]
+fn ai_makes_free_blocks() {
+    let d = prep(&[
+        card("Wall", "{2}{W}", "Creature — Wall", "", Some(("1", "12"))),
+        card("Brute", "{3}{R}", "Creature — Ogre", "", Some(("3", "6"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let brute = put(&mut g, 0, 1);
+    let wall = put(&mut g, 1, 0);
+    let blocks = ai::declare_blocks(&g, 1, &attack_on(&[brute], 1));
+    assert_eq!(
+        blocks,
+        vec![(wall, brute)],
+        "the 1/12 stops the 3/6 for free"
+    );
+}
+
+#[test]
+fn ai_blocks_the_big_hitters_first_when_the_swing_is_lethal() {
+    let d = prep(&[
+        card("Giant", "{5}{R}", "Creature — Giant", "", Some(("7", "7"))),
+        card("Ogre", "{4}{R}", "Creature — Ogre", "", Some(("6", "6"))),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let giant = put(&mut g, 0, 0);
+    let ogre = put(&mut g, 0, 1);
+    let rat1 = put(&mut g, 0, 2);
+    let rat2 = put(&mut g, 0, 2);
+    put(&mut g, 1, 3);
+    put(&mut g, 1, 3);
+    g.players[1].life = 13;
+    // Eating the two 1/1s with the bears (the value blocks) would let 13 through.
+    let at = attack_on(&[giant, ogre, rat1, rat2], 1);
+    let blocks = ai::declare_blocks(&g, 1, &at);
+    let through: i32 = [(giant, 7), (ogre, 6), (rat1, 1), (rat2, 1)]
+        .iter()
+        .filter(|(a, _)| !blocks.iter().any(|(_, x)| x == a))
+        .map(|(_, p)| *p)
+        .sum();
+    assert!(
+        through < 13,
+        "survives: {} gets through ({:?})",
+        through,
+        blocks
+    );
+}
+
+#[test]
+fn ai_chumps_to_stay_out_of_danger() {
+    let d = prep(&[
+        card("Ogre", "{4}{R}", "Creature — Ogre", "", Some(("6", "6"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let ogre = put(&mut g, 0, 0);
+    let bear = put(&mut g, 1, 1);
+    let at = attack_on(&[ogre], 1);
+    assert!(
+        ai::declare_blocks(&g, 1, &at).is_empty(),
+        "no chump at 40 life"
+    );
+    g.players[1].life = 8;
+    assert_eq!(
+        ai::declare_blocks(&g, 1, &at),
+        vec![(bear, ogre)],
+        "at 8 life the 2/2 chumps rather than going to 2"
+    );
+}
+
+#[test]
+fn ai_sends_only_what_lethal_needs_when_others_remain() {
+    let d = prep(&[
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("3", "3"))),
+        card("Giant", "{5}{R}", "Creature — Giant", "", Some(("7", "7"))),
+    ]);
+    let mut g = game(&[&d, &d, &d]);
+    for _ in 0..4 {
+        put(&mut g, 0, 0);
+    }
+    g.players[1].life = 3;
+    for _ in 0..2 {
+        put(&mut g, 2, 1);
+    }
+    let attacks = ai::declare_attacks(&g, 0);
+    let at_p1 = attacks.iter().filter(|(_, d)| *d == Def::Player(1)).count();
+    assert!(
+        (1..=2).contains(&at_p1),
+        "one bear kills P1, plus a spare: {:?}",
+        attacks
+    );
+}
+
+#[test]
+fn ai_keeps_defenders_home_against_a_lethal_crack_back() {
+    let d = prep(&[
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card("Giant", "{5}{R}", "Creature — Giant", "", Some(("6", "6"))),
+    ]);
+    let mut g = game(&[&d, &d, &d]);
+    let bears = [put(&mut g, 0, 0), put(&mut g, 0, 0)];
+    for _ in 0..4 {
+        put(&mut g, 2, 1);
+    }
+    // P1 is open; P2's four 6/6s could swing back at our 10 life.
+    g.players[0].life = 10;
+    let attacks = ai::declare_attacks(&g, 0);
+    assert!(
+        attacks.len() < bears.len(),
+        "a bear stays home: {:?}",
+        attacks
+    );
+    g.players[0].life = 40;
+    let attacks = ai::declare_attacks(&g, 0);
+    assert_eq!(attacks.len(), 2, "at 40 life both attack the open player");
+}
+
 #[test]
 fn counterspells_stop_big_threats() {
     let db = db();
