@@ -443,7 +443,7 @@ pub fn explore_with(
             })
             .map(|s| (s.card.name.clone(), s.score))
             .collect();
-    let heuristic: std::collections::HashMap<String, f32> = analysis::weakest(&base, db, rules)
+    let mut heuristic: std::collections::HashMap<String, f32> = analysis::weakest(&base, db, rules)
         .into_iter()
         .map(|s| (s.card.name.clone(), s.score))
         .chain(bench.iter().cloned())
@@ -627,11 +627,14 @@ pub fn explore_with(
         .take(effort.cut_slots)
         .map(|c| c.0.clone())
         .collect();
-    let mut adds: Vec<String> = bench
-        .iter()
-        .take(effort.bench)
-        .map(|b| b.0.clone())
-        .collect();
+    let mut adds = additions_to_try(&base, &bench, plays, db, coll, rules, effort.bench);
+    for name in &adds {
+        if !heuristic.contains_key(name) {
+            if let Some(c) = db.get(name) {
+                heuristic.insert(name.clone(), analysis::score_card(c, &base, db, rules).0);
+            }
+        }
+    }
     // A basic is an addition only below the land goal.
     if !at_goal {
         adds.extend(basic.clone());
@@ -912,6 +915,63 @@ pub fn explore_with(
         seconds: start.elapsed().as_secs_f32(),
         notes,
     })
+}
+
+/// The bench cards tried as additions (`n` of them). Mostly the builder's best by score,
+/// but its score isn't the whole story - the playtests keep finding big bodies it ranks low
+/// (Thor Odinson, Kree Sentinel) - so about a fifth are the biggest creatures it ranks lower
+/// (body and keywords), and a sixth the best cards in a colour the deck doesn't cast yet but
+/// its lands already make (a Thanos deck's gain lands make all five colours).
+fn additions_to_try(
+    base: &Deck,
+    bench: &[(String, f32)],
+    plays: ColorSet,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    n: usize,
+) -> Vec<String> {
+    let off_n = n / 6;
+    let body_n = n / 5;
+    let mut out: Vec<String> = bench
+        .iter()
+        .take(n - off_n - body_n)
+        .map(|b| b.0.clone())
+        .collect();
+    let mut bodies: Vec<(f32, &String)> = bench
+        .iter()
+        .filter(|b| !out.contains(&b.0))
+        .filter_map(|b| {
+            let c = db.get(&b.0)?;
+            c.is_creature().then(|| {
+                let v = crate::value::creature_value(c);
+                (v.body + v.keywords, &b.0)
+            })
+        })
+        .collect();
+    bodies.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    out.extend(bodies.into_iter().take(body_n).map(|b| b.1.clone()));
+    let sources = analysis::stats(base, db).sources;
+    let off: Vec<String> = analysis::suggestions_within(base, db, coll, rules, None)
+        .into_iter()
+        .filter(|s| !s.card.playable_with(plays))
+        .filter(|s| rules.max_copies == 0 || base.used(&s.card.name) < rules.max_copies)
+        .filter(|s| s.card.cost_colors().indices().all(|i| sources[i] >= 3))
+        .map(|s| s.card.name.clone())
+        .filter(|name| !out.contains(name))
+        .take(off_n)
+        .collect();
+    out.extend(off);
+    // Fill up from the score order when a group came up short.
+    for b in bench {
+        if out.len() >= n {
+            break;
+        }
+        if !out.contains(&b.0) {
+            out.push(b.0.clone());
+        }
+    }
+    out
 }
 
 /// Colour sets worth comparing: every subset of the identity that keeps the commander's
@@ -1251,6 +1311,57 @@ mod tests {
         d.add("Swamp", lands - lands / 2);
         assert_eq!(d.main_count(), 59);
         d
+    }
+
+    /// The additions tried aren't only the builder's top scores: big bodies it ranks lower,
+    /// and cards in a colour the deck's lands make but its spells don't use yet.
+    #[test]
+    fn additions_reach_past_the_top_scores() {
+        const GREEN: usize = 4; // W U B R G
+        let (db, coll) = setup();
+        let mut cards = db.cards.clone();
+        let mut grove = mk("Grove", "", "Land", "BG", 0, 0);
+        grove.power = None;
+        grove.toughness = None;
+        grove.oracle_text = "{T}: Add {B} or {G}.".into();
+        cards.push(grove);
+        cards.sort_by(|a, b| a.name.cmp(&b.name));
+        let db = CardDb::new(cards);
+        let mut counts = coll.counts.clone();
+        counts.insert("Grove".into(), 3);
+        let coll = Collection::new(PathBuf::new(), counts);
+        let rules = Rules::default();
+        let mut deck = titan_deck();
+        deck.remove("Swamp", 3);
+        deck.add("Grove", 3);
+        let plays = played_colors(&deck, &db);
+        assert!(!plays.contains(GREEN), "green isn't played: {}", plays);
+        let bench: Vec<(String, f32)> =
+            analysis::suggestions_within(&deck, &db, &coll, &rules, Some(plays))
+                .into_iter()
+                .map(|s| (s.card.name.clone(), s.score))
+                .collect();
+        let adds = additions_to_try(&deck, &bench, plays, &db, &coll, &rules, 12);
+        assert_eq!(adds.len(), 12);
+        let green = adds
+            .iter()
+            .filter(|n| db.get(n).unwrap().cost_colors().contains(GREEN))
+            .count();
+        assert_eq!(green, 2, "{:?}", adds);
+        let top: Vec<&String> = bench.iter().take(8).map(|b| &b.0).collect();
+        let beyond = adds
+            .iter()
+            .filter(|n| !top.contains(n) && !db.get(n).unwrap().cost_colors().contains(GREEN))
+            .count();
+        assert_eq!(beyond, 2, "two big bodies from further down: {:?}", adds);
+        // A deck with no green sources gets no green additions.
+        let adds = additions_to_try(&titan_deck(), &bench, plays, &db, &coll, &rules, 12);
+        assert!(
+            adds.iter()
+                .all(|n| !db.get(n).unwrap().cost_colors().contains(GREEN)),
+            "{:?}",
+            adds
+        );
     }
 
     #[test]

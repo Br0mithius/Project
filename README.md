@@ -63,6 +63,9 @@ Command-line examples: `commanders`, `auto madame hydra`, `lab` / `lab thorough`
 `cargo run --release --example testbed_timing -- data` times building the simulated opponents (fresh and cached) and
 prints one opponent's season log. `cargo run --release --example rank_timing -- data` times the ranking's parts;
 `cargo run --release --example weight_audit -- data` measures each ranking part's spread, noise and overlap on your pool;
+`card_calibration` (`list`, `score`, `measure`, `colors`, `rank`) measures what each pool card is worth in paired
+simulated games against a vanilla creature of its mana value, next to the builder's score, and checks the ranking
+weights against an independent playtest;
 `compare_builds -- data "Thanos, the Mad Titan" WBR WUBRG` playtests one commander in several colour sets (win rate,
 mana sources, opening hands); `score_cards -- data "<commander>" "<card>"...` shows how cards score for that deck;
 `review_cards -- data <list.txt>` prints each card's rules text beside the app's reading, for checking misreads;
@@ -133,13 +136,19 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   win rates were used here before; they come from 2-player 40-card draft games, so they've been dropped (and any
   saved copy is deleted). Roles from the card reading (graded removal, card draw, board wipes, "each opponent"
   effects that are better with 4 players, repeatable engines...), curve fit and synergy are added on top.
-* **Creatures** are rated by value for their mana cost (`src/value.rs`): body, keywords and abilities on one scale
-  (1 point is about 1 power), compared with what a fair creature of that cost gives. Keywords count for more when the
-  creature can use them (flying on a 4-power creature), and abilities that matter in 4-player games (removal, card
-  draw, repeating engines, effects on every opponent) count for more than ones that don't. Mana abilities count as
-  ramp, and returning only itself from the graveyard as resilience. The card's "why" shows e.g. "156% of fair value
-  for 3 mana (2/3 body, 2 damage to any target)"; `cargo run --release --example creature_values -- data --pool`
-  lists your creatures this way.
+* **Creatures** are rated on body, keywords and abilities on one scale (`src/value.rs`; 1 point is about 1 power).
+  Keywords count for more when the creature can use them (flying on a 4-power creature), and abilities that matter in
+  4-player games (removal, card draw, repeating engines, effects on every opponent) count for more than ones that
+  don't. Mana abilities count as ramp, and returning only itself from the graveyard as resilience. The score weighs
+  the body twice and abilities other than removal half, plus a little for value for the cost: simulated games
+  measure big bodies (Thor Odinson, Kree Sentinel) well above cheap creatures whose worth is a rider (see
+  `card_calibration` below). Abilities count only as far as the deck can use them: "if he's equipped" and "sacrifice
+  an Equipment" against the deck's Equipment (about 6 wanted), "other Villains you control get +2/+1" against its
+  Villains (about 12). The card's "why" shows e.g. "156% of fair value for 3 mana (2/3 body, 2 damage to any
+  target)"; `cargo run --release --example creature_values -- data --pool` lists your creatures this way.
+* **Token spells** count their creature tokens' bodies (half what the same bodies score on a creature card), and
+  only cards that *care* about Heroes, Villains or Robots ("other Villains", "if you control a Villain") get the
+  tribal bonus - making a Villain token isn't caring about Villains.
 * **EDHREC** adds two things. A card's EDHREC rank, compared with the rest of its set, moves it up to ±0.4 - less
   for new sets, which haven't been in many decks yet (half weight 90 days after release). And when its commander has
   an EDHREC page, cards real players run with that commander get up to +1.5 (from inclusion rate and synergy),
@@ -169,14 +178,17 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   | Part | Weight | Why |
   | --- | --- | --- |
   | Cards | 1.0 | Broadest, most data-backed measure |
-  | Curve | 0.5 | Follows Cards closely (rank correlation 0.82) - a deep pool fills the curve too |
+  | Curve | 0.25 | Follows Cards closely (rank correlation 0.82) - a deep pool fills the curve too - and the playtest already plays the curve out |
   | Creatures | 0.5 | Mostly a penalty for too few creatures (8 distinct values across 64 options) |
   | Interaction | 0.6 | Also follows Cards (0.81) |
-  | Mana | 0.6 | Opening-hand checks; the full game simulator pays coloured mana exactly and disagrees with it (-0.62), finding three-colour decks win more than this part says |
+  | Mana | 0.2 | Opening-hand checks; the full game simulator pays coloured mana exactly and disagrees with it (-0.62; -0.31 against an independent playtest), finding three-colour decks win more than this part says |
   | Commander | 0.8 | Independent, but partly heuristics and small samples |
-  | Playtest | 1.5 | The only part that plays full 4-player games against league-like decks (noise ±0.017 at 600 games, reliability 0.97) |
+  | Playtest | 3.0 | The only part that plays full 4-player games against league-like decks (noise ±0.017 at 600 games, reliability 0.97) |
   | EDHREC | 0.4 | Real decks, but 100-card constructed with every card available, and thin for new sets |
 
+  Checked against an independent playtest of every option's deck (opponents from other simulated pools, 3,000
+  games each, 58 options; `card_calibration rank`), the total's rank correlation with it rose from 0.59 (playtest
+  1.5, mana 0.6, curve 0.5) to 0.78 with these weights.
   Playgroup.gg win rates count for less than before (half trust at 300 games, at most ±0.6), and EDHREC's commander
   popularity isn't used (it tracks fans of the character more than strength in a league pool). Settings still on an
   earlier version's defaults move to these automatically; weights you changed are kept. A commander's ability only counts as much as its
@@ -225,8 +237,10 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
   - **What each card is worth:** each nonland card is replaced by the best card left on your bench (by score), and
     the win rate lost is the card's worth. When the best bench card is strong, swapping almost anything for it helps,
     so "dead weight" marks the cards whose swap helped clearly more (two standard errors) than the deck's typical card.
-  - **Additions:** the best-scoring bench cards, each tried in place of the cards measured least valuable; and one
-    land more (the weakest spell becomes a basic) or fewer (a basic becomes the best bench card).
+  - **Additions:** bench cards, each tried in place of the cards measured least valuable: mostly the best-scoring
+    ones, plus the biggest creatures (body and keywords) the builder ranks lower and the best cards in a colour the
+    deck doesn't cast yet but its lands already make (3+ sources); and one land more (the weakest spell becomes a
+    basic) or fewer (a basic becomes the best bench card).
   - **Best combination:** the swaps that measured well are combined, biggest first (each card cut or added only as
     often as you have it). The combination is then **confirmed on fresh games** - different seeds, several times as
     many - and each swap is checked by playing the combination without it; swaps that don't hold up are dropped (and
@@ -235,7 +249,10 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
     combination is reported only if its confirmed gain is more than two standard errors; otherwise the lab says no
     change beats the current build.
   - **Colour sets:** for commanders with a choice of colours (Thanos: WBR, WUBR, WBRG, WUBRG), the deck is rebuilt in
-    each and played against the same opponents and seats ("Use this build" switches to one).
+    each and played against the same opponents and seats ("Use this build" switches to one). Auto-build itself plays
+    at most the commander's cost colours (two at least) - or, when the commander's own abilities cost more colours
+    (Thanos's power-up costs all five), up to its whole identity, each extra colour picked only if the pool's best
+    cards gain more than 0.1 average score from it.
   - **Reading the numbers:** win-rate points (+2.0 = wins 2% more of its games; 25% is even in a 4-player game) ±
     one standard error. Within about ±2 standard errors is noise; green and red mark changes clearly better or worse.
     Card worths and additions are screening numbers (fewer games); the best combination's numbers are confirmed ones.

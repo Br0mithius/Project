@@ -1,8 +1,9 @@
 //! What a card's body and abilities are worth, on one scale: 1 point is about one point of
-//! power. A creature's total is compared with what a fair creature of its mana cost gives
-//! (`fair_value`), so a cheap creature with useful abilities rates above a big vanilla one.
-//! Abilities that matter more in 4-player Commander (card draw, removal, repeating engines,
-//! effects that hit every opponent) are worth more than ones that don't.
+//! power. Abilities that matter more in 4-player Commander (card draw, removal, repeating
+//! engines, effects that hit every opponent) are worth more than ones that don't. The
+//! builder's creature score (`creature_points`) weighs the body most, as simulated games
+//! measure it, and a creature's value is also compared with what a fair creature of its
+//! mana cost gives (`fair_value`).
 
 use crate::abilities::{Ability, Effect, When, Whose};
 use crate::card::Card;
@@ -298,6 +299,23 @@ pub fn keyword_value(kw: &str, p: f32, t: f32) -> f32 {
     }
 }
 
+/// Does this effect answer an opponent's permanent (a creature, any target, an artifact...)?
+fn answers_permanents(e: &Effect) -> bool {
+    use crate::abilities::Kind;
+    let hits = |t: &crate::abilities::Target| {
+        t.whose != Whose::Yours && !matches!(t.kind, Kind::Player | Kind::Spell | Kind::It)
+    };
+    match e {
+        Effect::Destroy(t) | Effect::Fight(t) | Effect::Bounce(t) | Effect::GainControl(t) => {
+            hits(t)
+        }
+        Effect::Exile { target, .. } => hits(target),
+        Effect::Damage { to, .. } | Effect::Shrink { to, .. } => hits(to),
+        Effect::Edict { .. } => true,
+        _ => false,
+    }
+}
+
 /// What a fair creature costing `mv` should be worth (body scale): about a vanilla
 /// creature one size bigger than its cost, since Commander creatures are expected to do
 /// something (a 3-mana 3/3 with no abilities rates a little below fair).
@@ -310,6 +328,9 @@ pub struct CreatureValue {
     pub body: f32,
     pub keywords: f32,
     pub abilities: f32,
+    /// The part of `abilities` that answers opponents' permanents (destroy, exile, damage,
+    /// -X/-X, fight, steal, bounce): removal on a body.
+    pub removal: f32,
     pub total: f32,
     pub fair: f32,
     /// total / fair: 1.0 = fair for its cost.
@@ -335,6 +356,12 @@ fn stat(v: Option<&str>, mv: u32) -> f32 {
 
 /// Rates a creature's body, keywords and abilities against its mana cost.
 pub fn creature_value(card: &Card) -> CreatureValue {
+    creature_value_in(card, &|_| 1.0)
+}
+
+/// `creature_value` with each ability's worth scaled by `gate` (0..1): how much of it the
+/// deck can use (an "if equipped" trigger in a deck without Equipment is worth nothing).
+pub fn creature_value_in(card: &Card, gate: &dyn Fn(&Ability) -> f32) -> CreatureValue {
     let p = stat(card.power.as_deref(), card.mana_value());
     let t = stat(card.toughness.as_deref(), card.mana_value());
     let parsed = card.parsed();
@@ -349,6 +376,7 @@ pub fn creature_value(card: &Card) -> CreatureValue {
         }
     }
     let mut abilities = 0.0;
+    let mut removal = 0.0;
     // The back face (an Adventure or prepared spell, a transformed side) is extra, but it
     // competes with the front for the same card, so it counts for half.
     let back = parsed.back.iter().flat_map(|b| b.abilities.iter());
@@ -358,9 +386,12 @@ pub fn creature_value(card: &Card) -> CreatureValue {
         .map(|a| (a, 1.0))
         .chain(back.map(|a| (a, 0.5)));
     for (a, share) in all {
-        let v = ability_value(a) * share;
+        let v = ability_value(a) * share * gate(a);
         if v.abs() >= 0.05 {
             abilities += v;
+            if v > 0.0 && a.effects.iter().any(answers_permanents) {
+                removal += v;
+            }
             let label = a
                 .effects
                 .iter()
@@ -380,6 +411,7 @@ pub fn creature_value(card: &Card) -> CreatureValue {
         body,
         keywords,
         abilities,
+        removal,
         total,
         fair,
         efficiency: total / fair,
@@ -387,10 +419,33 @@ pub fn creature_value(card: &Card) -> CreatureValue {
     }
 }
 
-/// Score points for a creature's value for its cost (about -2 .. +4): mostly efficiency,
-/// plus a little for sheer impact so a fair 6-drop isn't level with a fair 2-drop.
+/// How much a creature's body counts in `creature_points`, against its keywords (1) and its
+/// abilities other than removal (`ABILITY_WEIGHT`). Calibrated on simulated games (80 pool
+/// cards, each measured against a vanilla creature in two Thanos decks, 12,000 paired games
+/// per card and deck): among creatures, measured worth follows mana value (rank correlation
+/// +0.45) and body (+0.29), not ability points (-0.12). A 1/1 with a strong rider rarely
+/// beats a big body on a crowded 4-player board.
+pub const BODY_WEIGHT: f32 = 2.0;
+/// Non-removal ability points count for half (see `BODY_WEIGHT`). Removal on a body
+/// (destroy, exile, damage, -X/-X, steal) counts in full: it is removal, which the builder
+/// never undervalues (the playtests alone would rate it lower still).
+pub const ABILITY_WEIGHT: f32 = 0.5;
+
+/// Score points for a creature (about 1 .. 12): mostly sheer impact - body, keywords and
+/// abilities weighted as above - plus a little for efficiency (value for its cost), so a
+/// cheap creature with a fair rate isn't left behind entirely. The old shape (mostly
+/// efficiency, total/fair) rated a 1-drop with ability points above a 5-mana 5/5; the
+/// playtests measure the opposite (pooled rank correlation of builder scores with measured
+/// worth +0.07 -> +0.29 from this change alone).
 pub fn creature_points(v: &CreatureValue) -> f32 {
-    (3.0 * (v.efficiency - 1.0)).clamp(-2.0, 3.0) + 0.08 * v.total
+    let t = weighted_total(v);
+    let fair = v.fair * (BODY_WEIGHT + ABILITY_WEIGHT) / 2.0;
+    (0.25 * (t / fair - 1.0)).clamp(-2.0, 3.0) + 0.3 * t
+}
+
+/// Body, keywords and abilities with the weights `creature_points` uses.
+fn weighted_total(v: &CreatureValue) -> f32 {
+    BODY_WEIGHT * v.body + v.keywords + ABILITY_WEIGHT * (v.abilities - v.removal) + v.removal
 }
 
 #[cfg(test)]
@@ -414,7 +469,36 @@ mod tests {
     }
 
     #[test]
-    fn abilities_beat_vanilla_bodies() {
+    fn big_bodies_and_removal_lead_the_creature_score() {
+        let sentinel = creature_value(&creature("{4}{R}", ("5", "5"), ""));
+        let pinger = creature_value(&creature(
+            "{R}",
+            ("1", "1"),
+            "When this creature enters, it deals 1 damage to target creature an opponent controls.",
+        ));
+        let looter = creature_value(&creature(
+            "{1}{R}",
+            ("2", "1"),
+            "{T}: Draw a card, then discard a card.",
+        ));
+        let chupa = creature_value(&creature(
+            "{2}{B}{B}",
+            ("2", "2"),
+            "When this creature enters, destroy target creature an opponent controls.",
+        ));
+        let bear4 = creature_value(&creature("{3}{G}", ("4", "4"), ""));
+        // Measured in simulated games: a big body beats a cheap creature's rider.
+        assert!(creature_points(&sentinel) > creature_points(&looter) + 2.0);
+        assert!(creature_points(&sentinel) > creature_points(&pinger) + 2.0);
+        // Removal on a body counts in full: a 4-mana 2/2 that destroys a creature is still
+        // rated at least like a vanilla 4/4.
+        assert!(chupa.removal > 5.0 && looter.removal == 0.0, "{:?}", chupa);
+        assert!(creature_points(&chupa) >= creature_points(&bear4));
+    }
+
+    /// Value for its cost (`efficiency`) still credits abilities.
+    #[test]
+    fn abilities_beat_vanilla_bodies_for_their_cost() {
         let vanilla = creature_value(&creature("{2}{G}", ("3", "3"), ""));
         let flyer = creature_value(&creature("{2}{U}", ("2", "2"), "Flying"));
         let chupa = creature_value(&creature(
@@ -431,7 +515,6 @@ mod tests {
         assert!(chupa.efficiency > 1.2, "{:?}", chupa);
         assert!(visionary.efficiency > 0.85, "{:?}", visionary);
         assert!(creature_points(&chupa) > creature_points(&flyer));
-        assert!(creature_points(&flyer) > creature_points(&vanilla) - 0.5);
         let wall = creature_value(&creature("{1}{W}", ("0", "4"), "Defender"));
         assert!(wall.efficiency < 0.8);
     }

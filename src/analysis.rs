@@ -375,15 +375,20 @@ pub fn card_power(card: &Card) -> f32 {
 
 /// Adjustments for 3+ player games: effects that hit every opponent, board wipes, card
 /// flow and ramp gain value; small aggressive creatures and 1-for-1 trades lose some.
-fn multiplayer_adjust(card: &Card, roles: &[Role], rules: &Rules) -> (f32, Vec<String>) {
+fn multiplayer_adjust(
+    card: &Card,
+    roles: &[Role],
+    rules: &Rules,
+    each_opponent: f32,
+) -> (f32, Vec<String>) {
     let mut score = 0.0;
     let mut why = Vec::new();
     if rules.players < 3 {
         return (score, why);
     }
     let opponents = rules.players.saturating_sub(1) as f32;
-    if roles.contains(&Role::EachOpponent) {
-        score += 0.5 * (opponents - 1.0);
+    if roles.contains(&Role::EachOpponent) && each_opponent > 0.0 {
+        score += 0.5 * (opponents - 1.0) * each_opponent;
         why.push(format!("hits all {} opponents", opponents as u32));
     }
     if roles.contains(&Role::Sweeper) {
@@ -476,9 +481,48 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             why.push(label.to_string());
         }
     }
-    let (mp, mut mp_why) = multiplayer_adjust(card, &roles, rules);
+    // What the deck lets the card's abilities do (Equipment, creature types).
+    let gate = ability_gate(deck, db, rules);
+    // "Each opponent loses X life" on a creature counts as far as its condition can be met
+    // (Whiplash's drain needs Equipment).
+    let each_opponent = if creature {
+        parsed
+            .abilities
+            .iter()
+            .filter(|a| a.text.contains("each opponent"))
+            .map(|a| gate.of(a))
+            .fold(0.0, f32::max)
+    } else {
+        1.0
+    };
+    let (mp, mut mp_why) = multiplayer_adjust(card, &roles, rules, each_opponent);
     score += mp;
     why.append(&mut mp_why);
+    // A spell that makes creature tokens puts bodies on the board, which the playtests
+    // value like a creature's (Borough Backup's two 3/2s measure like a big creature): half
+    // what the same bodies score on a creature card (`value::creature_points`), on top of
+    // its "makes tokens" role.
+    if !creature {
+        let bodies: f32 = parsed
+            .abilities
+            .iter()
+            .filter(|a| matches!(a.when.first(), Some(When::Spell | When::Enters)))
+            .flat_map(|a| a.effects.iter())
+            .map(|e| match e {
+                AbEffect::Tokens {
+                    amount,
+                    power,
+                    toughness,
+                    ..
+                } => amount.value() * (*power as f32 + 0.7 * *toughness as f32).max(0.0),
+                _ => 0.0,
+            })
+            .sum();
+        if bodies > 0.0 {
+            score += 0.15 * crate::value::BODY_WEIGHT * bodies;
+            why.push(format!("creature tokens ({:.0} body points)", bodies));
+        }
+    }
     // Permanents that keep producing value (each-turn triggers, repeatable abilities) are
     // worth more in long 4-player games.
     if !creature && !matches!(card.main_type(), "Instant" | "Sorcery") {
@@ -503,8 +547,9 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let st = stats(deck, db);
     let plan = deck_plan(deck, db, rules);
     if card.is_creature() {
-        // Body, keywords and abilities against what a fair creature of its cost gives.
-        let v = crate::value::creature_value(card);
+        // Body, keywords and abilities against what a fair creature of its cost gives,
+        // each ability counted as far as the deck can use it.
+        let v = crate::value::creature_value_in(card, &|a| gate.of(a));
         score += crate::value::creature_points(&v);
         let best: Vec<String> = v
             .parts
@@ -590,10 +635,13 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             }
         }
     }
-    // Tribal pull: cards that care about Heroes/Villains get better with more of them.
+    // Tribal pull: cards that care about Heroes/Villains get better with more of them - not
+    // cards that merely make a Villain token ("costs {1} less if you control a Villain"
+    // counts).
     let text = card.text_lower();
     for tribe in ["Hero", "Villain", "Robot"] {
-        if text.contains(&tribe.to_lowercase()) {
+        let tl = tribe.to_lowercase();
+        if cares_about(text, &tl) || text.contains(&format!("control a {}", tl)) {
             let n = *st.subtypes.get(tribe).unwrap_or(&0);
             let bonus = (n as f32 / 5.0).min(1.5);
             if bonus > 0.0 {
@@ -622,6 +670,86 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
         }
     }
     (score, why)
+}
+
+/// How much of a creature's ability the deck can use (0..1), for abilities that need other
+/// cards: Equipment ("if he's equipped", "sacrifice an Equipment attached to ~", mana only
+/// for Equipment spells) and creature types ("other Villains you control get +2/+1",
+/// "whenever another nontoken Hero you control enters").
+struct AbilityGate {
+    /// Equipment in the deck against the ~6 per 60 cards an Equipment payoff wants.
+    equipment: f32,
+    /// Creature type (lower case) -> cards of that type against the ~12 per 60 a
+    /// type-matters ability wants.
+    tribes: Vec<(String, f32)>,
+}
+
+impl AbilityGate {
+    fn of(&self, a: &crate::abilities::Ability) -> f32 {
+        let t = &a.text;
+        let mut g: f32 = 1.0;
+        if t.contains("equipped")
+            || t.contains("sacrifice an equipment")
+            || t.contains("equipment spells")
+            || t.contains("equipment attached")
+        {
+            g = g.min(self.equipment);
+        }
+        for (tribe, ratio) in &self.tribes {
+            // A whole word ("elf" isn't the end of "itself, ").
+            let word = t.match_indices(tribe.as_str()).any(|(i, _)| {
+                !t[..i]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_alphabetic())
+            });
+            if word && cares_about(t, tribe) {
+                g = g.min(*ratio);
+            }
+        }
+        g
+    }
+}
+
+fn ability_gate(deck: &Deck, db: &CardDb, rules: &Rules) -> AbilityGate {
+    let scale = rules.deck_size as f32 / 60.0;
+    let cards = resolved(deck, db);
+    let equipment: f32 = cards
+        .iter()
+        .filter(|(c, _)| c.type_line.contains("Equipment"))
+        .map(|(_, n)| *n as f32)
+        .sum();
+    let mut counts: BTreeMap<String, f32> = BTreeMap::new();
+    for (c, n) in &cards {
+        if c.is_land() {
+            continue;
+        }
+        for st in c.subtypes() {
+            if st == "Hero" || st == "Villain" || c.is_creature() {
+                *counts.entry(st.to_lowercase()).or_insert(0.0) += *n as f32;
+            }
+        }
+    }
+    let mut tribes: Vec<String> = [
+        "hero", "villain", "robot", "human", "soldier", "dragon", "elf", "goblin", "zombie",
+        "wizard", "spider", "angel", "cat", "dwarf", "orc",
+    ]
+    .iter()
+    .map(|t| t.to_string())
+    .chain(counts.keys().filter(|k| k.len() >= 3).cloned())
+    .collect();
+    tribes.sort();
+    tribes.dedup();
+    AbilityGate {
+        equipment: (equipment / (6.0 * scale)).min(1.0),
+        tribes: tribes
+            .into_iter()
+            .map(|t| {
+                let n = counts.get(&t).copied().unwrap_or(0.0);
+                (t, (n / (12.0 * scale)).min(1.0))
+            })
+            .collect(),
+    }
 }
 
 thread_local! {
@@ -1806,23 +1934,39 @@ pub fn pool_quality_for(
     scores.iter().take(slots).sum::<f32>() / slots.max(1) as f32
 }
 
+/// What one more colour than the commander's cost colours costs a deck (in average card
+/// score): fewer sources for each colour, more awkward hands. The playtest lab measured
+/// Thanos (cost WBR) rebuilt in WUBRG and WBRG about 2-3 points ahead of WBR (WUBR a little
+/// behind); his pool picks WUBRG with this, and the 2-3 point gain doesn't need more.
+const EXTRA_COLOR: f32 = 0.1;
+
 /// For commanders with 3+ colours in their identity, picks the subset of colours to actually
 /// play: always the colours in the commander's own cost, plus the best others, at most
-/// max(2, cost colours) in total. Two-colour-or-less commanders just use their identity.
+/// max(2, cost colours) in total - or the whole identity when the commander's own abilities
+/// cost more colours than it does (Thanos's power-up wants all five: the deck runs lands for
+/// them anyway, so their spells come almost free). Each colour past the cost colours has to
+/// raise the pool's average card score by `EXTRA_COLOR` to be picked. Two-colour-or-less
+/// commanders just use their identity.
 pub fn best_colors(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> ColorSet {
     let id = cmd.identity();
     if id.count() <= 2 {
         return id;
     }
     let base = cmd.cost_colors();
-    let max = base.count().max(2);
+    let wants = ColorSet(cmd.ability_colors().0.0 & id.0);
+    let max = if wants.is_subset_of(base) {
+        base.count().max(2)
+    } else {
+        id.count()
+    };
     let mut best = (f32::MIN, id);
     for mask in 1u8..32 {
         let s = ColorSet(mask);
         if !s.is_subset_of(id) || !base.is_subset_of(s) || s.count() > max {
             continue;
         }
-        let q = pool_quality_for(cmd, s, db, coll, rules);
+        let extra = s.count().saturating_sub(base.count().max(2)) as f32;
+        let q = pool_quality_for(cmd, s, db, coll, rules) - EXTRA_COLOR * extra;
         if q > best.0 {
             best = (q, s);
         }
@@ -2115,18 +2259,21 @@ mod tests {
         ));
         db = CardDb::new(cards);
         let score = |n: &str| score_card(db.get(n).unwrap(), &deck, &db, &rules);
-        // The deck's creatures costing 2-4, as the builder rates them.
-        let mut near: Vec<f32> = resolved(&deck, &db)
-            .into_iter()
-            .filter(|(c, _)| c.is_creature() && c.mana_value().abs_diff(3) <= 1)
-            .map(|(c, _)| {
-                let mut without = deck.clone();
-                without.remove(&c.name, 1);
-                score_card(c, &without, &db, &rules).0
-            })
-            .collect();
-        near.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let solid = near[near.len() / 2];
+        // The deck's creatures within a mana of `mv`, as the builder rates them: the median.
+        let solid_at = |mv: u32| {
+            let mut near: Vec<f32> = resolved(&deck, &db)
+                .into_iter()
+                .filter(|(c, _)| c.is_creature() && c.mana_value().abs_diff(mv) <= 1)
+                .map(|(c, _)| {
+                    let mut without = deck.clone();
+                    without.remove(&c.name, 1);
+                    score_card(c, &without, &db, &rules).0
+                })
+                .collect();
+            near.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            near[near.len() / 2]
+        };
+        let solid = solid_at(3);
         let (murder, why) = score("Murder");
         assert!(
             murder >= solid + 0.5 - 1e-3,
@@ -2142,7 +2289,8 @@ mod tests {
             small,
             murder
         );
-        assert!(small >= solid - 1.5 - 1e-3);
+        // Small Kill costs two: its floor is a solid 2-drop's, less 1.5.
+        assert!(small >= solid_at(2) - 1.5 - 1e-3);
         let (bounce, why) = score("Unsummon");
         assert!(
             !why.iter().any(|w| w.contains("rated at least")),
@@ -2150,6 +2298,174 @@ mod tests {
             bounce,
             why
         );
+    }
+
+    /// `setup`'s pool plus `extra` cards, and Boss's auto-built deck from the original pool.
+    fn with_cards(extra: Vec<Card>) -> (CardDb, Deck) {
+        let (db, coll) = setup();
+        let rules = Rules::default();
+        let (deck, _) = autobuild(db.get("Boss").unwrap(), &db, &coll, &rules, None, None);
+        let mut cards = db.cards.clone();
+        cards.extend(extra);
+        cards.sort_by(|a, b| a.name.cmp(&b.name));
+        (CardDb::new(cards), deck)
+    }
+
+    #[test]
+    fn equipment_payoffs_need_equipment() {
+        let mut whip = mk(
+            "Whip",
+            "{B}",
+            "Legendary Creature — Human Villain",
+            "Whenever Whip attacks, if he's equipped, each opponent loses 3 life and you gain 3 life.",
+            "B",
+        );
+        whip.rarity = "rare".into();
+        let mut plain = whip.clone();
+        plain.name = "Plain Whip".into();
+        plain.oracle_text =
+            "Whenever Plain Whip attacks, each opponent loses 3 life and you gain 3 life.".into();
+        let sword = mk(
+            "Sword",
+            "{1}",
+            "Artifact — Equipment",
+            "Equipped creature gets +2/+0. Equip {2}",
+            "",
+        );
+        let (db, deck) = with_cards(vec![whip, plain, sword]);
+        let rules = Rules::default();
+        let score = |n: &str, d: &Deck| score_card(db.get(n).unwrap(), d, &db, &rules).0;
+        // No Equipment: the drain is worth nothing, and doesn't hit every opponent either.
+        let (s, why) = score_card(db.get("Whip").unwrap(), &deck, &db, &rules);
+        assert!(score("Plain Whip", &deck) > s + 2.0, "{} {:?}", s, why);
+        assert!(!why.iter().any(|w| w.contains("hits all")), "{:?}", why);
+        // Six Equipment: full value.
+        let mut geared = deck.clone();
+        geared.add("Sword", 6);
+        assert!((score("Plain Whip", &geared) - score("Whip", &geared)).abs() < 1.0);
+    }
+
+    #[test]
+    fn tribal_lords_and_pull_follow_the_deck() {
+        let lord = mk(
+            "Lord",
+            "{3}{B}",
+            "Creature — Human Villain",
+            "Other Villains you control get +2/+1.",
+            "B",
+        );
+        let maker = mk(
+            "Maker",
+            "{1}{B}",
+            "Creature — Human Soldier",
+            "When this creature dies, create a 2/1 black Villain creature token with menace.",
+            "B",
+        );
+        let (db, villains) = with_cards(vec![lord, maker]);
+        let rules = Rules::default();
+        // The same deck with its Villains swapped for Heroes of the same costs.
+        let mut cards = db.cards.clone();
+        for c in cards.iter_mut() {
+            if c.name.starts_with("Goon") {
+                c.type_line = "Creature — Human Hero".into();
+            }
+        }
+        let heroes_db = CardDb::new(cards);
+        let lord_with = score_card(db.get("Lord").unwrap(), &villains, &db, &rules).0;
+        let (lord_without, why) = score_card(
+            heroes_db.get("Lord").unwrap(),
+            &villains,
+            &heroes_db,
+            &rules,
+        );
+        assert!(
+            lord_with > lord_without + 2.0,
+            "a Villain lord needs Villains: {} vs {} {:?}",
+            lord_with,
+            lord_without,
+            why
+        );
+        // Making a Villain token isn't caring about Villains.
+        let (_, why) = score_card(db.get("Maker").unwrap(), &villains, &db, &rules);
+        assert!(
+            !why.iter().any(|w| w.contains("Villains in deck")),
+            "{:?}",
+            why
+        );
+        let (_, why) = score_card(db.get("Lord").unwrap(), &villains, &db, &rules);
+        assert!(
+            why.iter().any(|w| w.contains("Villains in deck")),
+            "{:?}",
+            why
+        );
+    }
+
+    #[test]
+    fn token_spells_count_their_bodies() {
+        let army = mk(
+            "Army",
+            "{3}{R}",
+            "Sorcery",
+            "Create two 3/2 red Soldier creature tokens with vigilance.",
+            "R",
+        );
+        let flare = mk(
+            "Flare",
+            "{3}{R}",
+            "Sorcery",
+            "Create a 1/1 red Soldier creature token.",
+            "R",
+        );
+        let (db, deck) = with_cards(vec![army, flare]);
+        let rules = Rules::default();
+        let (army, why) = score_card(db.get("Army").unwrap(), &deck, &db, &rules);
+        let flare = score_card(db.get("Flare").unwrap(), &deck, &db, &rules).0;
+        assert!(army > flare + 2.0, "{} vs {} {:?}", army, flare, why);
+        assert!(
+            why.iter().any(|w| w.contains("creature tokens")),
+            "{:?}",
+            why
+        );
+    }
+
+    #[test]
+    fn colours_the_commanders_abilities_want_are_played() {
+        let (db, coll) = setup();
+        let rules = Rules::default();
+        let boss = db.get("Boss").unwrap();
+        // A three-colour identity without colourful abilities: at most the cost colours.
+        let mut tri = boss.clone();
+        tri.color_identity = ["B", "R", "G"].iter().map(|c| c.to_string()).collect();
+        assert_eq!(best_colors(&tri, &db, &coll, &rules), boss.cost_colors());
+        // A black-red commander in a five-colour identity whose ability costs all five
+        // colours (like Thanos's power-up) may play every colour its pool supports.
+        let mut titan = boss.clone();
+        titan.name = "Titan Boss".into();
+        titan.color_identity = ["W", "U", "B", "R", "G"]
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        titan.oracle_text = "{W}{U}{B}{R}{G}: Draw a card.".into();
+        let mut counts = coll.counts.clone();
+        counts.insert("Titan Boss".into(), 1);
+        let mut cards = db.cards.clone();
+        cards.push(titan);
+        // Strong green cards: worth a fourth colour.
+        for i in 0..12 {
+            let name = format!("Beast {}", i);
+            let mut c = mk(&name, "{2}{G}", "Creature — Beast", "", "G");
+            c.power = Some("5".into());
+            c.toughness = Some("5".into());
+            c.rarity = "mythic".into();
+            cards.push(c);
+            counts.insert(name, 1);
+        }
+        cards.sort_by(|a, b| a.name.cmp(&b.name));
+        let db = CardDb::new(cards);
+        let coll = Collection::new(PathBuf::new(), counts);
+        let titan = db.get("Titan Boss").unwrap();
+        let picked = best_colors(titan, &db, &coll, &rules);
+        assert!(picked.count() >= 3 && picked.contains(4), "{}", picked);
     }
 
     #[test]

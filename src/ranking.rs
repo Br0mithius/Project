@@ -59,20 +59,25 @@ impl Default for Weights {
             cards: 1.0,
             // Curve and Interaction largely follow Cards (rank correlation 0.85 and 0.79:
             // a deep pool in those colours fills both), so they count for less on top.
-            curve: 0.5,
+            // Curve less still: the simulator already plays the curve out.
+            curve: 0.25,
             // Mostly a penalty for too few creatures (8 distinct values in 64 options).
             creatures: 0.5,
             interaction: 0.6,
             // Opening-hand checks. The full game simulator pays coloured mana exactly and
             // still finds three-colour decks win more than this part says (rank
-            // correlation -0.62), so it counts for less than it did.
-            mana: 0.6,
+            // correlation -0.62; -0.31 with an independent 3000-game playtest of each of
+            // 58 options), so it counts for little.
+            mana: 0.2,
             // Independent information, but partly heuristics and small-sample data.
             commander: 0.8,
             // The only part that plays real 4-player games against league-like decks
             // (noise 0.013 against a spread of 0.08: reliability 0.97); it already
-            // reflects cards, curve and mana, so it gets the most weight.
-            playtest: 1.5,
+            // reflects cards, curve and mana, so it gets the most weight. Checked against
+            // an independent playtest of every option (other opponents' pools, 3000
+            // games each, 58 options): the total's rank correlation with it is 0.59 with
+            // playtest 1.5, mana 0.6, curve 0.5 and 0.78 with these weights.
+            playtest: 3.0,
             // Real decks, but 100-card constructed with every card available - a hint
             // for league pools, and thin for new sets.
             edhrec: 0.4,
@@ -95,9 +100,12 @@ impl Weights {
             self.edhrec,
         ];
         let same = |old: &[f32]| now.iter().zip(old).all(|(a, b)| (a - b).abs() < 1e-4);
-        // All-equal weights (before the audit), then the first audit's defaults.
+        // All-equal weights (before the audit), then the first and second audits' defaults.
         let all_equal = now[..7].iter().all(|w| (w - 1.0).abs() < 1e-6);
-        if all_equal || same(&[1.0, 0.5, 0.5, 0.6, 1.0, 0.8, 1.25, 0.4]) {
+        if all_equal
+            || same(&[1.0, 0.5, 0.5, 0.6, 1.0, 0.8, 1.25, 0.4])
+            || same(&[1.0, 0.5, 0.5, 0.6, 0.6, 0.8, 1.5, 0.4])
+        {
             *self = Weights::default();
         }
     }
@@ -842,5 +850,30 @@ mod tests {
         finalize(&mut evals, &w);
         assert_eq!(evals[0].parts.curve, 1.0);
         assert!(evals[0].total > 50.0 && evals[1].total < 50.0);
+    }
+
+    #[test]
+    fn saved_old_default_weights_move_to_the_new_ones() {
+        let mut old = Weights {
+            cards: 1.0,
+            curve: 0.5,
+            creatures: 0.5,
+            interaction: 0.6,
+            mana: 0.6,
+            commander: 0.8,
+            playtest: 1.5,
+            edhrec: 0.4,
+        };
+        old.replace_old_defaults();
+        assert_eq!(old, Weights::default());
+        // The playtest outweighs the opening-hand check.
+        assert!(old.playtest >= 3.0 * old.cards && old.mana < 0.5);
+        // Weights someone chose stay.
+        let mut mine = Weights {
+            mana: 2.0,
+            ..Weights::default()
+        };
+        mine.replace_old_defaults();
+        assert_eq!(mine.mana, 2.0);
     }
 }
