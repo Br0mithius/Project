@@ -296,7 +296,8 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
     everything the result depends on (session and rules, seed, roster, pins, the imported Public Pool, the card
     data), so it rebuilds by itself when any of them change; `opponents refresh` (or "Simulate again") forces it.
     Everything is deterministic for a seed, and nothing goes online.
-* **Lands**: the league's 25-27 at 60 cards (scaled for 75), low end for cheap curves; basics are split by coloured pips.
+* **Lands**: the league's 25-27 at 60 cards (scaled for 75): its goal of 26, 25 for cheap curves (never more than 26
+  for a high curve: the lab measured a 27th land at no gain); basics are split by coloured pips.
 * **Simulation** shuffles the deck thousands of times to estimate opening-hand land counts, land drops by turn, and the
   odds of casting your commander on curve.
 

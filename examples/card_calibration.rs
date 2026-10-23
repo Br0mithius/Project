@@ -210,6 +210,30 @@ fn main() {
             }
             std::fs::write(&args[8], out).unwrap();
         }
+        // versus <data dir> <games> <deck> <deck>...: each deck's win rate against the playtest
+        // gauntlet on the same seeds, and its difference from the first deck.
+        Some("versus") => {
+            let (db, _coll, rules) = setup(&args[2]);
+            let games: u32 = args[3].parse().unwrap();
+            let decks: Vec<Prepared> = args[4..]
+                .iter()
+                .map(|p| Prepared::new(&Deck::load(&PathBuf::from(p), &db).unwrap(), &db))
+                .collect();
+            let bed = msh_deckbuilder::ranking::TestBed::new(&db, &rules);
+            let all: Vec<&Prepared> = decks.iter().collect();
+            let (done, cancel) = (AtomicUsize::new(0), AtomicBool::new(false));
+            let o = play_all(&all, &bed.gauntlet, &rules, games, 4242, &done, &cancel);
+            for (i, p) in args[4..].iter().enumerate() {
+                let d = o.diff(i, 0);
+                println!(
+                    "{:5.1}%  {:+5.1} ± {:.1} pts vs the first  {}",
+                    o.win_rate(i) * 100.0,
+                    d.gain * 100.0,
+                    d.stderr * 100.0,
+                    p
+                );
+            }
+        }
         // colors <data dir> <commander>: pool quality of every colour set the commander
         // allows, and the set `best_colors` picks.
         Some("colors") => {

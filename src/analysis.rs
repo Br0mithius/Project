@@ -289,17 +289,16 @@ pub fn land_goal(rules: &Rules) -> u32 {
     (lo + hi) / 2
 }
 
+/// Lands for a deck with this average mana value: the bottom of the league's range for a
+/// cheap curve, otherwise its goal (`land_goal`, 26 of 60). Not more for a high curve: the
+/// playtest lab measured a 27th land at no gain for Thanos decks averaging 3.5+ (and the
+/// league's goal is 26).
 pub fn recommended_lands(avg_mv: f32, rules: &Rules) -> u32 {
-    let (lo, hi) = land_range(rules);
-    let mid = (lo + hi) / 2;
-    if avg_mv == 0.0 {
-        mid
-    } else if avg_mv < 2.7 {
+    let (lo, _) = land_range(rules);
+    if avg_mv > 0.0 && avg_mv < 2.7 {
         lo
-    } else if avg_mv > 3.4 {
-        hi
     } else {
-        mid
+        land_goal(rules)
     }
 }
 
@@ -2493,5 +2492,14 @@ mod power_tests {
         assert!((card_power(&card("common")) - 1.25).abs() < 1e-4);
         assert!((card_power(&card("mythic")) - 2.0).abs() < 1e-4);
         assert!((card_power(&card("special")) - 1.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn land_recommendation_stops_at_the_goal() {
+        let rules = Rules::default();
+        assert_eq!(land_goal(&rules), 26);
+        assert_eq!(recommended_lands(2.4, &rules), 25);
+        assert_eq!(recommended_lands(3.0, &rules), 26);
+        assert_eq!(recommended_lands(4.2, &rules), 26);
     }
 }
