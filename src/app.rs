@@ -175,6 +175,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
     ),
     ("unown", "[n] <card>", "Remove cards from your collection"),
     (
+        "unimport",
+        "<file>",
+        "Take a card list out of your pool (e.g. trade-ins)",
+    ),
+    (
         "newcard",
         "",
         "Type in a card that isn't in the database yet",
@@ -304,6 +309,7 @@ impl App {
             "ratings" => self.ratings(),
             "update-cards" => self.update_cards(),
             "import" => self.import(rest),
+            "unimport" => self.unimport(rest),
             "commander" | "cmd" => self.set_commander(rest),
             "add" | "+" => self.add(rest),
             "rm" | "remove" | "-" => self.remove(rest),
@@ -982,6 +988,44 @@ impl App {
                 Err(e) => println!("Couldn't save it: {}", e),
             },
             Err(e) => println!("Couldn't read {}: {}", path, e),
+        }
+    }
+
+    /// `unimport <file>`: takes a card list (e.g. this round's trade-ins) out of the pool.
+    fn unimport(&mut self, arg: &str) {
+        let path = arg.trim().trim_matches('"');
+        if path.is_empty() {
+            println!(
+                "Usage: unimport <file>   (a card list to take out of your pool, e.g. trade-ins)"
+            );
+            return;
+        }
+        let text = match fs::read(path).map(|b| league::decode_text(&b)) {
+            Ok(t) => t,
+            Err(e) => {
+                println!("Couldn't read {}: {}", path, e);
+                return;
+            }
+        };
+        match league::remove_from_pool(&text, &self.db, &mut self.coll) {
+            Ok(r) => {
+                println!(
+                    "Removed {} cards ({} different) from your pool.",
+                    r.removed, r.distinct
+                );
+                if !r.missing.is_empty() {
+                    println!(
+                        "{} {}",
+                        self.style.warn("Not in your pool (or fewer copies):"),
+                        r.missing
+                            .iter()
+                            .map(|(n, k)| format!("{} {}", k, n))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+            }
+            Err(e) => println!("{}", e),
         }
     }
 

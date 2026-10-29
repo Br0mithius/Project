@@ -596,6 +596,31 @@ mod tests {
     }
 
     #[test]
+    fn remove_from_pool_takes_a_list_out() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+        let db = CardDb::load(&dir.join("cards.json")).unwrap();
+        let file = std::env::temp_dir().join(format!("msh_remove_test_{}.txt", std::process::id()));
+        let counts = [("Web Up".to_string(), 2), ("Red Hulk".to_string(), 1)]
+            .into_iter()
+            .collect();
+        let mut coll = Collection::new(file.clone(), counts);
+        let r = remove_from_pool(
+            "1 Web Up (MSH) 41\n2 Red Hulk\n1 Thor Odinson",
+            &db,
+            &mut coll,
+        )
+        .unwrap();
+        assert_eq!((r.removed, r.distinct), (2, 2));
+        assert_eq!(coll.owned("Web Up"), 1);
+        assert_eq!(coll.owned("Red Hulk"), 0);
+        assert_eq!(
+            r.missing,
+            vec![("Red Hulk".to_string(), 1), ("Thor Odinson".to_string(), 1)]
+        );
+        let _ = std::fs::remove_file(file);
+    }
+
+    #[test]
     fn mythic_floor_takes_a_deck_rare_when_spares_are_short() {
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
         let db = CardDb::load(&dir.join("cards.json")).unwrap();
@@ -867,6 +892,59 @@ pub struct ImportResult {
     pub distinct: usize,
     /// Names the card database doesn't know (kept in the pool so nothing is lost).
     pub unknown: Vec<String>,
+}
+
+/// What taking a list out of the pool did.
+pub struct RemoveResult {
+    /// Copies actually removed.
+    pub removed: u32,
+    pub distinct: usize,
+    /// Cards on the list the pool didn't have (or had fewer of): (name, copies missing).
+    pub missing: Vec<(String, u32)>,
+}
+
+/// Takes a Mana Mixer / ManaBox list out of the pool - cards traded in or given away. A card
+/// the pool has fewer copies of than listed goes to zero and is reported as missing.
+pub fn remove_from_pool(
+    text: &str,
+    db: &CardDb,
+    coll: &mut Collection,
+) -> Result<RemoveResult, String> {
+    let lines = parse_import(text);
+    if lines.is_empty() {
+        return Err("No cards found in that list.".into());
+    }
+    let mut wanted: Vec<(u32, String)> = Vec::new();
+    for l in &lines {
+        let name = match db.lookup(&l.name) {
+            crate::db::Lookup::Found(c) => c.name.clone(),
+            _ => l.name.clone(),
+        };
+        match wanted.iter_mut().find(|(_, n)| *n == name) {
+            Some(r) => r.0 += l.count,
+            None => wanted.push((l.count, name)),
+        }
+    }
+    let mut removed = 0;
+    let mut distinct = 0;
+    let mut missing = Vec::new();
+    for (n, name) in &wanted {
+        let have = coll.owned(name);
+        let take = (*n).min(have);
+        if take > 0 {
+            coll.adjust(name, -(take as i64))?;
+            removed += take;
+            distinct += 1;
+        }
+        if take < *n {
+            missing.push((name.clone(), n - take));
+        }
+    }
+    Ok(RemoveResult {
+        removed,
+        distinct,
+        missing,
+    })
 }
 
 /// Imports a Mana Mixer / ManaBox list into the pool, either adding to it or replacing it

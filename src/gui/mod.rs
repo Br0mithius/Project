@@ -163,6 +163,8 @@ enum Action {
     RulesChanged,
     /// Mana Mixer import: (list text, replace the whole pool?).
     Import(String, bool),
+    /// Takes the pasted list out of the pool (trade-ins).
+    RemoveList(String),
     /// Replace the deck (a playtest lab suggestion), with a status message.
     ApplyDeck(Deck, String),
     RunLab(crate::lab::Effort),
@@ -753,6 +755,31 @@ impl GuiApp {
                                     format!(
                                         " Not in the card database (kept; try Settings > Update card database): {}",
                                         r.unknown.join(", ")
+                                    )
+                                }
+                            );
+                            self.import_text.clear();
+                        }
+                        Err(e) => self.status = e,
+                    }
+                }
+                Action::RemoveList(text) => {
+                    match league::remove_from_pool(&text, &self.db, &mut self.coll) {
+                        Ok(r) => {
+                            self.status = format!(
+                                "Removed {} cards ({} different) from your pool.{}",
+                                r.removed,
+                                r.distinct,
+                                if r.missing.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        " Not in your pool (or fewer copies): {}",
+                                        r.missing
+                                            .iter()
+                                            .map(|(n, k)| format!("{} {}", k, n))
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
                                     )
                                 }
                             );
@@ -3770,7 +3797,7 @@ impl GuiApp {
                 self.coll_query = q;
                 ui.add_space(14.0);
                 ui.separator();
-                ui.label(RichText::new("Import from Mana Mixer").strong());
+                ui.label(RichText::new("Import from Mana Mixer, or remove a list").strong());
                 ui.label(
                     RichText::new(
                         "Drag your Mana Mixer (or ManaBox) export file onto this window, or paste it below with Ctrl+V - lines like \"1 Red Hulk (MSH) 149\" or a CSV with Name and Quantity columns.",
@@ -3794,6 +3821,13 @@ impl GuiApp {
                         .clicked()
                     {
                         acts.push(Action::Import(self.import_text.clone(), true));
+                    }
+                    if ui
+                        .add_enabled(!parsed.is_empty(), egui::Button::new("Remove from my pool"))
+                        .on_hover_text("Takes these cards out of your pool - e.g. the cards you traded in")
+                        .clicked()
+                    {
+                        acts.push(Action::RemoveList(self.import_text.clone()));
                     }
                     if ui
                         .add_enabled(!self.import_text.is_empty(), egui::Button::new("Clear"))
