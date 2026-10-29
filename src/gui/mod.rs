@@ -3124,7 +3124,7 @@ impl GuiApp {
             });
             ui.add_space(8.0);
             ui.label(RichText::new("Skill Tree staples (claim in any order)").strong());
-            ui.label(RichText::new("Each one costs 5 VP more than the last: 5, 10, 15 … 45 (225 for all nine). Suggested order for value:").small());
+            ui.label(RichText::new("Each one costs 2 VP more than the last: 5, 7, 9 … 21 (117 for all nine). Suggested order for value:").small());
             egui::Grid::new("staples").striped(true).show(ui, |ui| {
                 for (k, s) in league::STAPLES.iter().enumerate() {
                     ui.label(format!("{}.", k + 1));

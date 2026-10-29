@@ -189,9 +189,9 @@ pub fn claim_cost(card: &Card) -> u32 {
     vp_value(card) * 2
 }
 
-/// §5 Skill Tree: the k-th staple claimed (1-based) costs 5k VP.
+/// §5 Skill Tree: the first staple costs 5 VP and each later one 2 VP more (5, 7, 9 ...).
 pub fn staple_cost(k: u32) -> u32 {
-    5 * k
+    5 + 2 * k.saturating_sub(1)
 }
 
 pub const STAPLES: [&str; 9] = [
@@ -591,8 +591,8 @@ mod tests {
         apply_session(&mut r, 11).unwrap();
         assert_eq!((r.deck_size, r.singleton, r.session), (75, true, 11));
         assert!(apply_session(&mut r, 14).is_err());
-        assert_eq!(staple_cost(9), 45);
-        assert_eq!((1..=9).map(staple_cost).sum::<u32>(), 225);
+        assert_eq!((staple_cost(1), staple_cost(2), staple_cost(9)), (5, 7, 21));
+        assert_eq!((1..=9).map(staple_cost).sum::<u32>(), 117);
     }
 
     #[test]

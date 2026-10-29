@@ -282,7 +282,7 @@ A `?` after a card name in the app means its text hasn't been verified (for exam
     rotates each session), up to 3 claims each, best upgrade for their deck first (it must beat their weakest card);
     each claim costs 2x its VP, a rare needs a rare and a mythic a mythic or two rares traded in that same round, one
     copy per card, and claimed cards leave the pool. Spare cards are traded in cheapest-loss first (the Trades tab's
-    planner), always at least 10 VP; unspent VP is banked, and the next Skill Tree staple (5, 10, 15... VP) is bought
+    planner), always at least 10 VP; unspent VP is banked, and the next Skill Tree staple (5, 7, 9... VP) is bought
     when it beats the deck's weakest card. Traded-in cards join the pool after the round.
   - **This session's claims use your real Public Pool** when you've imported it (Upgrades tab or `publicpool`).
   - The `opponents` command (or **Season & Rules > Simulated opponents**) lists each opponent's deck and a

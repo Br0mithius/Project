@@ -2324,7 +2324,7 @@ impl App {
             );
         }
         println!(
-            "Skill Tree staples cost 5, 10, 15 ... 45 VP in the order you claim them (225 for all 9)."
+            "Skill Tree staples cost 5, 7, 9 ... 21 VP in the order you claim them (117 for all 9)."
         );
         println!("Shop items: 30 VP each, one purchase per session. Each win earns 5 VP.");
     }
