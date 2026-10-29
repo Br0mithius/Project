@@ -434,6 +434,8 @@ pub enum Purpose {
 /// Turn-by-turn facts the rules text asks about, kept apart from the core game state.
 #[derive(Debug, Clone, Default)]
 pub struct GameExtra {
+    /// Playtest lab: (our seat, how much more every opponent weighs it as a target).
+    pub hated: Option<(usize, f32)>,
     /// Counts the turns (for "you may play that card this turn / until your next turn").
     pub turn_no: u32,
     /// Descriptions of permanents that left the battlefield, for the log (only kept while

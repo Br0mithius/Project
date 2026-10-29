@@ -363,6 +363,16 @@ pub struct Rules {
     /// pure simulation.
     #[serde(skip)]
     pub data_dir: Option<PathBuf>,
+    /// Playtest lab only: how much more the opponents weigh our seat when choosing whom to
+    /// attack and target (1 = like any other player; `lab focus`).
+    #[serde(skip)]
+    pub focus_us: f32,
+    /// Playtest lab only: a land goal for this run in place of the league's (`lab lands 25`).
+    #[serde(skip)]
+    pub land_goal_override: Option<u32>,
+    /// Playtest lab only: cards the lab never cuts (`lab ... keep <card>|<card>`).
+    #[serde(skip)]
+    pub lab_keep: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -389,6 +399,9 @@ impl Default for Rules {
             piper_free: true,
             roster: crate::packs::Roster::default(),
             data_dir: None,
+            focus_us: 1.0,
+            land_goal_override: None,
+            lab_keep: Vec::new(),
         }
     }
 }

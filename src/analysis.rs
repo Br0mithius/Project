@@ -285,6 +285,9 @@ pub fn land_range(rules: &Rules) -> (u32, u32) {
 /// that has reached it isn't advised to play more lands (the playtest lab then suggests
 /// better fixing rather than another basic).
 pub fn land_goal(rules: &Rules) -> u32 {
+    if let Some(n) = rules.land_goal_override {
+        return n;
+    }
     let (lo, hi) = land_range(rules);
     (lo + hi) / 2
 }

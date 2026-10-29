@@ -401,7 +401,12 @@ fn weight_uncached(g: &Game, me: usize, o: usize) -> f32 {
         .iter()
         .map(|&q| win_score(g, q))
         .fold(f32::MIN, f32::max);
-    weight_from(g, me, o, win_score(g, o) - max)
+    let w = weight_from(g, me, o, win_score(g, o) - max);
+    // `lab focus`: the table ganging up on our seat.
+    match g.ext.hated {
+        Some((seat, k)) if seat == o && seat != me => w * k,
+        _ => w,
+    }
 }
 
 fn archenemy(g: &Game, me: usize) -> Option<usize> {

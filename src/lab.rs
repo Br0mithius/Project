@@ -425,8 +425,11 @@ pub fn explore_with(
     let land_goal = analysis::land_goal(rules);
     let at_goal = base_lands >= land_goal;
     let is_land = |n: &str| db.get(n).is_some_and(|c| c.is_land());
+    // Cards the user locked in (`lab ... keep`) are never cut.
+    let kept = |n: &str| rules.lab_keep.iter().any(|k| k == n);
     let swap_ok = |s: &Swap| {
-        !(at_goal && is_land(&s.add) && !is_land(&s.cut))
+        !kept(&s.cut)
+            && !(at_goal && is_land(&s.add) && !is_land(&s.cut))
             && !(base_lands <= land_goal && is_land(&s.cut) && !is_land(&s.add))
             && s.add != FILLER
     };
@@ -538,7 +541,7 @@ pub fn explore_with(
     // ------------------------------------------------------------ 1. each card's worth
     progress.set_stage("Measuring what each card is worth");
     let mut worth_swaps: Vec<Swap> = Vec::new();
-    for (c, _) in &spells {
+    for (c, _) in spells.iter().filter(|(c, _)| !kept(&c.name)) {
         // The best spell left on the bench (bench cards are never lands); with none, a
         // basic below the land goal, and at it a plain 2/2 stand-in.
         let repl = bench
@@ -1362,6 +1365,43 @@ mod tests {
             "{:?}",
             adds
         );
+    }
+
+    #[test]
+    fn kept_cards_are_never_cut_and_land_goal_can_be_set() {
+        let (db, coll) = setup();
+        let mut rules = Rules::default();
+        rules.land_goal_override = Some(25);
+        assert_eq!(analysis::land_goal(&rules), 25);
+        let gauntlet = opponents(&db, &coll, &rules);
+        let boss = db.get("Boss").unwrap().clone();
+        let deck = deck_with_lands(25);
+        let keep = resolved(&deck, &db)
+            .into_iter()
+            .find(|(c, _)| !c.is_land())
+            .map(|(c, _)| c.name.clone())
+            .unwrap();
+        rules.lab_keep = vec![keep.clone()];
+        let r = explore_with(
+            &boss,
+            &deck,
+            &db,
+            &coll,
+            &rules,
+            TINY,
+            &gauntlet,
+            &Progress::new(),
+        )
+        .unwrap();
+        assert_eq!(r.land_goal, 25);
+        assert!(
+            r.worth.iter().all(|w| w.name != keep),
+            "a kept card isn't measured for cutting"
+        );
+        assert!(r.additions.iter().all(|a| a.cut != keep));
+        for c in r.best.iter().chain(r.rejected.iter()) {
+            assert!(c.swaps.iter().all(|(s, _)| s.cut != keep));
+        }
     }
 
     #[test]

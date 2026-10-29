@@ -186,6 +186,9 @@ fn one_game(
             let mut table = opponents.clone();
             table.insert(seat, d);
             let mut game = Game::new(&table, rules, Rng::new(game_seed));
+            if rules.focus_us > 1.0 {
+                game.ext.hated = Some((seat, rules.focus_us));
+            }
             play(&mut game) == seat
         })
         .collect()

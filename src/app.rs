@@ -1631,10 +1631,68 @@ impl App {
             }
             _ => {}
         }
-        let Some(effort) = crate::lab::Effort::parse(&arg) else {
-            println!("Usage: lab [quick|thorough]  |  lab show  |  lab apply");
+        // Extra words: `focus` (the table targets us heavily), `lands N` (a land goal for
+        // this run).
+        let words: Vec<&str> = arg.split_whitespace().collect();
+        let mut rules = self.rules.clone();
+        let mut rest = Vec::new();
+        let mut k = 0;
+        while k < words.len() {
+            match words[k] {
+                "focus" => rules.focus_us = 2.5,
+                // Everything after `keep`: card names separated by `|`.
+                "keep" => {
+                    for name in words[k + 1..].join(" ").split('|') {
+                        match self.db.lookup(name.trim()) {
+                            crate::db::Lookup::Found(c) => rules.lab_keep.push(c.name.clone()),
+                            _ => {
+                                println!("Not a card: {}", name.trim());
+                                return;
+                            }
+                        }
+                    }
+                    break;
+                }
+                "lands" => match words.get(k + 1).and_then(|n| n.parse().ok()) {
+                    Some(n) => {
+                        rules.land_goal_override = Some(n);
+                        k += 1;
+                    }
+                    None => {
+                        println!("Usage: lab ... lands <number>");
+                        return;
+                    }
+                },
+                w => rest.push(w),
+            }
+            k += 1;
+        }
+        let Some(effort) = crate::lab::Effort::parse(&rest.join(" ")) else {
+            println!(
+                "Usage: lab [quick|thorough] [focus] [lands N] [keep <card>|<card>]  |  lab show  |  lab apply"
+            );
             return;
         };
+        if rules.focus_us > 1.0 {
+            println!(
+                "{}",
+                self.style
+                    .dim("Focus: every opponent weighs you 2.5x as a target.")
+            );
+        }
+        if !rules.lab_keep.is_empty() {
+            println!(
+                "{}",
+                self.style
+                    .dim(&format!("Never cut: {}.", rules.lab_keep.join(", ")))
+            );
+        }
+        if let Some(n) = rules.land_goal_override {
+            println!(
+                "{}",
+                self.style.dim(&format!("Land goal for this run: {}.", n))
+            );
+        }
         let Some(cmd) = self
             .deck
             .commander
@@ -1663,13 +1721,7 @@ impl App {
         let report = std::thread::scope(|s| {
             let job = s.spawn(|| {
                 crate::lab::explore(
-                    &cmd,
-                    &self.deck,
-                    &self.db,
-                    &self.coll,
-                    &self.rules,
-                    effort,
-                    &progress,
+                    &cmd, &self.deck, &self.db, &self.coll, &rules, effort, &progress,
                 )
             });
             let mut last = String::new();
