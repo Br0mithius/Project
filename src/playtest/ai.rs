@@ -1449,8 +1449,7 @@ fn floor_relaxed(g: &Game, p: usize) -> bool {
 /// paired games, a Thanos deck with five removal spells): +0.06 ± 0.03 win-rate points -
 /// the old valuation already held most removal for bigger targets; the floor stops the
 /// rest (a removal spell on a 2/2 token at the end of a turn, or on a small attacker).
-/// Valuing removal of a worthy target higher instead (0.6 of its worth, not 0.375)
-/// measured -0.9.
+/// (Removal itself is valued at 0.6 of the victim's worth: see `removal_discount`.)
 pub(crate) fn worth_removing(g: &Game, p: usize, i: usize) -> bool {
     if !floor_on(p) {
         return true;
@@ -1511,8 +1510,12 @@ fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
     }
     // A one-for-one in a four-player game: the creature removed was hurting one of three
     // opponents' victims, and the card and mana could have gone on our own board instead
-    // (measured: removal valued at 0.375 of the victim's worth plays best).
-    f * 0.375
+    // Measured with only our seat changed (4 x 30,000-40,000 paired games, a Thanos deck
+    // with Hero's Downfall): 0.6 of the victim's worth beat 0.375 by +0.32 win-rate points
+    // on average (+0.19 to +0.47; +0.1 with the table focusing on us); 0.75 and 1.0 were
+    // no better. An older test that changed every seat at once had read 0.6 as worse, as
+    // the opponents' removal got better too.
+    f * 0.6
 }
 
 /// What an effect would do for player `p` right now (card points).

@@ -763,8 +763,8 @@ thread_local! {
 /// What a solid playable creature costing about `mv` scores in `deck`: the median score of
 /// the deck's own creatures within one mana of it (all its creatures when fewer than three
 /// are that close), or with fewer than three creatures in all, a vanilla body worth about
-/// 130% of fair value (`value::fair_value`) for `cost`.
-fn solid_creature_score(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> f32 {
+/// 130% of fair value (`value::fair_value`) for `mv`.
+fn solid_creature_score(card: &Card, mv: u32, deck: &Deck, db: &CardDb, rules: &Rules) -> f32 {
     let key = deck_key(deck);
     let cached = CREATURE_SCORES.with(|c| {
         c.borrow()
@@ -785,7 +785,6 @@ fn solid_creature_score(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
         CREATURE_SCORES.with(|c| *c.borrow_mut() = Some((key, v.clone())));
         v
     });
-    let mv = card.mana_value();
     let median = |mut v: Vec<f32>| {
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
         v[v.len() / 2]
@@ -807,7 +806,7 @@ fn solid_creature_score(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
     let solid = Card {
         name: format!("(a solid {}-mana creature)", mv),
         mana_cost: card.mana_cost.clone(),
-        cmc: card.cmc,
+        cmc: mv as f32,
         type_line: "Creature — Human".into(),
         power: Some(format!("{}", p)),
         toughness: Some(format!("{}", t)),
@@ -825,7 +824,10 @@ fn solid_creature_score(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
 /// qualifies - destroy or exile any creature, steal one, 4+ damage or -4/-4 - costing 5 or
 /// less; conditional removal (a toughness or mana value limit, 2-3 damage) gets a floor 1.5
 /// lower. None for anything else (bounce, taps, X spells, board wipes, and creatures, whose
-/// removal is valued with their bodies).
+/// removal is valued with their bodies). Removal costing less than 4 is floored at least like
+/// a 4-mana creature: the playtests measure 2- and 3-mana removal (Hero's Downfall, Murdock's
+/// Crusade) as worth at least what 4-mana removal is (Hour of Defeat), so a cheaper answer
+/// must never rank below a dearer one.
 fn removal_floor(
     card: &Card,
     deck: &Deck,
@@ -857,7 +859,8 @@ fn removal_floor(
     if !broad && !conditional {
         return None;
     }
-    let base = solid_creature_score(card, deck, db, rules);
+    let base = solid_creature_score(card, mv, deck, db, rules)
+        .max(solid_creature_score(card, mv.max(4), deck, db, rules));
     let instant = card.type_line.contains("Instant") || card.text_lower().contains("flash");
     Some(if broad {
         (base + if instant { 0.5 } else { 0.0 }, "efficient removal")
@@ -2253,6 +2256,13 @@ mod tests {
             "B",
         ));
         cards.push(mk(
+            "Slow Murder",
+            "{3}{B}",
+            "Instant",
+            "Destroy target creature.",
+            "B",
+        ));
+        cards.push(mk(
             "Unsummon",
             "{U}",
             "Instant",
@@ -2275,15 +2285,18 @@ mod tests {
             near.sort_by(|a, b| a.partial_cmp(b).unwrap());
             near[near.len() / 2]
         };
-        let solid = solid_at(3);
+        let solid = solid_at(3).max(solid_at(4));
         let (murder, why) = score("Murder");
         assert!(
             murder >= solid + 0.5 - 1e-3,
-            "instant unconditional removal at least a solid 3-drop and a half ({} vs {}): {:?}",
+            "instant unconditional removal at least a solid 4-drop and a half ({} vs {}): {:?}",
             murder,
             solid,
             why
         );
+        // The same answer for more mana never ranks above the cheap one.
+        let (slow, _) = score("Slow Murder");
+        assert!(slow <= murder + 1e-3, "{} vs {}", slow, murder);
         let (small, _) = score("Small Kill");
         assert!(
             small < murder,
@@ -2291,8 +2304,8 @@ mod tests {
             small,
             murder
         );
-        // Small Kill costs two: its floor is a solid 2-drop's, less 1.5.
-        assert!(small >= solid_at(2) - 1.5 - 1e-3);
+        // Small Kill costs two: its floor is a solid 2- or 4-drop's, less 1.5.
+        assert!(small >= solid_at(2).max(solid_at(4)) - 1.5 - 1e-3);
         let (bounce, why) = score("Unsummon");
         assert!(
             !why.iter().any(|w| w.contains("rated at least")),
