@@ -859,8 +859,13 @@ fn removal_floor(
     if !broad && !conditional {
         return None;
     }
-    let base = solid_creature_score(card, mv, deck, db, rules)
-        .max(solid_creature_score(card, mv.max(4), deck, db, rules));
+    let base = solid_creature_score(card, mv, deck, db, rules).max(solid_creature_score(
+        card,
+        mv.max(4),
+        deck,
+        db,
+        rules,
+    ));
     let instant = card.type_line.contains("Instant") || card.text_lower().contains("flash");
     Some(if broad {
         (base + if instant { 0.5 } else { 0.0 }, "efficient removal")
