@@ -1509,13 +1509,16 @@ fn removal_discount(g: &Game, p: usize, i: usize) -> f32 {
         f *= 0.5;
     }
     // A one-for-one in a four-player game: the creature removed was hurting one of three
-    // opponents' victims, and the card and mana could have gone on our own board instead
-    // Measured with only our seat changed (4 x 30,000-40,000 paired games, a Thanos deck
-    // with Hero's Downfall): 0.6 of the victim's worth beat 0.375 by +0.32 win-rate points
-    // on average (+0.19 to +0.47; +0.1 with the table focusing on us); 0.75 and 1.0 were
-    // no better. An older test that changed every seat at once had read 0.6 as worse, as
-    // the opponents' removal got better too.
-    f * 0.6
+    // opponents' victims, and the card and mana could have gone on our own board instead.
+    // Every seat plays this, so it is tuned as a table-wide equilibrium (a Thanos deck with
+    // Hero's Downfall, 30,000-40,000 paired games per test, one seat changed against a
+    // table at the current setting): from 0.375, 0.6 for one seat gained +0.32 win-rate
+    // points; with the table at 0.6, 0.75 gained +0.2 more (and halving the hold-back in
+    // `options` +0.17); with the table at 0.75 and half the hold-back, no single seat
+    // gains from changing either (0.6, 1.0, full or quarter hold-back: all within
+    // ±0.15). An older test that changed every seat at once read higher values as worse,
+    // because the opponents' removal got better too.
+    f * 0.75
 }
 
 /// What an effect would do for player `p` right now (card points).
@@ -2582,9 +2585,10 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
             if !back && (c.kw & FLASH != 0 || c.is(T_INSTANT)) {
                 v *= 0.6;
             }
-            // One-for-one removal is kept for a target worth it: a bigger threat may come.
+            // One-for-one removal is kept for a target worth it: a bigger threat may come
+            // (half the old hold-back: see `removal_discount`).
             if !back && is_spot_removal(c) {
-                v -= (1.5 + 0.4 * g.round as f32).min(5.5);
+                v -= (0.75 + 0.2 * g.round as f32).min(2.75);
             }
             out.push((v, cost.total(), Act::Cast(src, opts)));
             // Cast it and use its power-up the same turn, at the reduced cost (planned as
