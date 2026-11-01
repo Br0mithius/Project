@@ -294,8 +294,9 @@ pub fn land_goal(rules: &Rules) -> u32 {
 
 /// Lands for a deck with this average mana value: the bottom of the league's range for a
 /// cheap curve, otherwise its goal (`land_goal`, 26 of 60). Not more for a high curve: the
-/// playtest lab measured a 27th land at no gain for Thanos decks averaging 3.5+ (and the
-/// league's goal is 26).
+/// league's goal is 26, which real-play mana formulas also give a 3.8-average five-colour
+/// deck (paired playtests of Thanos put a 27th land at only +0.2 to +0.9 win-rate points
+/// over a zero-value spell, and lean about half a land high).
 pub fn recommended_lands(avg_mv: f32, rules: &Rules) -> u32 {
     let (lo, _) = land_range(rules);
     if avg_mv > 0.0 && avg_mv < 2.7 {

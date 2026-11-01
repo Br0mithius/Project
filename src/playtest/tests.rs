@@ -966,6 +966,40 @@ fn mulligans_keep_playable_hands() {
 }
 
 #[test]
+fn keep_rule_matches_a_typical_player() {
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        card("Big", "{6}{G}", "Creature — Beast", "", Some(("6", "6"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card("Rock", "{2}", "Artifact", "{T}: Add {C}.", None),
+    ]);
+    let mut g = Game::new(&[&d, &d], &Rules::default(), Rng::new(1));
+    let mut keeps = |hand: &[u16], attempt: u8| {
+        g.players[0].hand = hand.to_vec();
+        ai::keepable(&g, 0, attempt)
+    };
+    assert!(
+        keeps(&[0, 0, 0, 1, 1, 1, 1], 0),
+        "3 lands, nothing early: keep"
+    );
+    assert!(
+        keeps(&[0, 0, 2, 1, 1, 1, 1], 0),
+        "2 lands and a 2-drop: keep"
+    );
+    assert!(
+        keeps(&[0, 0, 3, 1, 1, 1, 1], 0),
+        "2 lands and a mana rock: keep"
+    );
+    assert!(!keeps(&[0, 0, 1, 1, 1, 1, 1], 0), "2 lands, only 7-drops");
+    assert!(!keeps(&[0, 2, 2, 3, 1, 1, 1], 0), "1 land");
+    assert!(
+        !keeps(&[0, 0, 0, 0, 0, 0, 1], 0),
+        "6 lands: the free mulligan"
+    );
+    assert!(keeps(&[0, 0, 0, 0, 0, 0, 1], 1), "6 lands after a mulligan");
+}
+
+#[test]
 fn hand_size_and_fog() {
     let d = prep(&[
         Card::basic_land("Forest", 'G'),

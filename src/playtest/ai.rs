@@ -855,6 +855,16 @@ fn lands_total(g: &Game, p: usize) -> usize {
             .count()
 }
 
+/// Colours the lands in `p`'s hand make.
+fn hand_land_colours(g: &Game, p: usize) -> u8 {
+    let pl = &g.players[p];
+    pl.hand
+        .iter()
+        .map(|&c| &pl.cards[c as usize])
+        .filter(|c| c.is(T_LAND))
+        .fold(0, |m, c| m | c.produces)
+}
+
 fn lands_in_play(g: &Game, p: usize) -> usize {
     g.perms
         .iter()
@@ -1189,25 +1199,32 @@ pub fn free_spell_choice(g: &Game, me: usize, limit: u8) -> Option<usize> {
 
 // ------------------------------------------------------------ mulligan
 
-/// A keepable hand: 2-5 lands and an early play its lands can cast (or 3+ lands). The
-/// first mulligan is free, so the first hand also needs an untapped land and, with only two
-/// lands, a castable early play.
-fn keepable(g: &Game, p: usize, attempt: u8) -> bool {
+/// Landcycling or a "search for a land" cycling cost: the card finds a land.
+fn finds_land(find: &str) -> bool {
+    find == "land" || ["plains", "island", "swamp", "mountain", "forest"].contains(&find)
+}
+
+/// A keepable hand, as a typical player keeps one: 3-5 lands (tapped or not); 2 lands with a
+/// mana rock, a landcycler or a 1-3 drop the lands can cast; 6 lands only once a mulligan
+/// has been taken. (The old rule also wanted an untapped land and a castable early play on
+/// the free hand: 25% of a 26-land deck's hands went back, against ~15% for a human.)
+pub(crate) fn keepable(g: &Game, p: usize, attempt: u8) -> bool {
     let pl = &g.players[p];
     let hand: Vec<&SimCard> = pl.hand.iter().map(|&c| &pl.cards[c as usize]).collect();
     let lands: Vec<&&SimCard> = hand.iter().filter(|c| c.is(T_LAND)).collect();
-    let n = lands.len();
     let colours = lands.iter().fold(0u8, |m, c| m | c.produces);
-    let untapped = lands.iter().filter(|c| !c.enters_tapped).count();
     let castable = |c: &SimCard| pip_mask(&c.cost) & !colours == 0;
-    let early = hand
-        .iter()
-        .filter(|c| !c.is(T_LAND) && c.mv as usize <= n.max(2) + 1 && castable(c))
-        .count();
-    if !(2..=5).contains(&n) || early == 0 && n < 3 {
-        return false;
+    match lands.len() {
+        3..=5 => true,
+        6 => attempt > 0,
+        2 => hand.iter().any(|c| {
+            !c.is(T_LAND)
+                && (c.mana_ability && c.mv <= 3
+                    || c.cycling.as_ref().is_some_and(|(_, f)| finds_land(f))
+                    || c.mv <= 3 && castable(c))
+        }),
+        _ => false,
     }
-    attempt > 0 || untapped >= 1 && (early >= 1 || n >= 4)
 }
 
 /// London mulligan (CR 103.5), with the first mulligan free as in multiplayer Commander.
@@ -1252,8 +1269,8 @@ pub fn mulligan(g: &mut Game, p: usize) {
             } else if attempt == 2 {
                 "not keepable, kept anyway (third hand)"
             } else {
-                "not keepable (needs 2-5 lands and an early play they can cast, or 3+ lands; \
-                 the free first hand also an untapped land): mulligan"
+                "not keepable (needs 3-5 lands, 6 after a mulligan, or 2 with a mana rock, a \
+                 landcycler or a 1-3 drop they can cast): mulligan"
             };
             g.note(|| {
                 format!(
@@ -2639,11 +2656,14 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
         // Cycling a dead card.
         if let Some((cost, find)) = &c.cycling {
             let lands = lands_total(g, p);
-            let land_kind = find == "land"
-                || ["plains", "island", "swamp", "mountain", "forest"].contains(&find.as_str());
-            // Cycle when the card is dead now: short on lands (land-finders), or too expensive early.
+            let land_kind = finds_land(find);
+            // Cycle when the card is dead now: short on lands (land-finders: under five lands
+            // in play and hand, or under seven while a colour the hand or the commander needs
+            // is missing), or too expensive early.
+            let short =
+                lands < 5 || lands < 7 && missing_colors(g, p) & !hand_land_colours(g, p) != 0;
             let dead = if land_kind {
-                lands < 4 && !c.is(T_LAND) || c.is(T_LAND) && lands >= 6
+                short && !c.is(T_LAND) || c.is(T_LAND) && lands >= 6
             } else {
                 c.mv as usize > lands_in_play(g, p) + 3 && g.round <= 4
                     || c.is(T_LAND) && lands >= 6
