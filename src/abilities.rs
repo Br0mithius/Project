@@ -2597,6 +2597,33 @@ pub fn parse(card: &Card) -> Parsed {
         }
         parsed.back = Some(Box::new(b));
     }
+    // "Gets +X/+0, where X is War Machine's power", "add X mana ..., where X is this
+    // creature's power", "where X is the number of Equipment attached to him": the X is the
+    // card's own printed power (or one Equipment), not a typical X.
+    let own_power = card
+        .power
+        .as_deref()
+        .and_then(|p| p.parse::<i32>().ok())
+        .filter(|&p| p > 0);
+    for a in parsed.abilities.iter_mut() {
+        let n = if a.text.contains("where x is ~'s power")
+            || a.text.contains("where x is this creature's power")
+        {
+            own_power
+        } else if a
+            .text
+            .contains("where x is the number of equipment attached")
+        {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(n) = n {
+            for e in a.effects.iter_mut() {
+                set_x(e, n, &a.text);
+            }
+        }
+    }
     // "When you cast this spell, copy it X times": the spell's effects happen X+1 times
     // (Photon Blast Barrage), rather than a separate "copy" worth little on its own.
     if card.text_lower().contains("copy it x times") {
@@ -2739,6 +2766,16 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
         // War: amass 1, or 3 if cast from a graveyard). Read as the plain ability plus a
         // conditional alternative, so the two aren't added together.
         let (base_line, alternative, instead) = split_instead(&line);
+        // "Deals 2 damage to target attacking or blocking creature. If ..., it deals 4
+        // damage to that creature instead" (Helicarrier Strike): still the same kind of
+        // creature.
+        let alternative = alternative.map(|alt| {
+            if instead {
+                same_target_as(&base_line, &alt)
+            } else {
+                alt
+            }
+        });
         if let Some(alt_line) = alternative {
             let base = read_line(&base_line, card, is_spell).filter(|a| !a.effects.is_empty());
             if let (Some(mut base), Some(mut alt)) = (base, read_line(&alt_line, card, is_spell)) {
@@ -2810,6 +2847,85 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
     }
     // Teamwork, Storied and friends live in the keyword list; Sagas' "I, II —" lines are
     // chapters (handled in read_line).
+    out
+}
+
+/// Puts a known value in place of an effect's estimated X ("where X is ~'s power").
+fn set_x(e: &mut Effect, n: i32, text: &str) {
+    match e {
+        Effect::Draw { amount, .. }
+        | Effect::Mill { amount }
+        | Effect::Tokens { amount, .. }
+        | Effect::PlusCounters { amount, .. }
+        | Effect::Damage { amount, .. }
+        | Effect::Shrink { amount, .. }
+        | Effect::Drain { amount, .. }
+        | Effect::Scry(amount)
+        | Effect::GainLife(amount)
+        | Effect::AddMana(amount)
+        | Effect::Amass(amount)
+            if amount.x =>
+        {
+            amount.n = n;
+        }
+        Effect::Pump {
+            power, toughness, ..
+        } => {
+            if text.contains("+x/") {
+                *power = n;
+            }
+            if text.contains("/+x") {
+                *toughness = n;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// "That creature" in an alternative ("..., it deals 4 damage to that creature instead") is
+/// the creature the base sentence targets: written out the same way ("target attacking or
+/// blocking creature"), so it keeps that sentence's restrictions. "That creature's
+/// controller" is left alone.
+fn same_target_as(base: &str, alt: &str) -> String {
+    let Some(start) = base.find("target ") else {
+        return alt.to_string();
+    };
+    let rest = &base[start..];
+    let Some(end) = rest.find("creature") else {
+        return alt.to_string();
+    };
+    let mut phrase = rest[..end + "creature".len()].to_string();
+    if base[..start].ends_with("another ") {
+        phrase.insert_str(0, "another ");
+    }
+    for owner in [" you control", " an opponent controls"] {
+        if rest[end + "creature".len()..].starts_with(owner) {
+            phrase.push_str(owner);
+        }
+    }
+    // A phrase that runs past one target ("target player ... target creature") is not one.
+    if phrase.contains(['.', ',']) || phrase.matches("target").count() > 1 {
+        return alt.to_string();
+    }
+    // Only in what happens, not in the condition ("if that creature is another Hero, put
+    // two +1/+1 counters on it instead" is about the same target).
+    let cond_end = alt
+        .find("if ")
+        .and_then(|i| alt[i..].find(", ").map(|j| i + j + 2))
+        .unwrap_or(0);
+    let mut out = alt[..cond_end].to_string();
+    let mut tail = &alt[cond_end..];
+    while let Some(i) = tail.find("that creature") {
+        let after = &tail[i + "that creature".len()..];
+        out.push_str(&tail[..i]);
+        if after.starts_with('\'') || after.starts_with('’') {
+            out.push_str("that creature");
+        } else {
+            out.push_str(&phrase);
+        }
+        tail = after;
+    }
+    out.push_str(tail);
     out
 }
 
@@ -4438,6 +4554,76 @@ mod tests {
             crate::value::creature_value(db.get("Dragon Mage").unwrap()).efficiency < 2.0,
             "everyone draws seven"
         );
+    }
+
+    /// Hand-checked against the printed text of pool cards the review found misread.
+    #[test]
+    fn reads_pool_review_cards() {
+        let db = db();
+        // Helicarrier Strike: "deals 2 damage to target attacking or blocking creature. If
+        // ... teamwork, it deals 4 damage to that creature instead" - still an attacker or
+        // blocker.
+        let h = p(&db, "Helicarrier Strike");
+        let alt = h
+            .abilities
+            .iter()
+            .find(|a| a.instead)
+            .expect("teamwork half");
+        assert!(matches!(
+            alt.effects.as_slice(),
+            [Effect::Damage { amount, to }]
+                if amount.n == 4
+                    && to.restr.has(crate::restrict::ATTACKING)
+                    && to.restr.has(crate::restrict::BLOCKING)
+        ));
+        // "That creature" in a condition stays as it is (Wakandan Royal Guard).
+        assert!(
+            p(&db, "Wakandan Royal Guard")
+                .abilities
+                .iter()
+                .all(|a| !a.text.contains("if target creature")),
+        );
+        // "That creature's controller" stays as it is (Repulsor Blast's teamwork bonus).
+        assert!(
+            p(&db, "Repulsor Blast")
+                .abilities
+                .iter()
+                .any(|a| a.text.contains("that creature's controller")),
+        );
+        // War Machine: "+X/+0, where X is War Machine's power" - his power is 1.
+        assert!(
+            p(&db, "War Machine, Legacy of Iron")
+                .effects()
+                .any(|(_, e)| matches!(
+                    e,
+                    Effect::Pump {
+                        power: 1,
+                        toughness: 0,
+                        ..
+                    }
+                ))
+        );
+        // Whiplash: "X is the number of Equipment attached to him" - one, typically.
+        assert!(
+            p(&db, "Whiplash, Vengeful Engineer")
+                .effects()
+                .any(|(_, e)| matches!(e, Effect::Drain { amount, each: true } if amount.n == 1))
+        );
+        // Doc Samson: "add X mana, where X is Doc Samson's power" - 3.
+        assert!(
+            p(&db, "Doc Samson, Super Psychiatrist")
+                .effects()
+                .any(|(_, e)| matches!(e, Effect::AddMana(a) if a.n == 3))
+        );
+        // Vision Quest searches "library and/or graveyard" for an artifact creature card.
+        let r = crate::restrict::object_restr(
+            &db.get("Vision Quest")
+                .unwrap()
+                .text_lower()
+                .replace('\n', " "),
+        );
+        let artifact = crate::playtest::compile::T_ARTIFACT;
+        assert_eq!(r.all_types & artifact, artifact);
     }
 
     #[test]

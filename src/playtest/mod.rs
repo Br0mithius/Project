@@ -487,11 +487,18 @@ impl<'a> Game<'a> {
             // X spells: spend about half the remaining mana on X ("copy it X times": one
             // copy per worthwhile extra target).
             let spare = self.mana_available(p).saturating_sub(cost.total());
-            let n = if ai::copies_x_times(c) {
-                ai::copies_x(self, p, c, spare)
-            } else {
-                (spare / 2).max(1)
-            };
+            let n =
+                if ai::copies_x_times(c) {
+                    ai::copies_x(self, p, c, spare)
+                } else if c.abilities.iter().any(|a| {
+                    a.trig == Trig::Spell && a.text.contains("card with mana value x or less")
+                }) {
+                    // "Search ... for an artifact creature card with mana value X or less" (Vision
+                    // Quest): the bigger the X, the better the card found.
+                    spare.max(1)
+                } else {
+                    (spare / 2).max(1)
+                };
             cost = cost.plus_generic(n);
             x = Some(n as i32);
         }

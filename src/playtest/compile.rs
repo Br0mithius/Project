@@ -839,6 +839,9 @@ pub enum Cond {
     AttackersAtLeast(u8),
     /// A creature of this type you control attacked or entered this turn.
     AttackedOrEntered(String),
+    /// A permanent of these card types entered under your control this turn (and is still
+    /// there).
+    TypeEnteredThisTurn(u16),
     /// One of your attackers has this creature type.
     AttackerSubtype(String),
     /// Your attackers have total power N or greater.
@@ -1843,6 +1846,19 @@ fn cond_from(t: &str) -> Cond {
     if let Some(w) = word_after(t, "attacked with a ").filter(|_| t.contains(" entered")) {
         return Cond::AttackedOrEntered(w.to_string());
     }
+    // "If an artifact entered the battlefield under your control this turn" (Iron Man,
+    // Master of Machines).
+    if let Some(w) = t
+        .split(" entered the battlefield under your control this turn")
+        .next()
+        .filter(|_| t.contains(" entered the battlefield under your control this turn"))
+        .and_then(|h| h.rsplit(' ').next())
+    {
+        let types = types_in(w);
+        if types != 0 {
+            return Cond::TypeEnteredThisTurn(types);
+        }
+    }
     if t.contains("attacked this turn")
         || t.contains("attacked with")
         || t.contains("dealt combat damage by")
@@ -2791,6 +2807,12 @@ fn sim_rules(text: &str, effects: &mut Vec<Effect>) {
         && !text.contains("loses all abilities")
     {
         effects.retain(|e| !matches!(e, Effect::Rule(l) if l == "sets base power/toughness"));
+        // "Target artifact or creature becomes an artifact creature with base power and
+        // toughness 4/4 and gains flying" (I Am Iron Man): the keywords go to the same
+        // permanent, given with its new size (`Game::set_base_pt`).
+        if text.contains("target") && text.contains("becomes an artifact creature with base") {
+            effects.retain(|e| !matches!(e, Effect::Grant { .. }));
+        }
         rule(effects, "sets base power/toughness");
     }
     // "Until end of turn, target creature gains 'When this creature dies, return it to the
@@ -3481,15 +3503,22 @@ pub fn compile(card: &Card) -> SimCard {
     // A line of its own: "This creature can't block." (`own_text` has the card as "~"; a
     // condition or "this turn" makes it something else).
     let own_line = |s: &str| own_text.lines().any(|l| l.trim() == s);
+    // Abilities in quotes belong to tokens it makes ("create two 1/1 Rat tokens with 'This
+    // creature can't block'": Redcap Gutter-Dweller), not to the card.
+    let unquoted: String = front_text
+        .split('"')
+        .step_by(2)
+        .collect::<Vec<_>>()
+        .join(" ");
     if own_line("~ can't be blocked.")
-        || front_text.contains("~ can't be blocked")
-        || front_text.contains("can't be blocked.") && front_text.starts_with("~")
+        || unquoted.contains("~ can't be blocked")
+        || unquoted.contains("can't be blocked.") && unquoted.starts_with("~")
     {
         kw |= UNBLOCKABLE;
     }
     if own_line("~ can't block.")
-        || front_text.contains("~ can't block")
-        || front_text.contains("can't block.") && !front_text.contains("target")
+        || unquoted.contains("~ can't block")
+        || unquoted.contains("can't block.") && !unquoted.contains("target")
     {
         kw |= CANT_BLOCK;
     }

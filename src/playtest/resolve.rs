@@ -1321,6 +1321,11 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+            // A mode with a cost of its own happens only if it's paid.
+            let modes: Vec<usize> = modes
+                .into_iter()
+                .filter(|&m| self.pay_mode_cost(me, ab.mode_text(m).0))
+                .collect();
             modes
                 .into_iter()
                 .flat_map(|m| {
@@ -2685,6 +2690,39 @@ impl<'a> Game<'a> {
                 }
                 if to.kind == Kind::AnyTarget || to.whose == Whose::Theirs || to.whose == Whose::Any
                 {
+                    // "It deals 1 damage to any target. If a Dragon is dealt damage this way,
+                    // destroy it" (The Black Arrow): the opponents' best Dragon, if any.
+                    let slays = text
+                        .split("if a ")
+                        .nth(1)
+                        .and_then(|r| r.split_once(" is dealt damage this way, destroy it"))
+                        .map(|(sub, _)| sub.to_string());
+                    let slay_target = slays.as_ref().and_then(|sub| {
+                        let t1 = Target { count: 1, ..*to };
+                        self.candidates(ctx, &t1, true)
+                            .into_iter()
+                            .filter(|&i| {
+                                self.perms[i].ctrl as usize != me
+                                    && self.perms[i].subtypes.iter().any(|s| s == sub)
+                                    && !self.perms[i].has(INDESTRUCTIBLE)
+                            })
+                            .max_by(|&a, &b| {
+                                ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
+                            })
+                            .map(|i| self.perms[i].id)
+                    });
+                    if let Some(id) = slay_target {
+                        let i = self.idx(id).unwrap();
+                        if self.pay_ward(me, i) {
+                            self.actor = ctx.ctrl as u8;
+                            self.emit_targeted(id);
+                            self.hurt(ctx, id, n);
+                            if let Some(i) = self.idx(id) {
+                                self.destroy(i);
+                            }
+                        }
+                        return;
+                    }
                     let mut hit = ai::damage_target(self, ctx, to, n);
                     // A required target (CR 601.2c: chosen on casting, so there is one): when
                     // nothing dies to it, the best of the opponents' legal targets still takes
@@ -4070,6 +4108,17 @@ impl<'a> Game<'a> {
                                 .unwrap()
                         })
                         .map(|i| self.perms[i].clone())
+                } else if text
+                    .split("becomes a copy of ")
+                    .nth(1)
+                    .and_then(|r| r.split(", except").next())
+                    .is_some_and(|what| what.contains("target") && !what.contains("creature"))
+                {
+                    // "Becomes a copy of up to one target artifact, non-Aura enchantment, or
+                    // land, except ... he's a legendary 4/4 Human Villain creature" (Absorbing
+                    // Man): never a creature's body. Only size and keywords are copied here,
+                    // so nothing changes.
+                    None
                 } else {
                     let any = !text.contains("you control");
                     ai::best_to_copy(self, me, any)
@@ -4354,7 +4403,19 @@ impl<'a> Game<'a> {
                     if text.contains("onto the battlefield")
                         && self.players[me].cards[c as usize].is_permanent()
                     {
-                        self.enter_card(me, c, me, false);
+                        let i = self.enter_card(me, c, me, false);
+                        // "Put it onto the battlefield with X additional +1/+1 counters. If X
+                        // is 4 or greater, it gains haste until end of turn" (Vision Quest).
+                        if let (Some(i), true) =
+                            (i, text.contains("with x additional +1/+1 counters"))
+                        {
+                            let x = self.cur_x.unwrap_or(0).max(0);
+                            self.perms[i].counters += x as i16;
+                            if x >= 4 && text.contains("if x is 4 or greater, it gains haste") {
+                                self.perms[i].temp_kw |= HASTE;
+                            }
+                            self.recalc();
+                        }
                     } else if text.contains("on top") {
                         self.players[me].library.push(c);
                     } else if text.contains("put that card into your graveyard")
@@ -4904,9 +4965,23 @@ impl<'a> Game<'a> {
         } else {
             u8::MAX
         };
+        // "You may put a Hero, Equipment, or Vehicle card from among them onto the
+        // battlefield" (Nick Fury): only cards of those kinds.
+        let named = t
+            .split("you may put ")
+            .nth(1)
+            .and_then(|r| r.split(" from among").next())
+            .map(restrict::Restr::read)
+            .filter(|r| r.subtypes[0] != 0);
+        let d = named.map(|r| self.dyn_values(&r, Some(ctx), me, ctx.src));
         let fits = |g: &Self, c: u16| {
             let sc = &g.players[me].cards[c as usize];
-            sc.types & types != 0 && sc.mv <= limit
+            sc.types & types != 0
+                && sc.mv <= limit
+                && match (&named, &d) {
+                    (Some(r), Some(d)) => Game::card_ok(r, sc, d),
+                    _ => true,
+                }
         };
         let until = t.contains("until you reveal");
         // "Reveal cards until you reveal a creature card. If its mana value is less than or
@@ -6355,6 +6430,29 @@ impl<'a> Game<'a> {
     /// "Target creature has base power and toughness 1/1 until end of turn", "~'s base power
     /// and toughness become 4/2 until end of turn", "its base power and toughness become equal
     /// to Galion's power and toughness".
+    /// Pays a mode's own cost ("remove a counter from a creature you control. If you do,
+    /// draw a card"): false if it can't be paid, so the mode does nothing.
+    pub fn pay_mode_cost(&mut self, me: usize, mode_text: &str) -> bool {
+        if !mode_text.contains("remove a counter from a creature you control. if you do") {
+            return true;
+        }
+        let Some((i, _)) = ai::counter_to_remove(self, me) else {
+            return false;
+        };
+        let x = &mut self.perms[i];
+        if x.counters < 0 {
+            x.counters += 1;
+        } else if x.stun > 0 {
+            x.stun -= 1;
+        } else if x.other_counters > 0 {
+            x.other_counters -= 1;
+        } else {
+            x.counters -= 1;
+        }
+        self.recalc();
+        true
+    }
+
     fn set_base_pt(&mut self, ctx: &Ctx) {
         let text = ctx.text;
         let pt = match base_pt_of(text) {
@@ -6364,50 +6462,73 @@ impl<'a> Game<'a> {
                 None => return,
             },
         };
-        let ids: Vec<u32> = if text.contains("target creature") {
-            // Small (1/1, 0/0) is for an opponent's creature; big for ours, the one it
-            // grows the most.
-            let harmful = pt.0 + pt.1 <= 2;
-            let t = Target {
-                kind: Kind::Creature,
-                whose: if harmful { Whose::Theirs } else { Whose::Yours },
-                mass: false,
-                other: text.contains("other target creature"),
-                restricted: false,
-                restr: Default::default(),
-                count: 1,
-            };
-            if harmful {
-                self.choose(ctx, &t, true)
-            } else {
-                let grows = |x: &Perm| {
-                    let (bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
-                    (pt.0 + pt.1) - (bp + bt)
-                };
-                let best = self
-                    .candidates(ctx, &t, false)
-                    .into_iter()
-                    .filter(|&i| grows(&self.perms[i]) > 0)
-                    .max_by_key(|&i| grows(&self.perms[i]))
-                    .map(|i| self.perms[i].id);
-                self.last_targets = best.into_iter().collect();
-                self.targeted = true;
-                best.into_iter().collect()
-            }
+        // "Target artifact or creature becomes an artifact creature with base power and
+        // toughness 4/4 and gains flying" (I Am Iron Man): the keywords it gains with it.
+        let gains = if text.contains("becomes an artifact creature with base") {
+            text.split(" and gains ")
+                .nth(1)
+                .map(|r| {
+                    let words: Vec<String> = r
+                        .split(['.', ','])
+                        .next()
+                        .unwrap_or("")
+                        .split(" and ")
+                        .map(|w| w.trim().to_string())
+                        .collect();
+                    keyword_bits(&words)
+                })
+                .unwrap_or(0)
         } else {
-            self.src_idx(ctx)
-                .map(|i| self.perms[i].id)
-                .into_iter()
-                .collect()
+            0
         };
+        let ids: Vec<u32> =
+            if text.contains("target creature") || text.contains("target artifact or creature") {
+                // Small (1/1, 0/0) is for an opponent's creature; big for ours, the one it
+                // grows the most (and the keywords it gains count).
+                let harmful = pt.0 + pt.1 <= 2;
+                let t = Target {
+                    kind: Kind::Creature,
+                    whose: if harmful { Whose::Theirs } else { Whose::Yours },
+                    mass: false,
+                    other: text.contains("other target creature"),
+                    restricted: false,
+                    restr: Default::default(),
+                    count: 1,
+                };
+                if harmful {
+                    self.choose(ctx, &t, true)
+                } else {
+                    let grows = |x: &Perm| {
+                        let (bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+                        let new_kw = (gains & !(x.eff_kw | x.temp_kw)).count_ones() as i16;
+                        (pt.0 + pt.1) - (bp + bt) + 2 * new_kw
+                    };
+                    let best = self
+                        .candidates(ctx, &t, false)
+                        .into_iter()
+                        .filter(|&i| grows(&self.perms[i]) > 0)
+                        .max_by_key(|&i| grows(&self.perms[i]))
+                        .map(|i| self.perms[i].id);
+                    self.last_targets = best.into_iter().collect();
+                    self.targeted = true;
+                    best.into_iter().collect()
+                }
+            } else {
+                self.src_idx(ctx)
+                    .map(|i| self.perms[i].id)
+                    .into_iter()
+                    .collect()
+            };
         for id in ids {
             let Some(i) = self.idx(id) else { continue };
             let x = &mut self.perms[i];
             if text.contains("until end of turn") || ctx.until_eot {
                 x.temp_base = Some(pt);
+                x.temp_kw |= gains;
             } else {
                 x.base_p = pt.0;
                 x.base_t = pt.1;
+                x.kw |= gains;
             }
         }
         self.recalc();

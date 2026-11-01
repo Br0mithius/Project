@@ -1214,6 +1214,7 @@ impl<'a> Game<'a> {
                 mine().any(|x| x.subtypes.contains(w) && (x.attacked_turn || x.entered_turn))
             }
             Cond::AttackersAtLeast(n) => mine().filter(|x| x.attacking).count() >= *n as usize,
+            Cond::TypeEnteredThisTurn(types) => mine().any(|x| x.entered_turn && x.is(*types)),
             Cond::AttackerSubtype(w) => mine().any(|x| x.attacking && x.subtypes.contains(w)),
             Cond::AttackingPower(n) => {
                 mine()

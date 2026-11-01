@@ -4797,3 +4797,141 @@ fn draw_engine_stops_near_an_empty_library() {
     ai::main_phase(&mut g, 0, true);
     assert_eq!(g.players[0].library.len(), 27, "draws with a deep library");
 }
+
+/// Hand-checked against the printed text of league pool cards the review found misplayed.
+#[test]
+fn pool_review_readings() {
+    let db = db();
+    // Mister Hyde: "Remove a counter from a creature you control. If you do, draw a card":
+    // no counter, no card - the upkeep puts a counter on him instead.
+    let d = deck(&db, &["Mister Hyde, Monster Within", "Agents of HYDRA"]);
+    let mut g = game(&[&d, &d]);
+    let hyde = put(&mut g, 0, 0);
+    let k = ability_of(&g, hyde, |a| matches!(a.trig, Trig::Phase { .. }));
+    fire(&mut g, hyde, k);
+    assert!(
+        g.players[0].hand.is_empty(),
+        "nothing to remove, nothing drawn"
+    );
+    assert_eq!(perm(&g, hyde).counters, 1);
+    let draw_mode = "remove a counter from a creature you control. if you do, draw a card";
+    // Paying takes a -1/-1 counter off first (that's a gain), else a +1/+1 counter.
+    let agents = put(&mut g, 0, 1);
+    let i = g.idx(agents).unwrap();
+    g.perms[i].counters = -1;
+    assert!(g.pay_mode_cost(0, draw_mode));
+    assert_eq!((perm(&g, agents).counters, perm(&g, hyde).counters), (0, 1));
+    assert!(g.pay_mode_cost(0, draw_mode));
+    assert_eq!(perm(&g, hyde).counters, 0);
+    assert!(!g.pay_mode_cost(0, draw_mode), "no counters left");
+
+    // Iron Man, Master of Machines: "if an artifact entered the battlefield under your
+    // control this turn" - checked, not a coin flip.
+    let d = deck(&db, &["Iron Man, Master of Machines", "Sol Ring"]);
+    let mut g = game(&[&d, &d]);
+    let im = put(&mut g, 0, 0);
+    let i = g.idx(im).unwrap();
+    g.perms[i].entered_turn = false;
+    let k = ab_with(&g, im, "whenever ~ attacks");
+    let cond = g.abilities_of(perm(&g, im))[k].cond.clone();
+    assert_eq!(cond, Cond::TypeEnteredThisTurn(T_ARTIFACT));
+    assert!(!g.cond_holds(&cond, 0, Some(i)));
+    put(&mut g, 0, 1);
+    let i = g.idx(im).unwrap();
+    assert!(g.cond_holds(&cond, 0, Some(i)), "Sol Ring entered");
+
+    // I Am Iron Man: the target becomes a 4/4 and gains flying - the creature it helps
+    // most (the 1/1 without flying, not the 2/1 flyer).
+    let d = deck(
+        &db,
+        &[
+            "I Am Iron Man",
+            "Island",
+            "Agents of HYDRA",
+            "Kree Commandos",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'U');
+    let agents = put(&mut g, 0, 2);
+    let kree = put(&mut g, 0, 3);
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let a = perm(&g, agents);
+    assert_eq!((a.p, a.t), (4, 4));
+    assert!(a.has(FLYING));
+    assert!(perm(&g, kree).temp_base.is_none(), "only one target");
+
+    // Absorbing Man copies an artifact, enchantment or land and stays a 4/4: never the
+    // opponents' best creature.
+    let d0 = deck(&db, &["Absorbing Man"]);
+    let d1 = deck(&db, &["Ramos, Dragon Engine"]);
+    let mut g = game(&[&d0, &d1]);
+    let am = put(&mut g, 0, 0);
+    put(&mut g, 1, 0);
+    let k = ability_of(&g, am, |a| matches!(a.trig, Trig::Phase { .. }));
+    fire(&mut g, am, k);
+    let x = perm(&g, am);
+    assert_eq!((x.p, x.t), (4, 4));
+    assert!(!x.has(FLYING));
+
+    // Nick Fury: "you may put a Hero, Equipment, or Vehicle card from among them onto the
+    // battlefield" - not the Villain on top.
+    let d = deck(
+        &db,
+        &[
+            "Nick Fury, Agent of S.H.I.E.L.D.",
+            "Kree Commandos",
+            "Agent of Atlas",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    let nf = put(&mut g, 0, 0);
+    g.players[0].library = vec![2, 1, 1];
+    let k = ability_of(&g, nf, |a| matches!(a.trig, Trig::PowerUp(_)));
+    fire(&mut g, nf, k);
+    let on = |g: &Game, idx: u16| g.perms.iter().any(|x| x.card == Some((0, idx)));
+    assert!(on(&g, 2), "the Hero");
+    assert!(!on(&g, 1), "not the Villain");
+
+    // Vision Quest: an artifact creature card with mana value X or less, entering with X
+    // more +1/+1 counters.
+    let d = deck(
+        &db,
+        &[
+            "Vision Quest",
+            "Island",
+            "Mountain",
+            "Kree Commandos",
+            "Ultron Drone",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'U');
+    lands(&mut g, 0, 3, 'R');
+    g.players[0].library = vec![4, 3, 3];
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(!on(&g, 3), "Kree Commandos isn't an artifact");
+    let drone = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, 4)))
+        .expect("Ultron Drone found");
+    assert_eq!(drone.counters, 3, "X = 3 counters");
+
+    // The Black Arrow: "deals 1 damage to any target. If a Dragon is dealt damage this
+    // way, destroy it" - aimed at the Dragon.
+    let d0 = deck(&db, &["The Black Arrow"]);
+    let d1 = deck(&db, &["Ramos, Dragon Engine"]);
+    let mut g = game(&[&d0, &d1]);
+    let ramos = put(&mut g, 1, 0);
+    let life = g.players[1].life;
+    put(&mut g, 0, 0);
+    assert!(g.idx(ramos).is_none(), "the Dragon is destroyed");
+    assert_eq!(g.players[1].life, life);
+
+    // Redcap Gutter-Dweller: its Rats can't block; Redcap itself can.
+    let d = deck(&db, &["Redcap Gutter-Dweller"]);
+    assert_eq!(d.cards[0].kw & CANT_BLOCK, 0);
+}

@@ -1002,7 +1002,7 @@ pub fn object_restr(text: &str) -> Restr {
     static CARD: OnceLock<Regex> = OnceLock::new();
     let card = CARD.get_or_init(|| {
         Regex::new(
-            r"(?:return|put|search (?:your|their) library for|choose|exile) (?:up to (?:one|two|three|x|\d+) |all |each |any number of )?(?:other |another )?(?:target )?(?:other |another )?([^.;:]*?\bcards?\b[^.;:]*?)(?: from | to the | to your | to its | to their | onto | into | in your| on top|,|\.|;|$)",
+            r"(?:return|put|search (?:your|their) library(?: and/or graveyard)? for|choose|exile) (?:up to (?:one|two|three|x|\d+) |all |each |any number of )?(?:other |another )?(?:target )?(?:other |another )?([^.;:]*?\bcards?\b[^.;:]*?)(?: from | to the | to your | to its | to their | onto | into | in your| on top|,|\.|;|$)",
         )
         .unwrap()
     });

@@ -61,7 +61,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Phase { phase: Main, any_player: false, opponents_only: false }: "at the beginning of your first main phase, until your next turn, ~ becomes a copy of up to one target artifact, non-aura enchantment, or land, except his name is ~, he's a legendary 4/4 human villain creature in addition to his other types, and he has vigilance."
-      -> Your Absorbing Man: 4/4 -> 6/6, gains flying
+      -> (nothing changes)
 
 Abyssal Harvester | {1}{B}{B} | Creature — Demon Warlock | 3/2
 TEXT: {T}: Exile target creature card from a graveyard that was put there this turn. Create a token that's a copy of it, except it's a Nightmare in addition to its other types. Then exile all other Nightmare tokens you control.
@@ -3134,7 +3134,7 @@ ABILITIES:
   Phase { phase: Combat, any_player: false, opponents_only: false } [only if Not(Scried)]: "at the beginning of combat on your turn, another target creature you control gets +1/+1 until end of turn."
       -> Your Dragon: 6/6 -> 7/7
       if the condition holds -> Your Dragon: 6/6 -> 7/7
-  Phase { phase: Combat, any_player: false, opponents_only: false } [only if Scried]: "at the beginning of combat on your turn, if you've scried or surveilled this turn, put a +1/+1 counter on that creature instead"
+  Phase { phase: Combat, any_player: false, opponents_only: false } [only if Scried]: "at the beginning of combat on your turn, if you've scried or surveilled this turn, put a +1/+1 counter on another target creature you control instead"
       -> (nothing changes)
       if the condition holds -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
 
@@ -5811,10 +5811,9 @@ ABILITIES:
   Spell [only if Not(Teamwork)]: "~ deals 2 damage to target attacking or blocking creature."
       -> (nothing changes)
       if the condition holds -> (nothing changes)
-  Spell [only if Teamwork]: "if ~ was cast using teamwork, it deals 4 damage to that creature instead"
+  Spell [only if Teamwork]: "if ~ was cast using teamwork, it deals 4 damage to target attacking or blocking creature instead"
       -> (nothing changes)
-      if the condition holds -> Opp B: graveyard +1
-      if the condition holds -> Opp B's Knight left the battlefield
+      if the condition holds -> (nothing changes)
 
 Hell's Kitchen |  | Land
 TEXT: This land enters tapped. / When this land enters, you gain 1 life. / {T}: Add {B} or {R}.
@@ -6177,7 +6176,7 @@ I Am Iron Man | {2}{U} | Instant
 TEXT: Until end of turn, target artifact or creature becomes an artifact creature with base power and toughness 4/4 and gains flying. / Draw a card.
 ABILITIES:
   Spell: "until end of turn, target artifact or creature becomes an artifact creature with base power and toughness 4/4 and gains flying."
-      -> (nothing changes)
+      -> Your Bear: 2/2 -> 4/4, gains flying
   Spell: "draw a card."
       -> You: hand +1, library -1
 
@@ -6497,8 +6496,8 @@ On entering:
 ABILITIES:
   Static: "~ gets +1/+0 for each other artifact you control."
       (static: shown under "On entering")
-  Attacks [only if Chance(0.5)]: "whenever ~ attacks, if an artifact entered the battlefield under your control this turn, draw a card."
-      -> (nothing changes)
+  Attacks [only if TypeEnteredThisTurn(2)]: "whenever ~ attacks, if an artifact entered the battlefield under your control this turn, draw a card."
+      -> You: hand +1, library -1
       if the condition holds -> You: hand +1, library -1
 
 Ironheart, Clever Champion | {4}{U} | Legendary Artifact Creature — Human Hero | 3/4
@@ -8051,7 +8050,7 @@ On entering:
 ABILITIES:
   Phase { phase: Upkeep, any_player: false, opponents_only: false }: "at the beginning of your upkeep, choose one —"
       mode 1: Your Mister Hyde, Monster Within: 2/2 -> 3/3, +1/+1 counters +1
-      mode 2: You: hand +1, library -1
+      mode 2: (nothing changes)
 
 Misty Knight, Hero for Hire | {1}{R} | Legendary Creature — Human Detective Hero | 3/1
 TEXT: {2}, {T}, Discard a card: Draw a card for each card you've discarded this turn.
@@ -8417,9 +8416,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   PowerUp(Mana { generic: 0, pips: [1, 1, 1, 1, 1], x: false, colorless: 0, hybrid: [0, 0, 0] }) [may; once]: "{w}{u}{b}{r}{g}: put two +1/+1 counters on ~, then look at the top seven cards of your library. you may put a hero, equipment, or vehicle card from among them onto the battlefield. if it's a double-faced card, you may transform it. put the rest on the bottom of your library in a random order."
-      -> You: library -1
       -> Your Nick Fury, Agent of S.H.I.E.L.D.: 2/1 -> 4/3, +1/+1 counters +2
-      -> You gets Ogre 3/3
 
 Night Nurse, Healer of Heroes | {1}{W} | Legendary Creature — Human Doctor Hero | 2/1
 TEXT: Flash / Lifelink / When Night Nurse enters, choose target permanent card in your graveyard that was put there from anywhere this turn. Return it to your hand.
@@ -9581,9 +9578,9 @@ ABILITIES:
 
 Redcap Gutter-Dweller | {2}{R}{R} | Creature — Goblin Warrior | 3/3
 TEXT: Menace / When Redcap Gutter-Dweller enters, create two 1/1 black Rat creature tokens with "This creature can't block." / At the beginning of your upkeep, you may sacrifice another creature. If you do, put a +1/+1 counter on Redcap Gutter-Dweller and exile the top card of your library. You may play that card this turn.
-SIM: keywords menace, can't block; its creature token: keyword bits 0x100000 "~ can't block."
+SIM: keywords menace; its creature token: keyword bits 0x100000 "~ can't block."
 On entering:
-      itself: 3/3 menace, can't block
+      itself: 3/3 menace
       -> You gets 1/1 rat token 1/1 with can't block
       -> You gets 1/1 rat token 1/1 with can't block
 ABILITIES:
@@ -11877,11 +11874,13 @@ TEXT: Flash / When The Black Arrow enters, it deals 1 damage to any target. If a
 SIM: keywords flash; equip {1}
 On entering (attached to your Bear):
       itself: flash
-      -> Opp B: life -1
+      -> Opp B: graveyard +1
       -> Your Bear: 2/2 -> 3/3, gains reach
+      -> Opp B's Dragon left the battlefield
 ABILITIES:
   Enters: "when ~ enters, it deals 1 damage to any target. if a dragon is dealt damage this way, destroy it."
-      -> Opp B: life -1
+      -> Opp B: graveyard +1
+      -> Opp B's Dragon left the battlefield
   Static: "equipped creature gets +1/+1 and has reach."
       (static: shown under "On entering")
 
@@ -12713,7 +12712,7 @@ ABILITIES:
   Enters [only if Not(CreatureDiedThisTurn)]: "when ~ enters, target creature an opponent controls gets -1/-1 until end of turn."
       -> Opp A's Dragon: 6/6 -> 5/5
       if the condition holds -> Opp A's Dragon: 6/6 -> 5/5
-  Enters [only if CreatureDiedThisTurn]: "when ~ enters, if a creature died this turn, that creature gets -13/-13 instead"
+  Enters [only if CreatureDiedThisTurn]: "when ~ enters, if a creature died this turn, target creature an opponent controls gets -13/-13 instead"
       -> (nothing changes)
       if the condition holds -> Opp A: graveyard +1
       if the condition holds -> Opp A's Dragon left the battlefield
@@ -13345,8 +13344,7 @@ TEXT: Search your library and/or graveyard for an artifact creature card with ma
 SIM: X = 3
 ABILITIES:
   Spell: "search your library and/or graveyard for an artifact creature card with mana value x or less and put it onto the battlefield with x additional +1/+1 counters. if x is 4 or greater, it gains haste until end of turn. if you search your library this way, shuffle."
-      -> You: library -1
-      -> You gets Ogre 3/3
+      -> (nothing changes)
 
 Vision of Love | {1}{R} | Instant
 TEXT: You may sacrifice an artifact or discard a card. If you do, draw two cards.
@@ -13994,7 +13992,7 @@ ABILITIES:
 
 Woodland Weavemaster | {1}{G} | Creature — Elf Druid | 1/2
 TEXT: Vigilance / Whenever another Elf you control enters, this creature gets +1/+1 until end of turn. / {T}: Add X mana of any one color, where X is this creature's power. Spend this mana only to cast Elf spells and activate abilities of Elf sources.
-SIM: keywords vigilance; makes mana (colour mask 0b011111, 3 at a time); that mana only for elf spells or abilities of elf sources
+SIM: keywords vigilance; makes mana (colour mask 0b011111, 1 at a time); that mana only for elf spells or abilities of elf sources
 On entering:
       itself: 1/2 vigilance
       -> (nothing changes)

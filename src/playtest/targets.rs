@@ -46,7 +46,8 @@ impl<'a> Game<'a> {
         if r.has(restrict::MV_LE_X) {
             d.x = Some(match ctx {
                 Some(c) => self.x_value(c, &Amount { n: 3, x: true }),
-                None => 3,
+                // The X of the spell resolving (a search during it), else a typical one.
+                None => self.cur_x.unwrap_or(3),
             });
         }
         if r.has(restrict::MV_LE_SRC_POWER) {

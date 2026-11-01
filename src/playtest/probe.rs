@@ -759,8 +759,10 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 about: None,
             };
             if let Some(r) = groups.get(k) {
-                for e in &ab.effects[r.clone()] {
-                    g.apply(&ctx, e);
+                if g.pay_mode_cost(0, text) {
+                    for e in &ab.effects[r.clone()] {
+                        g.apply(&ctx, e);
+                    }
                 }
             } else {
                 // A cost paid as it resolves is the payment, not an effect.

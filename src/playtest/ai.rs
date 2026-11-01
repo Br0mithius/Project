@@ -1922,6 +1922,38 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
     }
 }
 
+/// "Remove a counter from a creature you control. If you do, draw a card" (Mister Hyde's
+/// second mode): the creature `p` would take the counter from, and what that costs (a
+/// -1/-1 or stun counter is a gain), or `None` when no creature of theirs has a counter.
+pub fn counter_to_remove(g: &Game, p: usize) -> Option<(usize, f32)> {
+    (0..g.perms.len())
+        .filter(|&i| g.perms[i].ctrl as usize == p && g.perms[i].is_creature())
+        .filter_map(|i| {
+            let x = &g.perms[i];
+            if x.counters < 0 || x.stun > 0 {
+                Some((i, -0.5))
+            } else if x.other_counters > 0 {
+                Some((i, 0.2))
+            } else if x.counters > 0 {
+                Some((i, 0.8 + 0.02 * perm_value(g, i).max(0.0)))
+            } else {
+                None
+            }
+        })
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+}
+
+/// A mode whose effects need a counter removed first ("remove a counter from a creature
+/// you control. If you do, ..."): what paying costs, `None` if it can't be paid; 0 for other
+/// modes.
+pub fn mode_cost(g: &Game, p: usize, mode_text: &str) -> Option<f32> {
+    if mode_text.contains("remove a counter from a creature you control. if you do") {
+        counter_to_remove(g, p).map(|(_, c)| c)
+    } else {
+        Some(0.0)
+    }
+}
+
 /// Value of an ability's effects for `p` now (modal: the best mode).
 fn ability_now(g: &Game, p: usize, a: &SimAbility, src: Option<u32>) -> f32 {
     ability_now_with(g, p, a, src, false)
@@ -1938,10 +1970,16 @@ fn ability_now_with(g: &Game, p: usize, a: &SimAbility, src: Option<u32>, floor:
             .enumerate()
             .map(|(m, r)| {
                 let (text, cr) = a.mode_text(m);
-                a.effects[r]
-                    .iter()
-                    .map(|e| effect_now_with(g, p, e, text, src, cr, floor))
-                    .sum()
+                match mode_cost(g, p, text) {
+                    Some(c) => {
+                        a.effects[r]
+                            .iter()
+                            .map(|e| effect_now_with(g, p, e, text, src, cr, floor))
+                            .sum::<f32>()
+                            - c
+                    }
+                    None => -100.0,
+                }
             })
             .collect();
         v.sort_by(|a, b| b.partial_cmp(a).unwrap());
@@ -1974,10 +2012,16 @@ pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usiz
         .filter(|(m, _)| *m >= 32 || used & (1 << m) == 0)
         .map(|(m, r)| {
             let (text, cr) = ab.mode_text(m);
-            let val = ab.effects[r.clone()]
-                .iter()
-                .map(|e| effect_now(g, ctx.ctrl, e, text, ctx.src, cr))
-                .sum();
+            let val = match mode_cost(g, ctx.ctrl, text) {
+                Some(c) => {
+                    ab.effects[r.clone()]
+                        .iter()
+                        .map(|e| effect_now(g, ctx.ctrl, e, text, ctx.src, cr))
+                        .sum::<f32>()
+                        - c
+                }
+                None => -100.0,
+            };
             (val, m)
         })
         .collect();
