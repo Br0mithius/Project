@@ -963,6 +963,20 @@ fn yes(b: bool) -> f32 {
     if b { 1.0 } else { 0.0 }
 }
 
+/// Does the text care about Plans ("an artifact creature or a Plan", "search your library
+/// for a Plan card")? Not "planeswalker", and not a Plan's own "put a plan counter on this
+/// enchantment".
+fn cares_about_plans(t: &str) -> bool {
+    t.match_indices("plan").any(|(i, _)| {
+        let before = t[..i].chars().next_back();
+        let after = &t[i + 4..];
+        let after = after.strip_prefix('s').unwrap_or(after);
+        before.is_none_or(|c| !c.is_alphanumeric())
+            && after.chars().next().is_none_or(|c| !c.is_alphanumeric())
+            && !after.starts_with(" counter")
+    })
+}
+
 const MECHANICS: &[Mechanic] = &[
     Mechanic {
         label: "token maker for a token commander",
@@ -1039,9 +1053,17 @@ const MECHANICS: &[Mechanic] = &[
         points: 1.0,
         payoff: |c| {
             let t = c.text_lower();
-            yes(t.contains("threshold")
-                || t.contains("cards in your graveyard")
-                || t.contains("from your graveyard"))
+            // "Return this card from your graveyard to your hand" (Project Deathlok Soldier)
+            // brings itself back: it needs no help filling the graveyard.
+            let name = c.name.to_lowercase();
+            let short = name.split([',', ' ']).next().unwrap_or("").to_string();
+            let others = t.match_indices("from your graveyard").any(|(i, _)| {
+                let before = &t[..i];
+                !before.ends_with("this card ")
+                    && !before.ends_with(&format!("{} ", name))
+                    && !(short.len() > 2 && before.ends_with(&format!("{} ", short)))
+            });
+            yes(t.contains("threshold") || t.contains("cards in your graveyard") || others)
         },
         enabler: |c| {
             yes(c.parsed().effects().any(|(_, e)| {
@@ -1120,7 +1142,17 @@ const MECHANICS: &[Mechanic] = &[
         points: 2.0,
         payoff: |c| {
             let t = c.text_lower();
-            yes(t.contains("equipped") || t.contains("equipment"))
+            // Not an Equipment named among other cards it may find or hit ("exile target
+            // Equipment, instant, or sorcery card": Thor; "a Hero, Equipment, or Vehicle
+            // card": Nick Fury; "exile up to one target Equipment attached to that
+            // creature": removal).
+            let mention = t.match_indices("equipment").any(|(i, _)| {
+                let after = &t[i + "equipment".len()..];
+                !after.starts_with(" card")
+                    && !after.starts_with(", ")
+                    && !after.starts_with(" attached to that creature")
+            });
+            yes(t.contains("equipped") || mention)
         },
         enabler: |c| {
             yes(c.type_line.contains("Equipment"))
@@ -1139,7 +1171,20 @@ const MECHANICS: &[Mechanic] = &[
         points: 1.5,
         payoff: |c| {
             let t = c.text_lower();
-            yes(t.contains("vehicle") || t.contains("crew"))
+            // Not "a Hero, Equipment, or Vehicle card" it may find (Nick Fury), nor a name
+            // with "Crew" in it (The Ruinous Wrecking Crew).
+            let vehicle = t
+                .match_indices("vehicle")
+                .any(|(i, _)| !t[i + "vehicle".len()..].starts_with(" card"));
+            let crew = t.contains("crewed")
+                || t.contains("crews ")
+                || t.match_indices("crew ").any(|(i, _)| {
+                    t[i + 5..]
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_digit() || ch == 'x')
+                });
+            yes(vehicle || crew)
         },
         enabler: |c| yes(c.type_line.contains("Vehicle")),
     },
@@ -1168,7 +1213,7 @@ const MECHANICS: &[Mechanic] = &[
         wanted: 3.0,
         gates: true,
         points: 1.5,
-        payoff: |c| yes(c.text_lower().contains("plan")),
+        payoff: |c| yes(cares_about_plans(c.text_lower())),
         enabler: |c| yes(c.type_line.contains("Plan") && !c.type_line.contains("Planeswalker")),
     },
     Mechanic {
@@ -2230,6 +2275,33 @@ mod tests {
         assert!(deck.count_of("Off Color") == 0);
         assert!(deck.count_of("Mountain") > 0 && deck.count_of("Swamp") > 0);
         assert_eq!(deck.count_of("Forest"), 0);
+    }
+
+    /// Hand-checked: what a card's text asks the deck for (a gated payoff costs score when
+    /// the deck lacks it).
+    #[test]
+    fn mechanic_payoffs_read_whole_words() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+        let db = CardDb::load(&dir.join("cards.json")).unwrap();
+        let payoff = |need: &str, name: &str| {
+            let m = MECHANICS.iter().find(|m| m.need == need).unwrap();
+            (m.payoff)(db.get(name).unwrap())
+        };
+        // "Destroy target creature or planeswalker" isn't about Plans.
+        assert_eq!(payoff("Plans", "Hero's Downfall"), 0.0);
+        assert_eq!(payoff("Plans", "Doctor Doom"), 1.0);
+        assert_eq!(payoff("Plans", "The Masters of Evil"), 1.0);
+        // Thor may recast an Equipment, instant or sorcery card: no Equipment needed.
+        assert_eq!(payoff("Equipment", "Thor, God of Thunder"), 0.0);
+        assert_eq!(payoff("Equipment", "Fiery Annihilation"), 0.0);
+        assert_eq!(payoff("Equipment", "Whiplash, Vengeful Engineer"), 1.0);
+        assert_eq!(payoff("Equipment", "Ronin, Shadow Stalker"), 1.0);
+        // "A Hero, Equipment, or Vehicle card", a name with "Crew" in it.
+        assert_eq!(payoff("Vehicles", "Nick Fury, Agent of S.H.I.E.L.D."), 0.0);
+        assert_eq!(payoff("Vehicles", "The Ruinous Wrecking Crew"), 0.0);
+        // "Return this card from your graveyard" brings itself back.
+        assert_eq!(payoff("graveyard fillers", "Project Deathlok Soldier"), 0.0);
+        assert_eq!(payoff("graveyard fillers", "Decoy Ploy"), 1.0);
     }
 
     #[test]
