@@ -4054,7 +4054,9 @@ impl Parsed {
     /// payoffs count them all).
     pub fn makes_tokens(&self) -> bool {
         self.effects().any(|(a, e)| match e {
-            Effect::Tokens { .. } | Effect::Amass(_) => true,
+            Effect::Tokens { .. } => true,
+            // "Its controller amasses Goblins X" (Azog): the opponent's Army.
+            Effect::Amass(_) => !a.text.contains("its controller amasses"),
             // "They create a Treasure token" (Vraska): the opponent's.
             Effect::ItemTokens { .. } => !a.text.contains(". they create "),
             _ => false,
@@ -4063,8 +4065,11 @@ impl Parsed {
 
     /// Creature tokens specifically (bodies on the board).
     pub fn makes_creature_tokens(&self) -> bool {
-        self.effects()
-            .any(|(_, e)| matches!(e, Effect::Tokens { .. } | Effect::Amass(_)))
+        self.effects().any(|(a, e)| match e {
+            Effect::Tokens { .. } => true,
+            Effect::Amass(_) => !a.text.contains("its controller amasses"),
+            _ => false,
+        })
     }
 
     pub fn evasive(&self) -> bool {

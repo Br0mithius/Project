@@ -210,6 +210,9 @@ pub fn ability_value(a: &Ability) -> f32 {
             Effect::ItemTokens { .. } if a.text.contains(". they create ") => {
                 -0.5 * effect_value(e)
             }
+            // "Destroy up to one other target creature. Its controller amasses Goblins X"
+            // (Azog): the Army goes to the opponent who lost the creature.
+            Effect::Amass(_) if a.text.contains("its controller amasses") => -0.5 * effect_value(e),
             Effect::Draw { .. }
             | Effect::Loot
             | Effect::Tokens { .. }
@@ -267,7 +270,48 @@ pub fn ability_value(a: &Ability) -> f32 {
         && a.text.contains("remove ")
         && (a.text.contains("counters from ~") || a.text.contains("counters from this"));
     let v = if counter_cost && v > 0.0 { v * 0.35 } else { v };
+    // Paid as it resolves: "you may sacrifice another creature. If you do, ..." (Rhovanion
+    // Rampager, The Sackville-Bagginses), "you may sacrifice an artifact or discard a
+    // nonland card. When you do, ..." (Bullseye). Done only when worth it.
+    let v = if v > 0.0 {
+        (v - resolution_cost(&a.text)).max(0.0)
+    } else {
+        v
+    };
     v * times(a) * ABILITY_SCALE
+}
+
+/// What a "you may <pay>. If/When you do, ..." payment costs (card points): a creature or
+/// another permanent sacrificed, or a card discarded where the parser hasn't netted it
+/// against a draw already.
+fn resolution_cost(text: &str) -> f32 {
+    let Some(i) = text.find("you may sacrifice ") else {
+        return 0.0;
+    };
+    let rest = &text[i + "you may sacrifice ".len()..];
+    let Some(end) = rest
+        .find(". if you do")
+        .or_else(|| rest.find(". when you do"))
+    else {
+        return 0.0;
+    };
+    let what = &rest[..end];
+    if what.contains(" or discard a ") {
+        // Netted already when it buys a draw (K'un-Lun Warrior, Vision of Love).
+        if rest[end..].contains("draw") {
+            0.0
+        } else {
+            0.8
+        }
+    } else if what.contains("artifact") {
+        // (The cheaper of "another creature or artifact"; a land sacrificed for more lands
+        // is read as the net ramp already.)
+        0.8
+    } else if what.contains("creature") {
+        1.5
+    } else {
+        0.0
+    }
 }
 
 /// Keywords' worth on a creature with this power and toughness (body scale).
@@ -517,5 +561,48 @@ mod tests {
         assert!(creature_points(&chupa) > creature_points(&flyer));
         let wall = creature_value(&creature("{1}{W}", ("0", "4"), "Defender"));
         assert!(wall.efficiency < 0.8);
+    }
+
+    /// Hand-checked: what a "you may <pay>. If you do" ability costs, and whose Army an
+    /// amass makes.
+    #[test]
+    fn payments_as_it_resolves_cost_something() {
+        let attack = |text: &str| creature_value(&creature("{2}{B}", ("3", "2"), text)).efficiency;
+        let free = attack("Whenever this creature attacks, draw a card.");
+        let paid = attack(
+            "Whenever this creature attacks, you may sacrifice another creature. If you do, draw a card.",
+        );
+        assert!(paid < free, "{} {}", paid, free);
+        assert_eq!(
+            resolution_cost("you may sacrifice another creature. if you do, draw a card."),
+            1.5
+        );
+        assert_eq!(
+            resolution_cost(
+                "you may sacrifice another creature or artifact. if you do, draw a card."
+            ),
+            0.8
+        );
+        // Netted against the draw by the parser already (K'un-Lun Warrior).
+        assert_eq!(
+            resolution_cost(
+                "when ~ enters, you may sacrifice an artifact or discard a card. if you do, draw a card."
+            ),
+            0.0
+        );
+        // Bullseye: a card for 2 damage.
+        assert_eq!(
+            resolution_cost(
+                "when ~ enters, you may sacrifice an artifact or discard a nonland card. when you do, ~ deals 2 damage to any target."
+            ),
+            0.8
+        );
+        // Azog: "its controller amasses Goblins X" - the opponent's Army, a cost.
+        let azog = creature(
+            "{2}{B}",
+            ("1", "3"),
+            "When this creature enters, destroy up to one other target creature. Its controller amasses Goblins X, where X is that creature's power.",
+        );
+        assert!(!azog.parsed().makes_tokens());
     }
 }
