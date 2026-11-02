@@ -5250,3 +5250,21 @@ fn a_flash_creature_is_cast_at_its_full_worth_in_the_main_phase() {
         "Captain Marvel cast, the Brute kept"
     );
 }
+
+#[test]
+fn a_filtered_payment_keeps_the_rest_of_the_turn_plan_payable() {
+    // {R} now (only a Surveillance Room's "{1}, {T}: Add one mana of any color" makes it),
+    // {C} next: the filter's {1} is paid with the Swamp, a Surveillance Room stays for {C}.
+    let db = db();
+    let d = deck(&db, &["Surveillance Room", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    g.ext.follow.set(Mana::parse("{C}"));
+    assert!(g.pay(0, &Mana::parse("{R}")));
+    assert!(
+        g.can_pay(0, &Mana::parse("{C}")),
+        "a Surveillance Room is left for {{C}}"
+    );
+}

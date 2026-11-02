@@ -1562,8 +1562,17 @@ impl<'a> Game<'a> {
     /// The third value is the mana the plan makes beyond what it spends on a filter's own
     /// activation cost, so `pay` floats only real leftovers.
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
-        let srcs = self.sources(p);
-        let plain = self.plan_from(p, cost, &srcs, None);
+        self.plan_payment_from(p, cost, &self.sources(p))
+    }
+
+    /// `plan_payment` from these sources (some set aside).
+    fn plan_payment_from(
+        &self,
+        p: usize,
+        cost: &Mana,
+        srcs: &[(usize, u8, u8, bool)],
+    ) -> Option<(Vec<usize>, u8, u32)> {
+        let plain = self.plan_from(p, cost, srcs, None);
         if plain.is_some() {
             return plain;
         }
@@ -1575,7 +1584,7 @@ impl<'a> Game<'a> {
             let Some((fee, made)) = self.filter_of(s.0) else {
                 continue;
             };
-            let mut alt = srcs.clone();
+            let mut alt = srcs.to_vec();
             alt[k] = (s.0, 0b11111, made, false);
             if let Some(plan) = self.plan_from(p, cost, &alt, Some((k, fee))) {
                 return Some(plan);
@@ -1819,7 +1828,7 @@ impl<'a> Game<'a> {
         };
         // (Mana floating in the pool is left out: it empties between steps.)
         let rest_ok = |plan: &(Vec<usize>, u8, u32)| -> bool {
-            self.plan_from(p, &follow, &without(&plan.0), None)
+            self.plan_payment_from(p, &follow, &without(&plan.0))
                 .is_some()
         };
         if rest_ok(&plain) {
@@ -1831,7 +1840,7 @@ impl<'a> Game<'a> {
         };
         let alt = self
             .plan_from(p, &symbols, &srcs, None)
-            .and_then(|kept| self.plan_from(p, cost, &without(&kept.0), None))
+            .and_then(|kept| self.plan_payment_from(p, cost, &without(&kept.0)))
             .filter(|alt| rest_ok(alt));
         Some(alt.unwrap_or(plain))
     }
