@@ -471,6 +471,9 @@ pub struct GameExtra {
     /// Colours (a bit each) the rest of the AI's turn plan still needs: generic costs are
     /// paid from other sources first.
     pub reserve: std::cell::Cell<u8>,
+    /// What the rest of the AI's turn plan costs (with a creature's power-up used the turn
+    /// it is cast): a payment leaves the sources that pay it untapped when it can.
+    pub follow: std::cell::Cell<Mana>,
     /// The last connive discarded a nonland card (its +1/+1 counter is put).
     pub connive_nonland: bool,
     /// This combat's attackers and the player each attacks (or whose planeswalker): "target
@@ -512,6 +515,65 @@ pub const CHANGELING_TYPES: &[&str] = &[
     "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant", "avenger",
     "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
 ];
+
+/// Pays each mana symbol (`units`: the colours, or `COLORLESS`, that may pay it) from a
+/// different source (`cap`: how many symbols each may pay - several only for a source of
+/// mixed colours such as Ramos): a bipartite matching by augmenting paths, trying the
+/// cheapest-to-lose sources first (not Treasures, not the colours `reserve` keeps, fewest
+/// colours). How many symbols each source pays, or None if no assignment pays them all.
+fn match_symbols(
+    units: &[u8],
+    srcs: &[(usize, u8, u8, bool)],
+    cap: &[u32],
+    reserve: u8,
+) -> Option<Vec<u32>> {
+    let mut order: Vec<usize> = (0..srcs.len()).collect();
+    order.sort_by_key(|&i| {
+        let s = &srcs[i];
+        (s.3, s.1 & reserve != 0, s.1.count_ones())
+    });
+    // Which source pays each symbol.
+    let mut by: Vec<Option<usize>> = vec![None; units.len()];
+    fn augment(
+        u: usize,
+        units: &[u8],
+        srcs: &[(usize, u8, u8, bool)],
+        cap: &[u32],
+        order: &[usize],
+        by: &mut [Option<usize>],
+        seen: &mut [bool],
+    ) -> bool {
+        for &j in order {
+            if seen[j] || srcs[j].1 & units[u] == 0 {
+                continue;
+            }
+            seen[j] = true;
+            let holders: Vec<usize> = (0..by.len()).filter(|&v| by[v] == Some(j)).collect();
+            if (holders.len() as u32) < cap[j] {
+                by[u] = Some(j);
+                return true;
+            }
+            for v in holders {
+                if augment(v, units, srcs, cap, order, by, seen) {
+                    by[u] = Some(j);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    for u in 0..units.len() {
+        let mut seen = vec![false; srcs.len()];
+        if !augment(u, units, srcs, cap, &order, &mut by, &mut seen) {
+            return None;
+        }
+    }
+    let mut paid = vec![0u32; srcs.len()];
+    for j in by.into_iter().flatten() {
+        paid[j] += 1;
+    }
+    Some(paid)
+}
 
 fn token_abilities(tok: Tok) -> &'static [SimAbility] {
     static TABLE: OnceLock<Vec<(Tok, Vec<SimAbility>)>> = OnceLock::new();
@@ -1570,7 +1632,8 @@ impl<'a> Game<'a> {
         // Colours the rest of the turn's plan needs (`GameExtra::reserve`): a pip is paid
         // from a source that can't make them when there's a choice.
         let reserve = self.ext.reserve.get();
-        for c in order {
+        let mut greedy_ok = true;
+        'greedy: for c in order {
             while pips[c] > 0 {
                 let pick = srcs
                     .iter()
@@ -1591,7 +1654,10 @@ impl<'a> Game<'a> {
                         pips[c] -= 1;
                         extra_generic += srcs[i].2 as u32 - 1;
                     }
-                    None => return None,
+                    None => {
+                        greedy_ok = false;
+                        break 'greedy;
+                    }
                 }
             }
         }
@@ -1599,19 +1665,52 @@ impl<'a> Game<'a> {
         let wanted: Vec<u8> = std::iter::repeat_n(COLORLESS, cost.colorless as usize)
             .chain(cost.hybrid.iter().copied().filter(|&h| h != 0))
             .collect();
-        for mask in wanted {
-            let pick = srcs
+        if greedy_ok {
+            for &mask in &wanted {
+                let pick = srcs
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, s)| !used[*i] && s.1 & mask != 0)
+                    .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
+                    .map(|(i, _)| i);
+                match pick {
+                    Some(i) => {
+                        used[i] = true;
+                        extra_generic += srcs[i].2 as u32 - 1;
+                    }
+                    None => {
+                        greedy_ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        // The greedy pass spent a source another symbol needed (Gleaming Bastion's {U} for
+        // {C}{U}{G} when it is the only {C}): assign every symbol at once (a matching).
+        if !greedy_ok {
+            let units: Vec<u8> = (0..5)
+                .flat_map(|c| std::iter::repeat_n(1u8 << c, cost.pips[c] as usize))
+                .chain(wanted.iter().copied())
+                .collect();
+            let cap: Vec<u32> = srcs
                 .iter()
                 .enumerate()
-                .filter(|(i, s)| !used[*i] && s.1 & mask != 0)
-                .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
-                .map(|(i, _)| i);
-            match pick {
-                Some(i) => {
-                    used[i] = true;
+                .map(|(i, s)| if multi[i] { s.2 as u32 } else { 1 })
+                .collect();
+            let assigned = match_symbols(&units, srcs, &cap, reserve)?;
+            used = vec![false; srcs.len()];
+            left = srcs.iter().map(|s| s.2 as u32).collect();
+            extra_generic = 0;
+            for (i, units_paid) in assigned.iter().enumerate() {
+                if *units_paid == 0 {
+                    continue;
+                }
+                used[i] = true;
+                if multi[i] {
+                    left[i] -= units_paid;
+                } else {
                     extra_generic += srcs[i].2 as u32 - 1;
                 }
-                None => return None,
             }
         }
         let fee = match filter {
@@ -1684,9 +1783,45 @@ impl<'a> Game<'a> {
         self.plan_payment(p, cost).is_some()
     }
 
+    /// `plan_payment`, keeping the rest of the turn's plan payable (`GameExtra::follow`):
+    /// when the plain plan would spend sources the rest needs (the {C}, {U} and {G} of
+    /// Thanos's power-up after he is cast), the rest's coloured symbols are set aside first
+    /// and the cost is paid from the other sources.
+    fn plan_payment_keeping(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
+        let plain = self.plan_payment(p, cost)?;
+        let follow = self.ext.follow.get();
+        if follow.total() == 0 {
+            return Some(plain);
+        }
+        let srcs = self.sources(p);
+        let without = |used: &[usize]| -> Vec<(usize, u8, u8, bool)> {
+            srcs.iter()
+                .copied()
+                .filter(|s| !used.contains(&s.0))
+                .collect()
+        };
+        // (Mana floating in the pool is left out: it empties between steps.)
+        let rest_ok = |plan: &(Vec<usize>, u8, u32)| -> bool {
+            self.plan_from(p, &follow, &without(&plan.0), None)
+                .is_some()
+        };
+        if rest_ok(&plain) {
+            return Some(plain);
+        }
+        let symbols = Mana {
+            generic: 0,
+            ..follow
+        };
+        let alt = self
+            .plan_from(p, &symbols, &srcs, None)
+            .and_then(|kept| self.plan_from(p, cost, &without(&kept.0), None))
+            .filter(|alt| rest_ok(alt));
+        Some(alt.unwrap_or(plain))
+    }
+
     /// Pays a cost (taps sources, sacrifices Treasures). False if it can't be paid.
     pub fn pay(&mut self, p: usize, cost: &Mana) -> bool {
-        let Some((idxs, from_pool, made)) = self.plan_payment(p, cost) else {
+        let Some((idxs, from_pool, made)) = self.plan_payment_keeping(p, cost) else {
             return false;
         };
         if self.stats.is_some() {

@@ -5037,3 +5037,39 @@ fn milled_and_returned_cards_are_the_kind_named() {
     assert_eq!(hand, vec![3, 5], "the two creature cards back");
     assert!(g.players[0].graveyard.contains(&4), "Shock stays");
 }
+
+#[test]
+fn mana_symbols_are_matched_to_sources_as_a_whole() {
+    // {C}{U}{G} from Gleaming Bastion ({C}, or {W}/{U} with a basic), a Forest and a
+    // Treasure: the Bastion must make the {C} and the Treasure the {U}. Paying {U} first
+    // from the Bastion (the cheaper source to lose) left no {C}.
+    let db = db();
+    let d = prep_db(&db, &["Gleaming Bastion", "Swamp", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let swamp = put(&mut g, 0, 1);
+    put(&mut g, 0, 2);
+    g.make_item(0, "treasure");
+    let i = g.idx(swamp).unwrap();
+    g.perms[i].tapped = true;
+    assert!(g.can_pay(0, &Mana::parse("{C}{U}{G}")));
+    assert!(g.pay(0, &Mana::parse("{C}{U}{G}")));
+    assert!(g.perms.iter().all(|x| x.tapped || x.tok == Tok::Treasure));
+    assert!(!g.perms.iter().any(|x| x.tok == Tok::Treasure));
+    assert!(!g.can_pay(0, &Mana::parse("{C}{U}{G}")), "all spent");
+}
+
+#[test]
+fn a_payment_keeps_the_rest_of_the_turn_plan_payable() {
+    // {1} now and {G} next (the rest of the AI's plan, `GameExtra::follow`): the Forest
+    // stays untapped for the {G}.
+    let db = db();
+    let d = prep_db(&db, &["Forest", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    let forest = put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    g.ext.follow.set(Mana::parse("{G}"));
+    assert!(g.pay(0, &Mana::parse("{1}")));
+    assert!(!perm(&g, forest).tapped, "the Forest is kept for the {{G}}");
+    assert!(g.can_pay(0, &Mana::parse("{G}")));
+}

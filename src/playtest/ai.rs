@@ -3208,19 +3208,23 @@ fn plan_turn(
         .filter(|&i| post || creature_mana || !waits_for_combat(g, p, &opts[i].2))
         .max_by(|&a, &b| opts[a].0.partial_cmp(&opts[b].0).unwrap())?;
     // Colours the rest of the plan needs: generic costs are paid from other sources.
-    let mut keep = set
+    let rest: Vec<Mana> = set
         .iter()
         .filter(|&&i| i != first)
         .filter_map(|&i| act_cost(g, p, &opts[i].2))
-        .fold(0u8, |a, m| a | pip_mask(&m));
+        .collect();
+    let mut keep = rest.iter().fold(0u8, |a, m| a | pip_mask(m));
+    let mut follow = rest.iter().fold(Mana::default(), |a, m| mana_sum(a, m));
     // A creature cast to use its power-up at once: the power-up's colours (and {C}) stay
     // untapped while the spell is paid.
     if twins.iter().any(|t| t.1 == first) {
         if let Some(r) = twin_powerup_cost(g, p, &opts[first].2) {
             keep |= pip_mask(&r) | if r.colorless > 0 { COLORLESS } else { 0 };
+            follow = mana_sum(follow, &r);
         }
     }
     g.ext.reserve.set(keep);
+    g.ext.follow.set(follow);
     Some((first, total))
 }
 
@@ -3326,6 +3330,7 @@ pub fn modes_worth_paying(g: &Game, p: usize, vals: &[f32], n: u32) -> usize {
 pub fn main_phase(g: &mut Game, p: usize, post: bool) {
     main_phase_inner(g, p, post);
     g.ext.reserve.set(0);
+    g.ext.follow.set(Mana::default());
     // Mana empties from the pool between steps and phases.
     g.players[p].pool = 0;
 }
@@ -3418,6 +3423,7 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
         let act = opts[i].2;
         let ok = do_act(g, p, act);
         g.ext.reserve.set(0);
+        g.ext.follow.set(Mana::default());
         if !ok {
             g.note(|| format!("   P{} couldn't do {:?}", p, act));
         }
