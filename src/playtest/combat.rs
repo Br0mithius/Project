@@ -144,8 +144,12 @@ impl<'a> Game<'a> {
 
     /// One combat phase for the active player `a`.
     pub fn combat(&mut self, a: usize) {
-        ai::crew_for_combat(self, a);
-        let mut declared = if self.log.is_some() {
+        if !self.is_human(a) {
+            ai::crew_for_combat(self, a);
+        }
+        let mut declared = if self.is_human(a) {
+            self.human_attacks(a)
+        } else if self.log.is_some() {
             let mut why = Vec::new();
             let d = ai::declare_attacks_why(self, a, Some(&mut why));
             for w in why {
@@ -208,6 +212,24 @@ impl<'a> Game<'a> {
             return;
         }
         self.players[a].attacked_this_turn = true;
+        // A person playing along may stop to see each bot attack (the Play tab).
+        if self
+            .human
+            .as_ref()
+            .is_some_and(|h| h.seat != a && h.opts.step_bot_turns)
+        {
+            let list: Vec<String> = attacks
+                .iter()
+                .map(|at| {
+                    let who = match at.def {
+                        Def::Player(d) => format!("P{}", d),
+                        Def::Walker(id) => self.id_desc(id),
+                    };
+                    format!("{} -> {}", self.id_desc(at.attacker), who)
+                })
+                .collect();
+            self.checkpoint(format!("P{} attacks: {}", a, list.join(", ")));
+        }
         self.ext.attack_def = attacks
             .iter()
             .filter_map(|at| self.def_player(at.def).map(|d| (at.attacker, d as u8)))
@@ -291,7 +313,12 @@ impl<'a> Game<'a> {
         defenders.dedup();
         for &d in &defenders {
             if self.players[d].alive {
-                ai::before_blocks(self, d, &attacks);
+                if self.is_human(d) {
+                    let at = attacks.clone();
+                    self.human_window(d, "Before blockers", move |g| ai::before_blocks(g, d, &at));
+                } else {
+                    ai::before_blocks(self, d, &attacks);
+                }
             }
         }
         attacks.retain(|at| self.idx(at.attacker).is_some());
@@ -311,7 +338,9 @@ impl<'a> Game<'a> {
                 .filter(|at| self.def_player(at.def) == Some(d))
                 .cloned()
                 .collect();
-            let blocks = if self.log.is_some() {
+            let blocks = if self.is_human(d) {
+                self.human_blocks(d, &mine)
+            } else if self.log.is_some() {
                 let mut why = Vec::new();
                 let b = ai::declare_blocks_why(self, d, &mine, Some(&mut why));
                 for w in why {
@@ -389,10 +418,20 @@ impl<'a> Game<'a> {
         self.recalc();
         self.sba();
         // Combat tricks: the attacker first, then each defender.
-        ai::combat_tricks(self, a, &attacks);
-        for &d in &defenders {
-            if self.players[d].alive {
-                ai::combat_tricks(self, d, &attacks);
+        for (k, p) in std::iter::once(a)
+            .chain(defenders.iter().copied())
+            .enumerate()
+        {
+            if k > 0 && !self.players[p].alive {
+                continue;
+            }
+            if self.is_human(p) {
+                let at = attacks.clone();
+                self.human_window(p, "After blockers (combat tricks)", move |g| {
+                    ai::combat_tricks(g, p, &at)
+                });
+            } else {
+                ai::combat_tricks(self, p, &attacks);
             }
         }
         self.recalc();

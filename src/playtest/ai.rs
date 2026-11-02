@@ -488,6 +488,7 @@ pub fn choose_friends(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usi
     v.into_iter().take(n).map(|(_, i)| i).collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Hit {
     Player(usize),
     Perm(u32),
@@ -1097,6 +1098,21 @@ pub fn dig(g: &mut Game, p: usize, n: usize, lands_ok: bool, r: &Restr) {
 }
 
 pub fn tutor_choice(g: &Game, p: usize, text: &str, r: &Restr) -> Option<usize> {
+    if (text.contains("land card") || text.contains("basic land")) && !text.contains("creature") {
+        return land_to_fetch(g, p, text.contains("basic"));
+    }
+    let pl = &g.players[p];
+    tutor_candidates(g, p, text, r)
+        .into_iter()
+        .max_by(|&a, &b| {
+            card_worth(g, p, &pl.cards[pl.library[a] as usize])
+                .partial_cmp(&card_worth(g, p, &pl.cards[pl.library[b] as usize]))
+                .unwrap()
+        })
+}
+
+/// The library cards (indices) a "search your library for ..." may find.
+pub fn tutor_candidates(g: &Game, p: usize, text: &str, r: &Restr) -> Vec<usize> {
     let pl = &g.players[p];
     // "Search your library for a Plan card": a card of that subtype only.
     let sub = text
@@ -1142,17 +1158,19 @@ pub fn tutor_choice(g: &Game, p: usize, text: &str, r: &Restr) -> Option<usize> 
         }
     };
     if (text.contains("land card") || text.contains("basic land")) && !text.contains("creature") {
-        return land_to_fetch(g, p, text.contains("basic"));
+        let basic = text.contains("basic");
+        return (0..pl.library.len())
+            .filter(|&k| {
+                let c = &pl.cards[pl.library[k] as usize];
+                c.is(T_LAND) && (!basic || c.is(T_BASIC))
+            })
+            .collect();
     }
     let d = g.dyn_values(r, None, p, None);
     (0..pl.library.len())
         .filter(|&k| want(&pl.cards[pl.library[k] as usize]))
         .filter(|&k| Game::card_ok(r, &pl.cards[pl.library[k] as usize], &d))
-        .max_by(|&a, &b| {
-            card_worth(g, p, &pl.cards[pl.library[a] as usize])
-                .partial_cmp(&card_worth(g, p, &pl.cards[pl.library[b] as usize]))
-                .unwrap()
-        })
+        .collect()
 }
 
 pub fn reanimate_choice(
@@ -2621,7 +2639,7 @@ fn choose_land(g: &Game, p: usize) -> Option<usize> {
 
 /// A land `p` may play from outside the hand: (true, graveyard slot) with Mole Man or
 /// Muldrotha, (false, playable slot) from exile.
-fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
+pub(crate) fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
     let pl = &g.players[p];
     if g.rules[p % 8] & R_LANDS_FROM_GY != 0 && g.active == p {
         let best = (0..pl.graveyard.len())
@@ -3092,7 +3110,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
 }
 
 /// An activated ability that only makes mana.
-fn mana_only(a: &SimAbility) -> bool {
+pub(crate) fn mana_only(a: &SimAbility) -> bool {
     matches!(a.trig, Trig::Activated { .. })
         && !a.effects.is_empty()
         && a.effects.iter().all(|e| matches!(e, Effect::AddMana(_)))
@@ -3724,7 +3742,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                 (n, _) => (n, None),
             }
         };
-        if unless.is_some_and(|n| g.mana_available(caster) >= n) {
+        if unless.is_some_and(|n| g.mana_available(caster) >= n) && !g.is_human(o) {
             g.note(|| {
                 format!(
                     "  AI P{} holds its counter: P{} could pay for it",
@@ -3754,7 +3772,15 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                 )
             });
         }
-        if threat_v < threshold {
+        let go = if g.is_human(o) {
+            let cname = g.players[o].cards[g.players[o].hand[h] as usize]
+                .name
+                .clone();
+            g.h_counter(o, caster, &spell.name, &cname, threat_v >= threshold)
+        } else {
+            threat_v >= threshold
+        };
+        if !go {
             continue;
         }
         let counter_idx = g.players[o].hand[h];

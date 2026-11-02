@@ -15,6 +15,7 @@ pub mod ai;
 pub mod audit;
 pub mod combat;
 pub mod compile;
+pub mod human;
 pub mod lab;
 pub mod probe;
 pub mod resolve;
@@ -138,6 +139,8 @@ pub struct CastOpts {
     /// The X of a "copy it X times" spell, when the AI picked a smaller one than all its
     /// mana pays for (Photon Blast Barrage with mana kept for the rest of the turn).
     pub copies: Option<u8>,
+    /// The X a person chose (the Play tab); None: the engine picks it.
+    pub x: Option<u16>,
 }
 
 impl<'a> Game<'a> {
@@ -153,6 +156,27 @@ impl<'a> Game<'a> {
         rng: Rng,
         log: bool,
         stats: bool,
+    ) -> Game<'a> {
+        Game::new_inner(decks, rules, rng, log, stats, None)
+    }
+
+    /// A game with seat `human.seat` played by a person (the Play tab), logged.
+    pub fn new_human(
+        decks: &[&'a Prepared],
+        rules: &Rules,
+        rng: Rng,
+        human: human::HumanLink,
+    ) -> Game<'a> {
+        Game::new_inner(decks, rules, rng, true, true, Some(Box::new(human)))
+    }
+
+    fn new_inner(
+        decks: &[&'a Prepared],
+        rules: &Rules,
+        rng: Rng,
+        log: bool,
+        stats: bool,
+        human: Option<Box<human::HumanLink>>,
     ) -> Game<'a> {
         let life = rules.starting_life.max(1) as i32;
         let players = decks
@@ -254,6 +278,7 @@ impl<'a> Game<'a> {
             effect_kind: "other",
             dmg_flag: false,
             quiet_enter: false,
+            human,
         };
         if log {
             g.log = Some(Vec::new());
@@ -274,7 +299,11 @@ impl<'a> Game<'a> {
             let mut lib = std::mem::take(&mut g.players[p].library);
             g.rng.shuffle(&mut lib);
             g.players[p].library = lib;
-            ai::mulligan(&mut g, p);
+            if g.is_human(p) {
+                g.human_mulligan(p);
+            } else {
+                ai::mulligan(&mut g, p);
+            }
             // "If ~ is in your opening hand, you may begin the game with it on the
             // battlefield" (Quicksilver, Brash Blur).
             let openers: Vec<u16> = g.players[p]
@@ -491,7 +520,9 @@ impl<'a> Game<'a> {
             // copy per worthwhile extra target).
             let spare = self.mana_available(p).saturating_sub(cost.total());
             let n =
-                if ai::copies_x_times(c) {
+                if let Some(x) = opts.x {
+                    x as u32
+                } else if ai::copies_x_times(c) {
                     let most = ai::copies_x(self, p, c, spare);
                     opts.copies.map_or(most, |k| (k as u32).min(most))
                 } else if c.abilities.iter().any(|a| {
@@ -1055,7 +1086,7 @@ impl<'a> Game<'a> {
         }
         let gift = opts.gift && c.gift;
         if gift {
-            if let Some(o) = ai::choose_opponent(self, p, 0) {
+            if let Some(o) = self.h_choose_opponent(p, 0) {
                 if c.abilities.iter().any(|a| a.text.contains("gift a card")) {
                     self.draw(o, 1);
                 } else {
@@ -1092,6 +1123,15 @@ impl<'a> Game<'a> {
         // (APNAP) - before the spell resolves or the permanent enters (CR 603.3).
         self.run_pending();
         self.sba();
+        // A person playing along may stop to see each bot spell (the Play tab).
+        if self
+            .human
+            .as_ref()
+            .is_some_and(|h| h.seat != p && h.opts.stop_on_bot_spells)
+        {
+            let name = c.name.clone();
+            self.checkpoint(format!("P{} casts {}", p, name));
+        }
         // Opponents may counter it.
         // (Sphinx of the Final Word, Samut: instants and sorceries can't be countered.)
         let uncounterable = c.cant_be_countered
@@ -2132,7 +2172,7 @@ impl<'a> Game<'a> {
             // Landcycling / typecycling: search for a basic land, a land type or a creature type.
             let pl = &self.players[p];
             let k = if find == "land" {
-                ai::land_to_fetch(self, p, true)
+                self.h_land_to_fetch(p, true)
             } else {
                 (0..pl.library.len()).find(|&k| {
                     let lc = &pl.cards[pl.library[k] as usize];
@@ -2424,14 +2464,31 @@ impl<'a> Game<'a> {
         }
         self.run_pending();
         self.phase_triggers(a, Phase::End);
+        if self
+            .human
+            .as_ref()
+            .is_some_and(|h| h.seat != a && h.opts.step_bot_turns)
+        {
+            self.checkpoint(format!("End of P{}'s turn", a));
+        }
         // Other players use instant-speed tricks at the end of the turn - mostly the next
         // player, whose mana is about to untap.
         let n = self.players.len();
         for k in 1..n {
             let o = (a + k) % n;
             if self.players[o].alive && self.alive_count() > 1 {
-                ai::end_of_turn(self, o, k == 1);
+                if self.is_human(o) {
+                    let next = k == 1;
+                    self.human_window(o, &format!("End of P{}'s turn", a), move |g| {
+                        ai::end_of_turn(g, o, next)
+                    });
+                } else {
+                    ai::end_of_turn(self, o, k == 1);
+                }
             }
+        }
+        if self.human.is_some() {
+            self.empty_pool();
         }
         self.cleanup(a);
     }
@@ -2471,7 +2528,11 @@ impl<'a> Game<'a> {
             }
         } else {
             self.phase_triggers(a, Phase::Main);
-            ai::main_phase(self, a, false);
+            if self.is_human(a) {
+                self.human_main(a, false);
+            } else {
+                ai::main_phase(self, a, false);
+            }
             // Extra combats added during a combat ("after this phase, there is an additional
             // combat phase") count too (CR 505.1a); at most five in a turn (loops).
             self.players[a].extra_combats = self.players[a].extra_combats.saturating_add(1);
@@ -2484,10 +2545,17 @@ impl<'a> Game<'a> {
                 }
                 self.phase_triggers(a, Phase::Combat);
                 self.combat(a);
+                if self.human.is_some() {
+                    self.empty_pool();
+                }
             }
             self.players[a].extra_combats = 0;
             if self.players[a].alive && self.alive_count() > 1 && !self.end_turn {
-                ai::main_phase(self, a, true);
+                if self.is_human(a) {
+                    self.human_main(a, true);
+                } else {
+                    ai::main_phase(self, a, true);
+                }
             }
         }
     }

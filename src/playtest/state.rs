@@ -372,6 +372,8 @@ pub struct Game<'a> {
     pub dmg_flag: bool,
     /// The permanent entering is a land played or a spell cast (its entry isn't logged).
     pub quiet_enter: bool,
+    /// The seat a person plays by hand (the Play tab), if any (`human`).
+    pub human: Option<Box<super::human::HumanLink>>,
 }
 
 pub const NO_CARD: u16 = u16::MAX;
@@ -1491,7 +1493,27 @@ impl<'a> Game<'a> {
         let outer = self.ext.paying.replace(Purpose::Any);
         let n = self.sources(p).iter().map(|s| s.2 as u32).sum::<u32>();
         self.ext.paying.set(outer);
-        n + self.players[p].pool as u32
+        n + self.players[p].pool as u32 + self.pool_units(p).len() as u32
+    }
+
+    /// `sources`, plus the mana in a person's pool (the Play tab: `human::POOL_SRC`).
+    fn pay_sources(&self, p: usize) -> Vec<(usize, u8, u8, bool)> {
+        let mut s = self.sources(p);
+        if self.human.is_some() {
+            s.extend(self.pool_units(p));
+        }
+        s
+    }
+
+    /// A payment plan from exactly these sources (the Play tab's "auto-tap" for what the
+    /// pool doesn't pay).
+    pub(crate) fn plan_from_sources(
+        &self,
+        p: usize,
+        cost: &Mana,
+        srcs: &[(usize, u8, u8, bool)],
+    ) -> Option<(Vec<usize>, u8, u32)> {
+        self.plan_payment_from(p, cost, srcs)
     }
 
     /// May restricted mana pay for what's being paid for now (`GameExtra::paying`)?
@@ -1578,7 +1600,7 @@ impl<'a> Game<'a> {
     /// The third value is the mana the plan makes beyond what it spends on a filter's own
     /// activation cost, so `pay` floats only real leftovers.
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
-        self.plan_payment_from(p, cost, &self.sources(p))
+        self.plan_payment_from(p, cost, &self.pay_sources(p))
     }
 
     /// `plan_payment` from these sources (some set aside).
@@ -1610,8 +1632,8 @@ impl<'a> Game<'a> {
     }
 
     /// A filter mana ability of permanent `i`: (mana it costs, mana of any colour it makes).
-    fn filter_of(&self, i: usize) -> Option<(u32, u8)> {
-        let x = &self.perms[i];
+    pub(crate) fn filter_of(&self, i: usize) -> Option<(u32, u8)> {
+        let x = self.perms.get(i)?;
         if x.tapped || x.no_abilities {
             return None;
         }
@@ -1652,8 +1674,9 @@ impl<'a> Game<'a> {
         let mut used = vec![false; srcs.len()];
         // Ramos' ten mana of mixed colours can pay several coloured pips at once.
         let is_multi = |s: &(usize, u8, u8, bool)| {
-            self.perms[s.0]
-                .card
+            self.perms
+                .get(s.0)
+                .and_then(|x| x.card)
                 .is_some_and(|r| self.card(r).counter_mana.is_some())
         };
         // Only allocated when such a source exists (payment planning is hot).
@@ -1835,7 +1858,7 @@ impl<'a> Game<'a> {
         if follow.total() == 0 {
             return Some(plain);
         }
-        let srcs = self.sources(p);
+        let srcs = self.pay_sources(p);
         let without = |used: &[usize]| -> Vec<(usize, u8, u8, bool)> {
             srcs.iter()
                 .copied()
@@ -1863,8 +1886,25 @@ impl<'a> Game<'a> {
 
     /// Pays a cost (taps sources, sacrifices Treasures). False if it can't be paid.
     pub fn pay(&mut self, p: usize, cost: &Mana) -> bool {
+        // A person's seat (the Play tab) pays from the mana they tapped.
+        if self.human.is_some() && self.is_human(p) {
+            return self.human_pay(p, cost);
+        }
+        self.pay_planned(p, cost)
+    }
+
+    /// `pay` by the payment planner.
+    pub(crate) fn pay_planned(&mut self, p: usize, cost: &Mana) -> bool {
         let Some((idxs, from_pool, made)) = self.plan_payment_keeping(p, cost) else {
             return false;
+        };
+        let idxs: Vec<usize> = if self.human.is_some() {
+            self.spend_pool_units(p, &idxs);
+            idxs.into_iter()
+                .filter(|&i| i < super::human::POOL_SRC)
+                .collect()
+        } else {
+            idxs
         };
         if self.stats.is_some() {
             if let Some(t) = self.turn_stat(p) {

@@ -241,7 +241,7 @@ fn snap(g: &Game) -> Snap {
     }
 }
 
-fn kw_names(bits: u32) -> String {
+pub(crate) fn kw_names(bits: u32) -> String {
     KEYWORDS
         .iter()
         .chain(

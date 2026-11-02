@@ -851,7 +851,7 @@ impl<'a> Game<'a> {
             self.discard(me);
         }
         for _ in 0..w.sacrifice {
-            if let Some(j) = ai::sacrifice_choice(self, me, 0xFFFF) {
+            if let Some(j) = self.h_sacrifice(me, 0xFFFF, &Default::default()) {
                 self.sacrifice(j);
             }
         }
@@ -938,11 +938,7 @@ impl<'a> Game<'a> {
                     .filter(|&i| self.perms[i].ctrl as usize == o)
                     .collect();
                 let n = one.count.max(1) as usize;
-                let picks = if harmful {
-                    ai::choose_victims(self, ctx.ctrl, &cands, n)
-                } else {
-                    ai::choose_friends(self, ctx.ctrl, &cands, n)
-                };
+                let picks = self.h_targets(ctx, &cands, n, harmful);
                 if self.auditing() {
                     let ids: Vec<u32> = picks.iter().map(|&i| self.perms[i].id).collect();
                     self.audit_targets(ctx.ctrl, &ids, harmful, &cands);
@@ -971,11 +967,7 @@ impl<'a> Game<'a> {
             return cands.iter().map(|&i| self.perms[i].id).collect();
         }
         let n = t.count.max(1) as usize;
-        let picks = if harmful {
-            ai::choose_victims(self, ctx.ctrl, &cands, n)
-        } else {
-            ai::choose_friends(self, ctx.ctrl, &cands, n)
-        };
+        let picks = self.h_targets(ctx, &cands, n, harmful);
         if let Some(&i) = picks.first() {
             self.last_ctrl = Some(self.perms[i].ctrl);
         }
@@ -1189,7 +1181,7 @@ impl<'a> Game<'a> {
             let payer = self
                 .opponents(me)
                 .into_iter()
-                .find_map(|o| ai::fodder(self, o, T_CREATURE, u32::MAX));
+                .find_map(|o| self.h_fodder(o, T_CREATURE, u32::MAX));
             let Some(i) = payer else { return };
             self.sacrifice(i);
             if ab.text.contains("tap ~") {
@@ -1204,7 +1196,7 @@ impl<'a> Game<'a> {
         if let Some(pc) = &ab.pay {
             let s = pend.source.and_then(|id| self.idx(id));
             let allowed = pc.cond.as_ref().is_none_or(|c| self.cond_holds(c, me, s));
-            let want = allowed && (!pc.optional || ai::wants_to_pay(self, &ctx, ab, pc));
+            let want = allowed && (!pc.optional || self.h_pay_ok(&ctx, ab, pc));
             // "You may pay {X}. When you do, put X +1/+1 counters on ~": the X it can spare.
             if let (true, ResCost::Mana(m)) = (want, &pc.cost) {
                 if m.x {
@@ -1225,7 +1217,7 @@ impl<'a> Game<'a> {
                     }
                     None => false,
                 };
-        } else if ab.optional && !ai::wants_optional(self, &ctx, ab) {
+        } else if ab.optional && !self.h_may(&ctx, ab) {
             // ("You may discard your hand. ... X is the number of cards discarded this way":
             // none.)
             if ab.text.contains("discard your hand") {
@@ -1268,7 +1260,7 @@ impl<'a> Game<'a> {
             } else {
                 0
             };
-            let mut modes = ai::choose_modes(self, &ctx, ab, used);
+            let mut modes = self.h_modes(&ctx, ab, used);
             // Chosen modes happen in the order printed (CR 700.2).
             modes.sort_unstable();
             // "You may pay {1} up to three times. When you do, choose up to that many"
@@ -1499,13 +1491,13 @@ impl<'a> Game<'a> {
         match cost {
             ResCost::Free => Some(None),
             ResCost::Sacrifice { types, other } => {
-                let i = ai::fodder(self, me, *types, if *other { src } else { u32::MAX })?;
+                let i = self.h_fodder(me, *types, if *other { src } else { u32::MAX })?;
                 let snap = self.perms[i].clone();
                 self.sacrifice(i);
                 Some(Some(snap))
             }
             ResCost::SacrificeOrDiscard(types, nonland) => {
-                match self.sac_or_discard(me, ai::fodder(self, me, *types, src), *nonland)? {
+                match self.sac_or_discard(me, self.h_fodder(me, *types, src), *nonland)? {
                     Ok(i) => {
                         let snap = self.perms[i].clone();
                         self.sacrifice(i);
@@ -1836,7 +1828,7 @@ impl<'a> Game<'a> {
 
     /// Discards a card the player chooses (the worst one).
     pub fn discard(&mut self, p: usize) {
-        if let Some(h) = ai::discard_choice(self, p) {
+        if let Some(h) = self.h_discard(p) {
             let c = self.players[p].hand.remove(h);
             if self.log.is_some() {
                 let name = self.players[p].cards[c as usize].name.clone();
@@ -2207,7 +2199,7 @@ impl<'a> Game<'a> {
 
     /// Fetches a land from the library (one adding a colour the hand needs).
     fn fetch_land(&mut self, p: usize, to_battlefield: bool, tapped: bool, basic_only: bool) {
-        let Some(k) = ai::land_to_fetch(self, p, basic_only) else {
+        let Some(k) = self.h_land_to_fetch(p, basic_only) else {
             return;
         };
         let c = self.players[p].library.remove(k);
@@ -2406,7 +2398,7 @@ impl<'a> Game<'a> {
             Effect::Destroy(_) if text.contains("odd or even") => {
                 // Thanos: pick the parity that hurts the table most and spares the most of
                 // our own; "each other creature" never includes the source.
-                let (odd, net) = ai::best_parity(self, me, ctx.src);
+                let (odd, net) = self.h_parity(me, ctx.src);
                 if self.log.is_some() {
                     let (o, e) = ai::parity_values_peek(self, me, ctx.src);
                     self.note(|| {
@@ -2618,7 +2610,7 @@ impl<'a> Game<'a> {
                     }
                     return;
                 }
-                if let ai::Hit::Perm(id) = ai::damage_target(self, ctx, to, n) {
+                if let ai::Hit::Perm(id) = self.h_damage_target(ctx, to, n) {
                     if self.auditing() {
                         self.audit_targets(me, &[id], true, &[]);
                     }
@@ -2687,7 +2679,7 @@ impl<'a> Game<'a> {
                             self.opponents(me)
                         }
                     } else {
-                        ai::choose_opponent(self, me, n).into_iter().collect()
+                        self.h_choose_opponent(me, n).into_iter().collect()
                     };
                     for o in targets {
                         self.hurt_player(ctx, o, n);
@@ -2744,7 +2736,7 @@ impl<'a> Game<'a> {
                         }
                         return;
                     }
-                    let mut hit = ai::damage_target(self, ctx, to, n);
+                    let mut hit = self.h_damage_target(ctx, to, n);
                     // An instance of Photon Blast Barrage: the creature its plan gives it
                     // (`GameExtra::barrage`), while that one is still a legal target.
                     if ctx.card.is_some_and(ai::copies_x_times) {
@@ -3074,7 +3066,7 @@ impl<'a> Game<'a> {
                 let mut victims: Vec<usize> = if *each_opponent {
                     self.opponents(me)
                 } else {
-                    ai::edict_victim(self, me, &ctx.card_restr)
+                    self.h_edict_victim(me, &ctx.card_restr)
                         .into_iter()
                         .collect()
                 };
@@ -3102,7 +3094,7 @@ impl<'a> Game<'a> {
                         T_CREATURE
                     };
                     for _ in 0..n {
-                        if let Some(i) = ai::sacrifice_choice_r(self, o, types, &ctx.card_restr) {
+                        if let Some(i) = self.h_sacrifice(o, types, &ctx.card_restr) {
                             self.sacrifice(i);
                         }
                     }
@@ -3163,7 +3155,7 @@ impl<'a> Game<'a> {
                     let who: Vec<usize> = if text.contains("each opponent draws") {
                         self.opponents(me)
                     } else {
-                        ai::choose_opponent(self, me, 0).into_iter().collect()
+                        self.h_choose_opponent(me, 0).into_iter().collect()
                     };
                     for o in who {
                         self.draw(o, n);
@@ -3283,7 +3275,7 @@ impl<'a> Game<'a> {
                         if text.contains("each opponent") || text.contains("each player") {
                             self.opponents(me)
                         } else {
-                            ai::choose_opponent(self, me, 0).into_iter().collect()
+                            self.h_choose_opponent(me, 0).into_iter().collect()
                         };
                     // "Each player discards ...": you too.
                     if text.contains("each player discards") {
@@ -3342,7 +3334,7 @@ impl<'a> Game<'a> {
                     } else if text.contains("each opponent mills") {
                         self.opponents(me)
                     } else {
-                        ai::choose_opponent(self, me, 0).into_iter().collect()
+                        self.h_choose_opponent(me, 0).into_iter().collect()
                     };
                     for o in victims {
                         self.mill(o, n);
@@ -3369,7 +3361,7 @@ impl<'a> Game<'a> {
             }
             Effect::Scry(n) => {
                 let k = self.x_value(ctx, n).max(1) as usize;
-                ai::scry(self, me, k, text.contains("surveil"));
+                self.h_scry(me, k, text.contains("surveil"));
             }
             // Recruit's Human Soldier comes from the discard (`Loot`), not on its own.
             Effect::Tokens { .. } if text.contains("recruit") && !text.contains("create") => {}
@@ -3464,7 +3456,7 @@ impl<'a> Game<'a> {
                 // "Gift a Treasure": the opponent gets the gift; its bonus is checked as a condition.
                 // "Destroy target permanent. They create a Treasure token" (Vraska): theirs.
                 let to = if text.contains("gift") {
-                    ai::choose_opponent(self, me, 0).unwrap_or(me)
+                    self.h_choose_opponent(me, 0).unwrap_or(me)
                 } else if text.contains(". they create a") {
                     self.last_left
                         .as_ref()
@@ -3510,7 +3502,7 @@ impl<'a> Game<'a> {
                 let hit = self.src_perm(ctx).map_or(0, |s| s.hit_turn);
                 let o = (0..self.players.len())
                     .find(|&o| hit & (1 << o.min(7)) != 0 && o != me && self.players[o].alive)
-                    .or_else(|| ai::choose_opponent(self, me, 0));
+                    .or_else(|| self.h_choose_opponent(me, 0));
                 let mut cast = false;
                 if let Some(o) = o {
                     while let Some(c) = self.players[o].library.pop() {
@@ -3707,7 +3699,7 @@ impl<'a> Game<'a> {
                     // "Whenever an opponent casts a spell, that player loses 5 life".
                     vec![o]
                 } else {
-                    ai::choose_opponent(self, me, n).into_iter().collect()
+                    self.h_choose_opponent(me, n).into_iter().collect()
                 };
                 // "Deals 2 damage to each player", "each player loses 1 life": you too.
                 if *each
@@ -3727,7 +3719,7 @@ impl<'a> Game<'a> {
                             T_CREATURE
                         };
                         if text.contains("sacrifices") {
-                            if let Some(i) = ai::fodder(self, o, types, u32::MAX) {
+                            if let Some(i) = self.h_fodder(o, types, u32::MAX) {
                                 self.sacrifice(i);
                                 continue;
                             }
@@ -3926,9 +3918,9 @@ impl<'a> Game<'a> {
                             && ctx.card.is_some_and(|c| c.teamwork.is_some())
                             && text.starts_with("choose target") =>
                         {
-                            ai::reanimate_choice(self, me, any, &Default::default(), &d)
+                            self.h_reanimate(me, any, &Default::default(), &d)
                         }
-                        None => ai::reanimate_choice(self, me, any, &ctx.card_restr, &d),
+                        None => self.h_reanimate(me, any, &ctx.card_restr, &d),
                     };
                     let Some((o, k)) = pick else {
                         break;
@@ -4029,7 +4021,7 @@ impl<'a> Game<'a> {
                     self.best_permanent_in_graveyard(me)
                 } else {
                     let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
-                    ai::regrowth_choice(self, me, creature, &ctx.card_restr, &d)
+                    self.h_regrowth(me, creature, &ctx.card_restr, &d)
                 };
                 if let Some(k) = pick {
                     let c = self.players[me].graveyard.remove(k);
@@ -4039,9 +4031,7 @@ impl<'a> Game<'a> {
                     // "Up to two target creature cards".
                     if text.contains("up to two target") || text.contains("two target") {
                         let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
-                        if let Some(k) =
-                            ai::regrowth_choice(self, me, creature, &ctx.card_restr, &d)
-                        {
+                        if let Some(k) = self.h_regrowth(me, creature, &ctx.card_restr, &d) {
                             let c = self.players[me].graveyard.remove(k);
                             self.players[me].hand.push(c);
                             self.emit(Ev::LeavesGraveyard, me, None);
@@ -4470,7 +4460,7 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::Tutor => {
-                if let Some(k) = ai::tutor_choice(self, me, text, &ctx.card_restr) {
+                if let Some(k) = self.h_tutor(me, text, &ctx.card_restr) {
                     let c = self.players[me].library.remove(k);
                     let mut lib = std::mem::take(&mut self.players[me].library);
                     self.rng.shuffle(&mut lib);
@@ -5405,7 +5395,7 @@ impl<'a> Game<'a> {
         let text = ctx.text;
         match label {
             "you control an opponent's next turn" => {
-                if let Some(o) = ai::choose_opponent(self, me, 0) {
+                if let Some(o) = self.h_choose_opponent(me, 0) {
                     self.players[o].hijacked = true;
                 }
             }
@@ -5420,7 +5410,7 @@ impl<'a> Game<'a> {
                     Some("three") => 3,
                     _ => 1,
                 };
-                if let Some(o) = ai::choose_opponent(self, me, 0) {
+                if let Some(o) = self.h_choose_opponent(me, 0) {
                     self.players[o].poison = self.players[o].poison.saturating_add(n);
                 }
             }
@@ -5501,8 +5491,8 @@ impl<'a> Game<'a> {
             "gives a permanent away" => {
                 // Gives away its worst permanent to an opponent.
                 if let (Some(i), Some(o)) = (
-                    ai::sacrifice_choice(self, me, 0xFFFF & !T_LAND),
-                    ai::choose_opponent(self, me, 0),
+                    self.h_sacrifice(me, 0xFFFF & !T_LAND, &Default::default()),
+                    self.h_choose_opponent(me, 0),
                 ) {
                     self.perms[i].ctrl = o as u8;
                 }
@@ -6331,7 +6321,7 @@ impl<'a> Game<'a> {
         let me = ctx.ctrl;
         let from: Vec<usize> = match spec.whose {
             0 => vec![me],
-            1 => ai::choose_opponent(self, me, 0).into_iter().collect(),
+            1 => self.h_choose_opponent(me, 0).into_iter().collect(),
             _ => (0..self.players.len())
                 .filter(|&o| self.players[o].alive)
                 .collect(),
@@ -6443,7 +6433,7 @@ impl<'a> Game<'a> {
             return;
         }
         let from = if imp.opponent {
-            match ai::choose_opponent(self, me, 0) {
+            match self.h_choose_opponent(me, 0) {
                 Some(o) => o,
                 None => return,
             }
