@@ -214,7 +214,11 @@ pub enum FromEngine {
         /// Sandbox edits and manual tapping can be applied now.
         edits_ok: bool,
     },
-    Dump(String),
+    /// The state dump, and every answer used so far (for a replayable report).
+    Dump {
+        text: String,
+        answers: Vec<Answer>,
+    },
     Over {
         winner: usize,
         view: Box<GameView>,
@@ -357,7 +361,7 @@ impl HumanIo for ScriptIo {
                 self.log.borrow_mut().extend(view.new_log.iter().cloned());
                 *self.last_view.borrow_mut() = Some(*view);
             }
-            FromEngine::Dump(d) => *self.dump.borrow_mut() = Some(d),
+            FromEngine::Dump { text, .. } => *self.dump.borrow_mut() = Some(text),
             _ => {}
         }
     }
@@ -565,7 +569,10 @@ impl<'a> Game<'a> {
         });
         loop {
             match h.io.recv() {
-                ToEngine::Dump => h.io.send(FromEngine::Dump(self.dump())),
+                ToEngine::Dump => h.io.send(FromEngine::Dump {
+                    text: self.dump(),
+                    answers: h.transcript.borrow().clone(),
+                }),
                 ToEngine::Answer(a) => {
                     let side = matches!(
                         a,

@@ -5,6 +5,7 @@ use eframe::egui;
 mod cards;
 mod images;
 mod opponents;
+mod play;
 
 use crate::analysis::{self, SimResult, curve_label};
 use crate::card::{BASIC_FOR_COLOR, COLORS, Card, ColorSet, Role};
@@ -49,11 +50,13 @@ enum Tab {
     Stats,
     Season,
     Collection,
+    Play,
 }
 
-const TABS: [(Tab, &str); 9] = [
+const TABS: [(Tab, &str); 10] = [
     (Tab::Build, "Deck Builder"),
     (Tab::Lab, "Playtest Lab"),
+    (Tab::Play, "Play"),
     (Tab::Commanders, "Commanders"),
     (Tab::Draft, "Draft Helper"),
     (Tab::Trade, "Trades & VP"),
@@ -253,6 +256,8 @@ pub struct GuiApp {
     /// Bumped whenever the deck, pool or rules change; invalidates `memo`.
     rev: u64,
     memo: Memo,
+    /// The Play tab's game.
+    play: play::PlayState,
 }
 
 /// "45 s", "3 min".
@@ -395,6 +400,7 @@ impl GuiApp {
             error,
             rev: 1,
             memo: Memo::default(),
+            play: Default::default(),
         };
         app.deck.name = app.deck_name.clone();
         app.refresh_saved_decks();
@@ -4086,6 +4092,7 @@ impl eframe::App for GuiApp {
             Tab::Season => {
                 egui::CentralPanel::default().show(ui, |ui| self.season_tab(ui, &mut acts));
             }
+            Tab::Play => self.play_tab(ui),
             Tab::Collection => {
                 Panel::right("inspector_p")
                     .resizable(true)
