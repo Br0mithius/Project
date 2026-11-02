@@ -474,6 +474,9 @@ pub struct GameExtra {
     /// What the rest of the AI's turn plan costs (with a creature's power-up used the turn
     /// it is cast): a payment leaves the sources that pay it untapped when it can.
     pub follow: std::cell::Cell<Mana>,
+    /// The creatures the instances of a "copy it X times" spell still to resolve go to, one
+    /// entry per instance (Photon Blast Barrage, `ai::barrage_plan`).
+    pub barrage: Vec<u32>,
     /// The last connive discarded a nonland card (its +1/+1 counter is put).
     pub connive_nonland: bool,
     /// This combat's attackers and the player each attacks (or whose planeswalker): "target
@@ -1408,6 +1411,20 @@ impl<'a> Game<'a> {
                 // commander - CR 903.4f).
                 if c.mana_identity {
                     colors = self.players[p].px.identity;
+                    if colors == 0 {
+                        continue;
+                    }
+                }
+                // Fellwar Stone: the colours the opponents' lands make (their own such lands
+                // aside, CR 106.7).
+                if c.mana_opp_lands {
+                    colors = self
+                        .perms
+                        .iter()
+                        .filter(|y| y.ctrl as usize != p && y.is(T_LAND))
+                        .filter_map(|y| y.card.map(|r| self.card(r)))
+                        .filter(|l| !l.mana_opp_lands)
+                        .fold(0, |a, l| a | (l.produces | l.cond_produces) & 0b11111);
                     if colors == 0 {
                         continue;
                     }
@@ -2484,9 +2501,17 @@ impl<'a> Game<'a> {
                     self.perms[e].attached = Some(self.perms[g].id);
                 }
             }
+            // A Saga enters with a lore counter (CR 714.3a) - two with Doc Samson's "that
+            // many plus one": chapters I and II both trigger.
+            let lore = if c.is(T_SAGA) {
+                let doc = self.rules[ctrl % 8] & R_EXTRA_ANY_COUNTER != 0;
+                1 + i16::from(doc)
+            } else {
+                0
+            };
             for (ai, a) in c.abilities.iter().enumerate() {
                 let fire = a.trig == Trig::Enters && !hushed
-                    || (a.trig == Trig::Chapter(1) && c.is(T_SAGA));
+                    || matches!(a.trig, Trig::Chapter(n) if (n as i16) <= lore);
                 if fire {
                     self.pending.push(Pending {
                         ctrl: ctrl as u8,
@@ -2507,7 +2532,7 @@ impl<'a> Game<'a> {
             }
             if c.is(T_SAGA) {
                 if let Some(e) = self.idx(id) {
-                    self.perms[e].other_counters = 1;
+                    self.perms[e].other_counters = lore;
                 }
             }
             // "As ~ enters, look at an opponent's hand, then choose any card name"

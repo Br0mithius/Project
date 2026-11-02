@@ -980,6 +980,9 @@ pub fn probe(card: &Card) -> String {
     if c.mana_identity {
         sim.push("its colours: the commanders' colour identity".into());
     }
+    if c.mana_opp_lands {
+        sim.push("its colours: those the opponents' lands make".into());
+    }
     if let Some(t) = &c.token {
         sim.push(format!(
             "its creature token: {}{}{}",

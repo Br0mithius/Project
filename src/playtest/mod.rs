@@ -135,6 +135,9 @@ pub struct CastOpts {
     pub overload: bool,
     /// MSH Sneak's alternative cost (after attacking this turn).
     pub sneak: bool,
+    /// The X of a "copy it X times" spell, when the AI picked a smaller one than all its
+    /// mana pays for (Photon Blast Barrage with mana kept for the rest of the turn).
+    pub copies: Option<u8>,
 }
 
 impl<'a> Game<'a> {
@@ -489,7 +492,8 @@ impl<'a> Game<'a> {
             let spare = self.mana_available(p).saturating_sub(cost.total());
             let n =
                 if ai::copies_x_times(c) {
-                    ai::copies_x(self, p, c, spare)
+                    let most = ai::copies_x(self, p, c, spare);
+                    opts.copies.map_or(most, |k| (k as u32).min(most))
                 } else if c.abilities.iter().any(|a| {
                     a.trig == Trig::Spell && a.text.contains("card with mana value x or less")
                 }) {
@@ -2460,7 +2464,15 @@ impl<'a> Game<'a> {
     /// The cleanup step of player `a`'s turn: hand size, damage and "this turn" effects end.
     fn cleanup(&mut self, a: usize) {
         let outer = std::mem::replace(&mut self.cause, audit::Cause::Rule("hand size"));
-        while self.players[a].alive && self.players[a].hand.len() > 7 {
+        // "You have no maximum hand size" (Thought Vessel).
+        let unlimited = self.perms.iter().any(|x| {
+            x.ctrl as usize == a
+                && self
+                    .abilities_of(x)
+                    .iter()
+                    .any(|ab| ab.trig == Trig::Static && ab.text.contains("no maximum hand size"))
+        });
+        while !unlimited && self.players[a].alive && self.players[a].hand.len() > 7 {
             self.discard(a);
         }
         self.cause = outer;

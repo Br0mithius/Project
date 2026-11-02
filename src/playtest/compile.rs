@@ -1058,6 +1058,9 @@ pub struct SimCard {
     pub cond_produces: u8,
     /// Its mana is "of any color in your commander's color identity" (Command Tower).
     pub mana_identity: bool,
+    /// Its mana is "of any color that a land an opponent controls could produce" (Fellwar
+    /// Stone).
+    pub mana_opp_lands: bool,
     /// The creature token it creates when that has abilities in quotes or a name ("create
     /// Zabu, a legendary 2/2 green Cat creature token with \"Landfall — ...\""): those
     /// abilities, keywords and the legendary type (CR 111.4).
@@ -2248,6 +2251,9 @@ pub struct ManaLines {
     pub costed: bool,
     /// "Add one mana of any color in your commander's color identity" (Command Tower).
     pub identity: bool,
+    /// "Add one mana of any color that a land an opponent controls could produce" (Fellwar
+    /// Stone, Exotic Orchard).
+    pub opp_lands: bool,
 }
 
 /// Reads a card's mana abilities line by line (lowercase text, reminders dropped).
@@ -2277,6 +2283,9 @@ pub fn mana_lines(own_text: &str) -> ManaLines {
         }
         if what.contains("commander's color identity") {
             m.identity = true;
+        }
+        if what.contains("a land an opponent controls could produce") {
+            m.opp_lands = true;
         }
         let paid = crate::card::symbols_in(cost)
             .iter()
@@ -3817,6 +3826,7 @@ pub fn compile(card: &Card) -> SimCard {
             0
         },
         mana_identity: lines.identity,
+        mana_opp_lands: lines.opp_lands,
         token: token_card(card).map(Box::new),
         identity: card.identity().0 & 0b11111,
         mana_amount,

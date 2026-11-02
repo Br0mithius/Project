@@ -4064,7 +4064,7 @@ ABILITIES:
 
 Exotic Orchard |  | Land
 TEXT: {T}: Add one mana of any color that a land an opponent controls could produce.
-SIM: makes mana (colour mask 0b011111, 1 at a time)
+SIM: makes mana (colour mask 0b011111, 1 at a time); its colours: those the opponents' lands make
 On entering:
       itself: 
       -> (nothing changes)
@@ -4336,7 +4336,7 @@ ABILITIES:
 
 Fellwar Stone | {2} | Artifact
 TEXT: {T}: Add one mana of any color that a land an opponent controls could produce.
-SIM: makes mana (colour mask 0b011111, 1 at a time)
+SIM: makes mana (colour mask 0b011111, 1 at a time); its colours: those the opponents' lands make
 On entering:
       itself: 
       -> (nothing changes)

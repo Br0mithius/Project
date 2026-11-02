@@ -1237,6 +1237,11 @@ impl<'a> Game<'a> {
             let times = ctx.x.or(self.cur_x).unwrap_or(0).clamp(0, 20);
             if let Some(spell) = self.casting {
                 self.note(|| format!("P{} copies the spell {} times (X = {})", me, times, times));
+                // Where the instances go: several on a creature one doesn't kill.
+                self.ext.barrage = ctx
+                    .card
+                    .map(|c| ai::barrage_plan(self, me, c, times as u32 + 1).0)
+                    .unwrap_or_default();
                 for _ in 0..times {
                     self.copy_spell(me, spell);
                 }
@@ -2724,6 +2729,23 @@ impl<'a> Game<'a> {
                         return;
                     }
                     let mut hit = ai::damage_target(self, ctx, to, n);
+                    // An instance of Photon Blast Barrage: the creature its plan gives it
+                    // (`GameExtra::barrage`), while that one is still a legal target.
+                    if ctx.card.is_some_and(ai::copies_x_times) {
+                        let t1 = Target { count: 1, ..*to };
+                        let cands = self.candidates(ctx, &t1, true);
+                        while !self.ext.barrage.is_empty() {
+                            let id = self.ext.barrage.remove(0);
+                            let ok = cands.iter().any(|&i| {
+                                let x = &self.perms[i];
+                                x.id == id && x.damage < x.t
+                            });
+                            if ok {
+                                hit = ai::Hit::Perm(id);
+                                break;
+                            }
+                        }
+                    }
                     // A required target (CR 601.2c: chosen on casting, so there is one): when
                     // nothing dies to it, the best of the opponents' legal targets still takes
                     // the damage (Magnificent End's tapped creature, Helicarrier Strike's

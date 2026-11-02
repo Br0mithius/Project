@@ -5073,3 +5073,155 @@ fn a_payment_keeps_the_rest_of_the_turn_plan_payable() {
     assert!(!perm(&g, forest).tapped, "the Forest is kept for the {{G}}");
     assert!(g.can_pay(0, &Mana::parse("{G}")));
 }
+
+#[test]
+fn photon_blast_barrage_puts_two_pings_on_a_two_toughness_creature() {
+    // A 2/2 and a 1/1 across the table and six Mountains: X = 2, two instances on the Bear
+    // and one on the Elf, and no mana spent on copies with nothing to kill.
+    let db = db();
+    let mut d = deck(&db, &["Photon Blast Barrage", "Mountain"]);
+    d.cards.push(bear());
+    d.cards.push(compile(&card(
+        "Elf",
+        "{G}",
+        "Creature — Elf",
+        "",
+        Some(("1", "1")),
+    )));
+    let mut g = game(&[&d, &d]);
+    let b = put(&mut g, 1, 2);
+    let e = put(&mut g, 1, 3);
+    lands(&mut g, 0, 6, 'R');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(b).is_none(), "two pings kill the Bear");
+    assert!(g.idx(e).is_none(), "one kills the Elf");
+    let untapped = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 0 && x.is(T_LAND) && !x.tapped)
+        .count();
+    assert_eq!(untapped, 2, "X = 2: four of the six Mountains tapped");
+}
+
+#[test]
+fn a_second_copy_of_a_legend_in_play_is_worth_only_its_arrival() {
+    let db = db();
+    let d = prep_db(&db, &["Madame Masque", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    let fresh = ai::spell_value(&g, 0, 0, false, false);
+    let masque = put(&mut g, 0, 0);
+    let old = ai::perm_value(&g, g.idx(masque).unwrap());
+    let again = ai::spell_value(&g, 0, 0, false, false);
+    assert!(
+        again < fresh - 0.9 * old,
+        "the legend rule costs the one in play: {} vs {} - {}",
+        again,
+        fresh,
+        old
+    );
+}
+
+#[test]
+fn teamwork_both_modes_only_with_a_target_for_each() {
+    // Murdock's Crusade with teamwork chooses both modes; without an enchantment of mana
+    // value 4 or more to exile, it isn't cast that way.
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Murdock's Crusade",
+            "Aegis Turtle",
+            "Celebrate the Mountain-king",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    let crusade = &g.players[0].cards[0];
+    put(&mut g, 1, 1);
+    assert!(!ai::both_modes_targetable(&g, 0, crusade), "no enchantment");
+    put(&mut g, 1, 2);
+    let crusade = &g.players[0].cards[0];
+    assert!(ai::both_modes_targetable(&g, 0, crusade));
+}
+
+#[test]
+fn removal_frees_our_card_from_an_exiling_enchantment() {
+    // Two of the opponent's enchantments alike, one holding our card "until it leaves the
+    // battlefield": that's the one to destroy.
+    let d = prep(&[
+        card("Jail", "{2}{W}", "Enchantment", "", None),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let empty = put(&mut g, 1, 0);
+    let jail = put(&mut g, 1, 0);
+    let i = g.idx(jail).unwrap();
+    g.perms[i].holding.push((0, (0, 1)));
+    g.players[0].exile.push(1);
+    let cands: Vec<usize> = [empty, jail].iter().map(|&id| g.idx(id).unwrap()).collect();
+    let pick = ai::choose_victims(&g, 0, &cands, 1);
+    assert_eq!(pick, vec![g.idx(jail).unwrap()]);
+}
+
+#[test]
+fn fellwar_stone_makes_the_colours_of_the_opponents_lands() {
+    let db = db();
+    let d = deck(&db, &["Fellwar Stone", "Swamp", "Island"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    assert!(!g.can_pay(0, &Mana::parse("{B}")), "no opponent's land yet");
+    put(&mut g, 1, 1);
+    assert!(g.can_pay(0, &Mana::parse("{B}")), "their Swamp makes {{B}}");
+    assert!(
+        !g.can_pay(0, &Mana::parse("{U}")),
+        "not {{U}}: they have no Island"
+    );
+    put(&mut g, 1, 2);
+    assert!(g.can_pay(0, &Mana::parse("{U}")));
+}
+
+#[test]
+fn thought_vessel_means_no_maximum_hand_size() {
+    let db = db();
+    let d = deck(&db, &["Thought Vessel", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1; 9];
+    g.players[1].hand = vec![1; 9];
+    put(&mut g, 0, 0);
+    g.cleanup(0);
+    g.cleanup(1);
+    assert_eq!(g.players[0].hand.len(), 9, "Thought Vessel: no maximum");
+    assert_eq!(
+        g.players[1].hand.len(),
+        7,
+        "the other player discards to seven"
+    );
+}
+
+#[test]
+fn a_saga_enters_with_doc_samsons_extra_lore_counter() {
+    // Doc Samson: "that many plus one" of any counter - Avengers: Under Siege enters with
+    // two lore counters, so chapters I and II both trigger.
+    let db = db();
+    let d = prep_db(
+        &db,
+        &["Doc Samson, Super Psychiatrist", "Avengers: Under Siege"],
+    );
+    let mut g = game(&[&d, &d]);
+    let life = g.players[1].life;
+    put(&mut g, 0, 1);
+    assert_eq!(
+        g.players[1].life, life,
+        "chapter I alone without Doc Samson"
+    );
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let siege = put(&mut g, 0, 1);
+    assert_eq!(
+        g.players[1].life,
+        life - 2,
+        "chapter II's 2 damage to each opponent"
+    );
+    assert_eq!(perm(&g, siege).other_counters, 2);
+}
