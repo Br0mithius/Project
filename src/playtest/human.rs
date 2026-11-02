@@ -332,6 +332,8 @@ pub struct ScriptIo {
     /// The last view sent (what the game looked like at the last question).
     pub last_view: RefCell<Option<GameView>>,
     pub log: RefCell<Vec<String>>,
+    /// With `stop_when_done`: the full state dump taken where the answers ran out.
+    pub dump: RefCell<Option<String>>,
 }
 
 impl ScriptIo {
@@ -345,16 +347,71 @@ impl ScriptIo {
 
 impl HumanIo for ScriptIo {
     fn send(&self, msg: FromEngine) {
-        if let FromEngine::Ask { ask, view, .. } = msg {
-            self.log.borrow_mut().extend(view.new_log.iter().cloned());
-            self.asks.borrow_mut().push(ask);
-            *self.last_view.borrow_mut() = Some(*view);
+        match msg {
+            FromEngine::Ask { ask, view, .. } => {
+                self.log.borrow_mut().extend(view.new_log.iter().cloned());
+                self.asks.borrow_mut().push(ask);
+                *self.last_view.borrow_mut() = Some(*view);
+            }
+            FromEngine::Over { view, .. } => {
+                self.log.borrow_mut().extend(view.new_log.iter().cloned());
+                *self.last_view.borrow_mut() = Some(*view);
+            }
+            FromEngine::Dump(d) => *self.dump.borrow_mut() = Some(d),
+            _ => {}
         }
     }
     fn recv(&self) -> ToEngine {
         match self.answers.borrow_mut().pop_front() {
             Some(a) => ToEngine::Answer(a),
+            // Out of answers: take a state dump, then stop.
+            None if self.stop_when_done && self.dump.borrow().is_none() => ToEngine::Dump,
             None if self.stop_when_done => std::panic::resume_unwind(Box::new(Quit)),
+            None => ToEngine::Answer(Answer::Auto),
+        }
+    }
+}
+
+/// A `ScriptIo` kept by the caller too (to read its asks and log afterwards).
+pub struct SharedIo(pub std::rc::Rc<ScriptIo>);
+
+impl HumanIo for SharedIo {
+    fn send(&self, msg: FromEngine) {
+        self.0.send(msg)
+    }
+    fn recv(&self) -> ToEngine {
+        self.0.recv()
+    }
+}
+
+/// Answers from a function of the question and the game (tests and fuzzing).
+pub struct FnIo {
+    pub f: RefCell<Box<dyn FnMut(&Ask, &GameView) -> Answer>>,
+    last: RefCell<Option<(Ask, GameView)>>,
+    pub asks: std::rc::Rc<RefCell<Vec<Ask>>>,
+}
+
+impl FnIo {
+    pub fn new(f: impl FnMut(&Ask, &GameView) -> Answer + 'static) -> FnIo {
+        FnIo {
+            f: RefCell::new(Box::new(f)),
+            last: RefCell::new(None),
+            asks: Default::default(),
+        }
+    }
+}
+
+impl HumanIo for FnIo {
+    fn send(&self, msg: FromEngine) {
+        if let FromEngine::Ask { ask, view, .. } = msg {
+            self.asks.borrow_mut().push(ask.clone());
+            *self.last.borrow_mut() = Some((ask, *view));
+        }
+    }
+    fn recv(&self) -> ToEngine {
+        let last = self.last.borrow();
+        match last.as_ref() {
+            Some((ask, view)) => ToEngine::Answer((self.f.borrow_mut())(ask, view)),
             None => ToEngine::Answer(Answer::Auto),
         }
     }
@@ -2607,32 +2664,48 @@ pub fn start(setup: Setup, db: CardDb) -> PlayHandle {
     }
 }
 
+/// What a replay found where the report's answers end.
+pub struct Replayed {
+    pub log: Vec<String>,
+    pub view: Option<GameView>,
+    /// Every question asked, the last one being the one pending where the answers ran out
+    /// (unless the game ended).
+    pub asks: Vec<Ask>,
+    /// The full state dump there (None if the game ended first).
+    pub dump: Option<String>,
+    /// The engine panicked (a crash bug): its message.
+    pub crash: Option<String>,
+}
+
 /// Replays a report's answers and stops where they end: the log and the game as it was at
 /// the last question.
-pub fn replay(report: &Report, db: &CardDb) -> (Vec<String>, Option<GameView>, Vec<Ask>) {
+pub fn replay(report: &Report, db: &CardDb) -> Replayed {
     let io = std::rc::Rc::new(ScriptIo {
         answers: RefCell::new(report.answers.clone().into()),
         stop_when_done: true,
         ..Default::default()
     });
-    struct Shared(std::rc::Rc<ScriptIo>);
-    impl HumanIo for Shared {
-        fn send(&self, msg: FromEngine) {
-            self.0.send(msg)
-        }
-        fn recv(&self) -> ToEngine {
-            self.0.recv()
-        }
-    }
     let setup = report.setup.clone();
-    let shared = Shared(io.clone());
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let shared = SharedIo(io.clone());
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         play_with(&setup, db, Box::new(shared));
     }));
-    let log = io.log.borrow().clone();
-    let view = io.last_view.borrow().clone();
-    let asks = io.asks.borrow().clone();
-    (log, view, asks)
+    let crash = match r {
+        Err(e) if e.downcast_ref::<Quit>().is_none() => Some(
+            e.downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "panic".into()),
+        ),
+        _ => None,
+    };
+    Replayed {
+        log: io.log.borrow().clone(),
+        view: io.last_view.borrow().clone(),
+        asks: io.asks.borrow().clone(),
+        dump: io.dump.borrow().clone(),
+        crash,
+    }
 }
 
 /// The text of a bug report file: the note, the state dump, the log, and (last, as JSON)

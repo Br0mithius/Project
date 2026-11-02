@@ -16,6 +16,8 @@ pub mod audit;
 pub mod combat;
 pub mod compile;
 pub mod human;
+#[cfg(test)]
+mod human_tests;
 pub mod lab;
 pub mod probe;
 pub mod resolve;
