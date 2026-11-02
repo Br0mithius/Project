@@ -4982,3 +4982,58 @@ fn pool_review_readings() {
     let d = deck(&db, &["Redcap Gutter-Dweller"]);
     assert_eq!(d.cards[0].kw & CANT_BLOCK, 0);
 }
+
+#[test]
+fn milled_and_returned_cards_are_the_kind_named() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Forest", 'G'),
+        db.get("Rapid Rescue").unwrap().clone(),
+        db.get("Call Damage Control").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card(
+            "Shock",
+            "{R}",
+            "Instant",
+            "Shock deals 2 damage to any target.",
+            None,
+        ),
+        card(
+            "Dragon",
+            "{5}{R}{R}",
+            "Creature — Dragon",
+            "Flying",
+            Some(("8", "8")),
+        ),
+    ]);
+    // Rapid Rescue mills two and takes a permanent card from those two, not the top card.
+    let rescue = |library: Vec<u16>| {
+        let mut g = game(&[&d, &d]);
+        lands(&mut g, 0, 1, 'G');
+        g.players[0].library = library;
+        g.players[0].hand = vec![1];
+        assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+        g.run_pending();
+        (
+            g.players[0].hand.clone(),
+            g.players[0].library.len(),
+            g.players[0].life,
+        )
+    };
+    let (hand, left, life) = rescue(vec![4, 4, 4]);
+    assert!(hand.is_empty(), "two instants milled: nothing to take");
+    assert_eq!((left, life), (1, 32));
+    let (hand, left, _) = rescue(vec![4, 3, 4]);
+    assert_eq!((hand, left), (vec![3u16], 1));
+    // Call Damage Control returns permanent cards only: the Dragon and the Bear, not Shock.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'G');
+    g.players[0].graveyard = vec![4, 3, 5];
+    g.players[0].hand = vec![2];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.run_pending();
+    let mut hand = g.players[0].hand.clone();
+    hand.sort();
+    assert_eq!(hand, vec![3, 5], "the two creature cards back");
+    assert!(g.players[0].graveyard.contains(&4), "Shock stays");
+}

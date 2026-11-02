@@ -3971,6 +3971,10 @@ impl<'a> Game<'a> {
                 } else if text.contains("return that card") || text.contains("return it") {
                     // The card that just went there (e.g. the creature that died).
                     self.players[me].graveyard.len().checked_sub(1)
+                } else if text.contains("return those cards") {
+                    // Modes that only name the targets (Call Damage Control: an artifact, a
+                    // creature, an enchantment or a land card): the best permanent card.
+                    self.best_permanent_in_graveyard(me)
                 } else {
                     let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
                     ai::regrowth_choice(self, me, creature, &ctx.card_restr, &d)
@@ -4611,8 +4615,12 @@ impl<'a> Game<'a> {
                     })
                     .unwrap_or(3usize);
                 // "Mill four cards, then put all Elf cards from among them into your hand":
-                // the milled cards, only the kind named.
-                if text.contains("mill") && text.contains("from among them") {
+                // the milled cards, only the kind named. (Rapid Rescue: "a permanent card from
+                // among the milled cards".)
+                if text.contains("mill")
+                    && (text.contains("from among them")
+                        || text.contains("from among the milled cards"))
+                {
                     let milled = text
                         .split("mill ")
                         .nth(1)
@@ -4628,15 +4636,14 @@ impl<'a> Game<'a> {
                         .unwrap_or(3usize);
                     let d = self.dyn_values(&ctx.card_restr, Some(ctx), me, ctx.src);
                     let all = text.contains("put all");
+                    let permanent = text.contains("a permanent card from among");
                     let gy = &self.players[me].graveyard;
                     let from = gy.len().saturating_sub(milled);
                     let mut picks: Vec<usize> = (from..gy.len())
                         .filter(|&k| {
-                            Game::card_ok(
-                                &ctx.card_restr,
-                                &self.players[me].cards[gy[k] as usize],
-                                &d,
-                            )
+                            let c = &self.players[me].cards[gy[k] as usize];
+                            Game::card_ok(&ctx.card_restr, c, &d)
+                                && (!permanent || c.is_permanent())
                         })
                         .collect();
                     // "You may put a permanent card from among them into your hand": the best.
@@ -5079,6 +5086,18 @@ impl<'a> Game<'a> {
     }
 
     /// Puts a copy of a spell's effects on the stack (CR 707.10).
+    /// The most valuable permanent card in `p`'s graveyard.
+    fn best_permanent_in_graveyard(&self, p: usize) -> Option<usize> {
+        let pl = &self.players[p];
+        (0..pl.graveyard.len())
+            .filter(|&k| pl.cards[pl.graveyard[k] as usize].is_permanent())
+            .max_by(|&a, &b| {
+                let va = pl.cards[pl.graveyard[a] as usize].value;
+                let vb = pl.cards[pl.graveyard[b] as usize].value;
+                va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
     pub fn copy_spell(&mut self, me: usize, spell: (CardRef, bool)) {
         let c = self.card(spell.0);
         let abilities = if spell.1 {

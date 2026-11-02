@@ -9469,7 +9469,7 @@ Rapid Rescue | {G} | Instant
 TEXT: Mill two cards. You may put a permanent card from among the milled cards into your hand. You gain 2 life. (To mill two cards, put the top two cards of your library into your graveyard.)
 ABILITIES:
   Spell [may]: "mill two cards. you may put a permanent card from among the milled cards into your hand. you gain 2 life."
-      -> You: life +2, hand +1, library -3, graveyard +2
+      -> You: life +2, hand +1, library -2, graveyard +1
 
 Ravenhill Flock | {3}{U} | Creature — Bird | 1/2
 TEXT: Flying / Whenever you draw a card, put a +1/+1 counter on this creature.
