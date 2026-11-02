@@ -833,7 +833,14 @@ impl<'a> Game<'a> {
                     } else if o == me {
                         -v
                     } else {
-                        v * ai::weight_peek(g, me, o)
+                        // (Plus our cards it holds exiled, as `choose_victims` adds.)
+                        let back: f32 = g.perms[i]
+                            .holding
+                            .iter()
+                            .filter(|(owner, _)| *owner as usize == me)
+                            .map(|&(_, r)| g.card(r).value.max(0.0))
+                            .sum();
+                        v * ai::weight_peek(g, me, o) + back
                     }
                 };
                 let chosen: Vec<String> = ids

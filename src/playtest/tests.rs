@@ -5324,3 +5324,234 @@ fn bite_removal_hits_the_creature_it_was_cast_for() {
     assert!(!ai::removal_kills(&g, 0, c, g.idx(giant).unwrap()));
     assert!(ai::removal_kills(&g, 0, c, g.idx(ogre).unwrap()));
 }
+
+#[test]
+fn mana_symbols_are_matched_to_sources_as_a_whole() {
+    // {C}{U}{G} from Gleaming Bastion ({C}, or {W}/{U} with a basic), a Forest and a
+    // Treasure: the Bastion must make the {C} and the Treasure the {U}. Paying {U} first
+    // from the Bastion (the cheaper source to lose) left no {C}.
+    let db = db();
+    let d = prep_db(&db, &["Gleaming Bastion", "Swamp", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let swamp = put(&mut g, 0, 1);
+    put(&mut g, 0, 2);
+    g.make_item(0, "treasure");
+    let i = g.idx(swamp).unwrap();
+    g.perms[i].tapped = true;
+    assert!(g.can_pay(0, &Mana::parse("{C}{U}{G}")));
+    assert!(g.pay(0, &Mana::parse("{C}{U}{G}")));
+    assert!(g.perms.iter().all(|x| x.tapped || x.tok == Tok::Treasure));
+    assert!(!g.perms.iter().any(|x| x.tok == Tok::Treasure));
+    assert!(!g.can_pay(0, &Mana::parse("{C}{U}{G}")), "all spent");
+}
+
+#[test]
+fn a_payment_keeps_the_rest_of_the_turn_plan_payable() {
+    // {1} now and {G} next (the rest of the AI's plan, `GameExtra::follow`): the Forest
+    // stays untapped for the {G}.
+    let db = db();
+    let d = prep_db(&db, &["Forest", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    let forest = put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    g.ext.follow.set(Mana::parse("{G}"));
+    assert!(g.pay(0, &Mana::parse("{1}")));
+    assert!(!perm(&g, forest).tapped, "the Forest is kept for the {{G}}");
+    assert!(g.can_pay(0, &Mana::parse("{G}")));
+}
+
+#[test]
+fn photon_blast_barrage_puts_two_pings_on_a_two_toughness_creature() {
+    // A 2/2 and a 1/1 across the table and six Mountains: X = 2, two instances on the Bear
+    // and one on the Elf, and no mana spent on copies with nothing to kill.
+    let db = db();
+    let mut d = deck(&db, &["Photon Blast Barrage", "Mountain"]);
+    d.cards.push(bear());
+    d.cards.push(compile(&card(
+        "Elf",
+        "{G}",
+        "Creature — Elf",
+        "",
+        Some(("1", "1")),
+    )));
+    let mut g = game(&[&d, &d]);
+    let b = put(&mut g, 1, 2);
+    let e = put(&mut g, 1, 3);
+    lands(&mut g, 0, 6, 'R');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(b).is_none(), "two pings kill the Bear");
+    assert!(g.idx(e).is_none(), "one kills the Elf");
+    let untapped = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 0 && x.is(T_LAND) && !x.tapped)
+        .count();
+    assert_eq!(untapped, 2, "X = 2: four of the six Mountains tapped");
+}
+
+#[test]
+fn a_second_copy_of_a_legend_in_play_is_worth_only_its_arrival() {
+    let db = db();
+    let d = prep_db(&db, &["Madame Masque", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'B');
+    let fresh = ai::spell_value(&g, 0, 0, false, false);
+    let masque = put(&mut g, 0, 0);
+    let old = ai::perm_value(&g, g.idx(masque).unwrap());
+    let again = ai::spell_value(&g, 0, 0, false, false);
+    assert!(
+        again < fresh - 0.9 * old,
+        "the legend rule costs the one in play: {} vs {} - {}",
+        again,
+        fresh,
+        old
+    );
+}
+
+#[test]
+fn teamwork_both_modes_only_with_a_target_for_each() {
+    // Murdock's Crusade with teamwork chooses both modes; without an enchantment of mana
+    // value 4 or more to exile, it isn't cast that way.
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Murdock's Crusade",
+            "Aegis Turtle",
+            "Celebrate the Mountain-king",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    let crusade = &g.players[0].cards[0];
+    put(&mut g, 1, 1);
+    assert!(!ai::both_modes_targetable(&g, 0, crusade), "no enchantment");
+    put(&mut g, 1, 2);
+    let crusade = &g.players[0].cards[0];
+    assert!(ai::both_modes_targetable(&g, 0, crusade));
+}
+
+#[test]
+fn removal_frees_our_card_from_an_exiling_enchantment() {
+    // Two of the opponent's enchantments alike, one holding our card "until it leaves the
+    // battlefield": that's the one to destroy.
+    let d = prep(&[
+        card("Jail", "{2}{W}", "Enchantment", "", None),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let empty = put(&mut g, 1, 0);
+    let jail = put(&mut g, 1, 0);
+    let i = g.idx(jail).unwrap();
+    g.perms[i].holding.push((0, (0, 1)));
+    g.players[0].exile.push(1);
+    let cands: Vec<usize> = [empty, jail].iter().map(|&id| g.idx(id).unwrap()).collect();
+    let pick = ai::choose_victims(&g, 0, &cands, 1);
+    assert_eq!(pick, vec![g.idx(jail).unwrap()]);
+}
+
+#[test]
+fn fellwar_stone_makes_the_colours_of_the_opponents_lands() {
+    let db = db();
+    let d = deck(&db, &["Fellwar Stone", "Swamp", "Island"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    assert!(!g.can_pay(0, &Mana::parse("{B}")), "no opponent's land yet");
+    put(&mut g, 1, 1);
+    assert!(g.can_pay(0, &Mana::parse("{B}")), "their Swamp makes {{B}}");
+    assert!(
+        !g.can_pay(0, &Mana::parse("{U}")),
+        "not {{U}}: they have no Island"
+    );
+    put(&mut g, 1, 2);
+    assert!(g.can_pay(0, &Mana::parse("{U}")));
+}
+
+#[test]
+fn thought_vessel_means_no_maximum_hand_size() {
+    let db = db();
+    let d = deck(&db, &["Thought Vessel", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1; 9];
+    g.players[1].hand = vec![1; 9];
+    put(&mut g, 0, 0);
+    g.cleanup(0);
+    g.cleanup(1);
+    assert_eq!(g.players[0].hand.len(), 9, "Thought Vessel: no maximum");
+    assert_eq!(
+        g.players[1].hand.len(),
+        7,
+        "the other player discards to seven"
+    );
+}
+
+#[test]
+fn a_saga_enters_with_doc_samsons_extra_lore_counter() {
+    // Doc Samson: "that many plus one" of any counter - Avengers: Under Siege enters with
+    // two lore counters, so chapters I and II both trigger.
+    let db = db();
+    let d = prep_db(
+        &db,
+        &["Doc Samson, Super Psychiatrist", "Avengers: Under Siege"],
+    );
+    let mut g = game(&[&d, &d]);
+    let life = g.players[1].life;
+    put(&mut g, 0, 1);
+    assert_eq!(
+        g.players[1].life, life,
+        "chapter I alone without Doc Samson"
+    );
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let siege = put(&mut g, 0, 1);
+    assert_eq!(
+        g.players[1].life,
+        life - 2,
+        "chapter II's 2 damage to each opponent"
+    );
+    assert_eq!(perm(&g, siege).other_counters, 2);
+}
+
+#[test]
+fn a_flash_creature_is_cast_at_its_full_worth_in_the_main_phase() {
+    // Captain Marvel (5/4 flying, lifelink, flash) or a vanilla 5/4 for the same five mana:
+    // the flier. (Flash creatures were valued at 0.6 in the main phase, for an instant-speed
+    // cast that never came.)
+    let db = db();
+    let mut d = prep_db(&db, &["Captain Marvel, Earth's Protector", "Plains"]);
+    d.cards.push(compile(&card(
+        "Brute",
+        "{4}{W}",
+        "Creature — Giant",
+        "",
+        Some(("5", "4")),
+    )));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'W');
+    g.players[0].hand = vec![0, 2];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(
+        g.players[0].hand,
+        vec![2],
+        "Captain Marvel cast, the Brute kept"
+    );
+}
+
+#[test]
+fn a_filtered_payment_keeps_the_rest_of_the_turn_plan_payable() {
+    // {R} now (only a Surveillance Room's "{1}, {T}: Add one mana of any color" makes it),
+    // {C} next: the filter's {1} is paid with the Swamp, a Surveillance Room stays for {C}.
+    let db = db();
+    let d = deck(&db, &["Surveillance Room", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    g.ext.follow.set(Mana::parse("{C}"));
+    assert!(g.pay(0, &Mana::parse("{R}")));
+    assert!(
+        g.can_pay(0, &Mana::parse("{C}")),
+        "a Surveillance Room is left for {{C}}"
+    );
+}

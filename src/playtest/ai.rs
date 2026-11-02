@@ -450,7 +450,15 @@ pub fn choose_victims(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usi
                 // As removal is valued: less on a commander or a player about to die.
                 weight(g, me, owner) * removal_discount(g, me, i)
             };
-            (focus + perm_value(g, i) * w, i)
+            // Cards it holds exiled "until ~ leaves the battlefield" (Banishing Light,
+            // Celebrate the Mountain-king) come back: ours are ours again.
+            let back: f32 = g.perms[i]
+                .holding
+                .iter()
+                .filter(|(owner, _)| *owner as usize == me)
+                .map(|&(_, r)| g.card(r).value.max(0.0))
+                .sum();
+            (focus + perm_value(g, i) * w + back, i)
         })
         .collect();
     v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
@@ -2228,25 +2236,13 @@ fn pay_price(g: &Game, p: usize, src_id: Option<u32>, pc: &PayCost) -> Option<Op
 }
 
 /// What casting a spell is worth to `p` right now.
-fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32 {
+pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32 {
     let c = &g.players[p].cards[idx as usize];
     if is_reactive_only(c) && !back {
         return 0.0;
     }
     let mut v = 0.0;
     let permanent = !back && c.is_permanent();
-    // A second copy of a legend we have (a commander and its copy in the deck): the legend
-    // rule puts one of them into the graveyard.
-    if permanent
-        && c.is(T_LEGENDARY)
-        && g.perms.iter().any(|x| {
-            x.ctrl as usize == p
-                && x.tok == Tok::None
-                && x.card.is_some_and(|r| g.card(r).name == c.name)
-        })
-    {
-        return 0.0;
-    }
     if permanent {
         if c.is(T_CREATURE) {
             v += c.power.max(0) as f32
@@ -2333,14 +2329,22 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
         if commander {
             v += 1.5;
         }
+        // A second copy of a legend we control (or of our commander, which the deck may also
+        // hold while the league isn't singleton): the legend rule puts the one in play into
+        // the graveyard, so only what the new one adds is gained (its arrival, mostly).
+        if c.is(T_LEGENDARY) {
+            if let Some(old) = g.perms.iter().position(|x| {
+                x.ctrl as usize == p
+                    && x.tok == Tok::None
+                    && x.card.is_some_and(|r| g.card(r).name == c.name)
+            }) {
+                v -= perm_value(g, old);
+            }
+        }
     } else if !back && copies_x_times(c) {
-        // "Copy it X times" (Photon Blast Barrage): one instance a target, as many as the
-        // mana pays for.
+        // "Copy it X times" (Photon Blast Barrage): what the mana's instances kill.
         let spare = g.mana_available(p).saturating_sub(c.cost.total());
-        v += barrage_targets(g, p, c)
-            .iter()
-            .take(spare as usize + 1)
-            .sum::<f32>();
+        v += barrage_plan(g, p, c, spare + 1).1;
     } else {
         for a in spell_abilities(c, back)
             .iter()
@@ -2393,9 +2397,11 @@ pub fn copies_x_times(c: &SimCard) -> bool {
         .any(|a| a.trig == Trig::Spell && a.text.contains("copy it x times"))
 }
 
-/// For a "deals N damage to target creature" spell copied X times: what each distinct
-/// target it kills is worth (best first, the ones worth a mana or more).
-fn barrage_targets(g: &Game, p: usize, c: &SimCard) -> Vec<f32> {
+/// For a "deals N damage to target creature" spell copied X times (Photon Blast Barrage):
+/// the opponents' creatures its `budget` instances kill - one instance for each that N
+/// kills, several on a tougher one - best value per instance first, and what they're worth.
+/// Each creature's id is listed once per instance it takes (`GameExtra::barrage`).
+pub fn barrage_plan(g: &Game, p: usize, c: &SimCard, budget: u32) -> (Vec<u32>, f32) {
     let Some(n) = c
         .abilities
         .iter()
@@ -2406,33 +2412,48 @@ fn barrage_targets(g: &Game, p: usize, c: &SimCard) -> Vec<f32> {
             _ => None,
         })
     else {
-        return Vec::new();
+        return (Vec::new(), 0.0);
     };
-    let mut v: Vec<f32> = g
+    let mut cands: Vec<(f32, u32, u32)> = g
         .perms
         .iter()
         .enumerate()
         .filter(|(_, x)| {
+            // (Not a creature with ward: each instance would pay it again.)
             x.ctrl as usize != p
                 && x.is_creature()
                 && !x.has(INDESTRUCTIBLE | HEXPROOF | SHROUD)
-                && x.t - x.damage <= n
+                && x.ward == 0
+                && x.card
+                    .is_none_or(|r| g.card(r).ward_cost == WardCost::default())
         })
         .map(|(i, x)| {
-            perm_value(g, i) * weight(g, p, x.ctrl as usize) * 0.8 * removal_discount(g, p, i)
+            let need = ((x.t - x.damage).max(1) as u32).div_ceil(n as u32);
+            let v =
+                perm_value(g, i) * weight(g, p, x.ctrl as usize) * 0.8 * removal_discount(g, p, i);
+            (v, need, x.id)
         })
-        .filter(|&v| v >= 0.35)
+        // Worth a mana or so for each instance it takes.
+        .filter(|&(v, need, _)| v >= 0.35 * need as f32)
         .collect();
-    v.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    v
+    cands.sort_by(|a, b| (b.0 / b.1 as f32).total_cmp(&(a.0 / a.1 as f32)));
+    let mut left = budget;
+    let mut plan = Vec::new();
+    let mut total = 0.0;
+    for (v, need, id) in cands {
+        if need <= left {
+            left -= need;
+            total += v;
+            plan.extend(std::iter::repeat_n(id, need as usize));
+        }
+    }
+    (plan, total)
 }
 
-/// The X for a "copy it X times" spell: one copy for each worthwhile target beyond the
-/// first, no more than `spare` mana pays for.
+/// The X for a "copy it X times" spell: enough copies for the creatures worth killing
+/// (`barrage_plan`), no more than `spare` mana pays for.
 pub fn copies_x(g: &Game, p: usize, c: &SimCard, spare: u32) -> u32 {
-    (barrage_targets(g, p, c).len() as u32)
-        .saturating_sub(1)
-        .min(spare)
+    (barrage_plan(g, p, c, spare + 1).0.len() as u32).saturating_sub(1)
 }
 
 /// What a Saga's chapters after the `done` first ones are worth to `p`: the next one at what
@@ -2630,11 +2651,36 @@ fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
         .map(|k| (false, k))
 }
 
+/// "Choose one. If this spell was cast using teamwork, choose both instead" (Murdock's
+/// Crusade): cast that way only when every mode has a legal target - both must be chosen,
+/// and a mode without one can't be (CR 700.2a) - else the creatures are tapped for nothing.
+pub(crate) fn both_modes_targetable(g: &Game, p: usize, c: &SimCard) -> bool {
+    c.abilities
+        .iter()
+        .filter(|a| a.trig == Trig::Spell && a.modal && a.text.contains("choose both instead"))
+        .all(|a| {
+            a.mode_groups().into_iter().enumerate().all(|(m, r)| {
+                let (text, restr) = a.mode_text(m);
+                let one = SimAbility {
+                    modal: false,
+                    modes: Vec::new(),
+                    mode_texts: Vec::new(),
+                    mode_restr: Vec::new(),
+                    effects: a.effects[r].to_vec(),
+                    text: text.to_string(),
+                    card_restr: restr,
+                    ..a.clone()
+                };
+                g.ability_targets_exist(p, Some(c), None, &one)
+            })
+        })
+}
+
 fn cast_opts(g: &Game, p: usize, idx: u16, back: bool, post: bool) -> CastOpts {
     let c = &g.players[p].cards[idx as usize];
-    let teamwork = c
-        .teamwork
-        .is_some_and(|n| post && !teamwork_tappers(g, p, n as i16).is_empty());
+    let teamwork = c.teamwork.is_some_and(|n| {
+        post && !teamwork_tappers(g, p, n as i16).is_empty() && both_modes_targetable(g, p, c)
+    });
     let mut o = CastOpts {
         back,
         teamwork,
@@ -2719,11 +2765,14 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 return;
             }
             let mut v = spell_value(g, p, idx, back, commander);
-            // Flash creatures and instants are worth more cast at instant speed (end of the
-            // turn before ours, or in combat), so the main phase only uses them if there's
-            // nothing better to do with the mana.
+            // Instants are worth more cast at instant speed (end of the turn before ours, or
+            // in combat), so the main phase only uses them if there's nothing better to do
+            // with the mana. Not a flash creature: its body is worth as much now, and it
+            // was rarely cast later (Captain Marvel, Earth's Protector: 0 of 38 casts at
+            // instant speed, held up to 13 turns; cast at full worth, the planned Thanos
+            // deck won 1.3-1.6 points more in 20,000 games on each of two seeds).
             let c = &pl.cards[idx as usize];
-            if !back && (c.kw & FLASH != 0 || c.is(T_INSTANT)) {
+            if !back && c.is(T_INSTANT) {
                 v *= 0.6;
             }
             // One-for-one removal is kept for a target worth it: a bigger threat may come
@@ -2732,6 +2781,27 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 v -= (0.75 + 0.2 * g.round as f32).min(2.75);
             }
             out.push((v, cost.total(), Act::Cast(src, opts)));
+            // "Copy it X times" (Photon Blast Barrage): also with only the copies for the
+            // best kill, the rest of the mana left for other spells (planned as a twin of
+            // the cast above, like a power-up).
+            if !back && copies_x_times(c) {
+                let spare = g.mana_available(p).saturating_sub(c.cost.total());
+                let (all, _) = barrage_plan(g, p, c, spare + 1);
+                let first = all
+                    .iter()
+                    .take_while(|&&id| Some(&id) == all.first())
+                    .count();
+                if first >= 1 && first < all.len() {
+                    let (_, worth) = barrage_plan(g, p, c, first as u32);
+                    let small = CastOpts {
+                        copies: Some((first - 1) as u8),
+                        ..opts
+                    };
+                    if let Some(cs) = g.cast_cost(p, src, small) {
+                        out.push((worth, cs.total(), Act::Cast(src, small)));
+                    }
+                }
+            }
             // Cast it and use its power-up the same turn, at the reduced cost (planned as
             // one action; `plan_turn` keeps it apart from the plain cast).
             if !back && c.is(T_CREATURE) {
@@ -3288,19 +3358,23 @@ fn plan_turn(
         .filter(|&i| post || creature_mana || !waits_for_combat(g, p, &opts[i].2))
         .max_by(|&a, &b| opts[a].0.partial_cmp(&opts[b].0).unwrap())?;
     // Colours the rest of the plan needs: generic costs are paid from other sources.
-    let mut keep = set
+    let rest: Vec<Mana> = set
         .iter()
         .filter(|&&i| i != first)
         .filter_map(|&i| act_cost(g, p, &opts[i].2))
-        .fold(0u8, |a, m| a | pip_mask(&m));
+        .collect();
+    let mut keep = rest.iter().fold(0u8, |a, m| a | pip_mask(m));
+    let mut follow = rest.iter().fold(Mana::default(), |a, m| mana_sum(a, m));
     // A creature cast to use its power-up at once: the power-up's colours (and {C}) stay
     // untapped while the spell is paid.
     if twins.iter().any(|t| t.1 == first) {
         if let Some(r) = twin_powerup_cost(g, p, &opts[first].2) {
             keep |= pip_mask(&r) | if r.colorless > 0 { COLORLESS } else { 0 };
+            follow = mana_sum(follow, &r);
         }
     }
     g.ext.reserve.set(keep);
+    g.ext.follow.set(follow);
     Some((first, total))
 }
 
@@ -3406,6 +3480,7 @@ pub fn modes_worth_paying(g: &Game, p: usize, vals: &[f32], n: u32) -> usize {
 pub fn main_phase(g: &mut Game, p: usize, post: bool) {
     main_phase_inner(g, p, post);
     g.ext.reserve.set(0);
+    g.ext.follow.set(Mana::default());
     // Mana empties from the pool between steps and phases.
     g.players[p].pool = 0;
 }
@@ -3498,6 +3573,7 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
         let act = opts[i].2;
         let ok = do_act(g, p, act);
         g.ext.reserve.set(0);
+        g.ext.follow.set(Mana::default());
         if !ok {
             g.note(|| format!("   P{} couldn't do {:?}", p, act));
         }

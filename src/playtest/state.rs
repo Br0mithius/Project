@@ -483,6 +483,12 @@ pub struct GameExtra {
     /// Creatures whose base power is the number of cards in their controller's hand until
     /// end of turn (Ms. Marvel's Embiggen Fist).
     pub hand_power: Vec<u32>,
+    /// What the rest of the AI's turn plan costs (with a creature's power-up used the turn
+    /// it is cast): a payment leaves the sources that pay it untapped when it can.
+    pub follow: std::cell::Cell<Mana>,
+    /// The creatures the instances of a "copy it X times" spell still to resolve go to, one
+    /// entry per instance (Photon Blast Barrage, `ai::barrage_plan`).
+    pub barrage: Vec<u32>,
     /// The last connive discarded a nonland card (its +1/+1 counter is put).
     pub connive_nonland: bool,
     /// This combat's attackers and the player each attacks (or whose planeswalker): "target
@@ -524,6 +530,65 @@ pub const CHANGELING_TYPES: &[&str] = &[
     "warrior", "soldier", "zombie", "dragon", "vampire", "beast", "spider", "mutant", "avenger",
     "inhuman", "army", "orc", "wolf", "cat", "bird", "knight", "rogue", "spy",
 ];
+
+/// Pays each mana symbol (`units`: the colours, or `COLORLESS`, that may pay it) from a
+/// different source (`cap`: how many symbols each may pay - several only for a source of
+/// mixed colours such as Ramos): a bipartite matching by augmenting paths, trying the
+/// cheapest-to-lose sources first (not Treasures, not the colours `reserve` keeps, fewest
+/// colours). How many symbols each source pays, or None if no assignment pays them all.
+fn match_symbols(
+    units: &[u8],
+    srcs: &[(usize, u8, u8, bool)],
+    cap: &[u32],
+    reserve: u8,
+) -> Option<Vec<u32>> {
+    let mut order: Vec<usize> = (0..srcs.len()).collect();
+    order.sort_by_key(|&i| {
+        let s = &srcs[i];
+        (s.3, s.1 & reserve != 0, s.1.count_ones())
+    });
+    // Which source pays each symbol.
+    let mut by: Vec<Option<usize>> = vec![None; units.len()];
+    fn augment(
+        u: usize,
+        units: &[u8],
+        srcs: &[(usize, u8, u8, bool)],
+        cap: &[u32],
+        order: &[usize],
+        by: &mut [Option<usize>],
+        seen: &mut [bool],
+    ) -> bool {
+        for &j in order {
+            if seen[j] || srcs[j].1 & units[u] == 0 {
+                continue;
+            }
+            seen[j] = true;
+            let holders: Vec<usize> = (0..by.len()).filter(|&v| by[v] == Some(j)).collect();
+            if (holders.len() as u32) < cap[j] {
+                by[u] = Some(j);
+                return true;
+            }
+            for v in holders {
+                if augment(v, units, srcs, cap, order, by, seen) {
+                    by[u] = Some(j);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    for u in 0..units.len() {
+        let mut seen = vec![false; srcs.len()];
+        if !augment(u, units, srcs, cap, &order, &mut by, &mut seen) {
+            return None;
+        }
+    }
+    let mut paid = vec![0u32; srcs.len()];
+    for j in by.into_iter().flatten() {
+        paid[j] += 1;
+    }
+    Some(paid)
+}
 
 fn token_abilities(tok: Tok) -> &'static [SimAbility] {
     static TABLE: OnceLock<Vec<(Tok, Vec<SimAbility>)>> = OnceLock::new();
@@ -1366,6 +1431,20 @@ impl<'a> Game<'a> {
                         continue;
                     }
                 }
+                // Fellwar Stone: the colours the opponents' lands make (their own such lands
+                // aside, CR 106.7).
+                if c.mana_opp_lands {
+                    colors = self
+                        .perms
+                        .iter()
+                        .filter(|y| y.ctrl as usize != p && y.is(T_LAND))
+                        .filter_map(|y| y.card.map(|r| self.card(r)))
+                        .filter(|l| !l.mana_opp_lands)
+                        .fold(0, |a, l| a | (l.produces | l.cond_produces) & 0b11111);
+                    if colors == 0 {
+                        continue;
+                    }
+                }
                 // "Activate only if this land entered this turn or if you control a basic
                 // land" (Gleaming Bastion).
                 if c.cond_produces != 0
@@ -1499,8 +1578,17 @@ impl<'a> Game<'a> {
     /// The third value is the mana the plan makes beyond what it spends on a filter's own
     /// activation cost, so `pay` floats only real leftovers.
     fn plan_payment(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
-        let srcs = self.sources(p);
-        let plain = self.plan_from(p, cost, &srcs, None);
+        self.plan_payment_from(p, cost, &self.sources(p))
+    }
+
+    /// `plan_payment` from these sources (some set aside).
+    fn plan_payment_from(
+        &self,
+        p: usize,
+        cost: &Mana,
+        srcs: &[(usize, u8, u8, bool)],
+    ) -> Option<(Vec<usize>, u8, u32)> {
+        let plain = self.plan_from(p, cost, srcs, None);
         if plain.is_some() {
             return plain;
         }
@@ -1512,7 +1600,7 @@ impl<'a> Game<'a> {
             let Some((fee, made)) = self.filter_of(s.0) else {
                 continue;
             };
-            let mut alt = srcs.clone();
+            let mut alt = srcs.to_vec();
             alt[k] = (s.0, 0b11111, made, false);
             if let Some(plan) = self.plan_from(p, cost, &alt, Some((k, fee))) {
                 return Some(plan);
@@ -1586,7 +1674,8 @@ impl<'a> Game<'a> {
         // Colours the rest of the turn's plan needs (`GameExtra::reserve`): a pip is paid
         // from a source that can't make them when there's a choice.
         let reserve = self.ext.reserve.get();
-        for c in order {
+        let mut greedy_ok = true;
+        'greedy: for c in order {
             while pips[c] > 0 {
                 let pick = srcs
                     .iter()
@@ -1607,7 +1696,10 @@ impl<'a> Game<'a> {
                         pips[c] -= 1;
                         extra_generic += srcs[i].2 as u32 - 1;
                     }
-                    None => return None,
+                    None => {
+                        greedy_ok = false;
+                        break 'greedy;
+                    }
                 }
             }
         }
@@ -1615,19 +1707,52 @@ impl<'a> Game<'a> {
         let wanted: Vec<u8> = std::iter::repeat_n(COLORLESS, cost.colorless as usize)
             .chain(cost.hybrid.iter().copied().filter(|&h| h != 0))
             .collect();
-        for mask in wanted {
-            let pick = srcs
+        if greedy_ok {
+            for &mask in &wanted {
+                let pick = srcs
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, s)| !used[*i] && s.1 & mask != 0)
+                    .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
+                    .map(|(i, _)| i);
+                match pick {
+                    Some(i) => {
+                        used[i] = true;
+                        extra_generic += srcs[i].2 as u32 - 1;
+                    }
+                    None => {
+                        greedy_ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        // The greedy pass spent a source another symbol needed (Gleaming Bastion's {U} for
+        // {C}{U}{G} when it is the only {C}): assign every symbol at once (a matching).
+        if !greedy_ok {
+            let units: Vec<u8> = (0..5)
+                .flat_map(|c| std::iter::repeat_n(1u8 << c, cost.pips[c] as usize))
+                .chain(wanted.iter().copied())
+                .collect();
+            let cap: Vec<u32> = srcs
                 .iter()
                 .enumerate()
-                .filter(|(i, s)| !used[*i] && s.1 & mask != 0)
-                .min_by_key(|(_, s)| (s.3, s.1.count_ones()))
-                .map(|(i, _)| i);
-            match pick {
-                Some(i) => {
-                    used[i] = true;
+                .map(|(i, s)| if multi[i] { s.2 as u32 } else { 1 })
+                .collect();
+            let assigned = match_symbols(&units, srcs, &cap, reserve)?;
+            used = vec![false; srcs.len()];
+            left = srcs.iter().map(|s| s.2 as u32).collect();
+            extra_generic = 0;
+            for (i, units_paid) in assigned.iter().enumerate() {
+                if *units_paid == 0 {
+                    continue;
+                }
+                used[i] = true;
+                if multi[i] {
+                    left[i] -= units_paid;
+                } else {
                     extra_generic += srcs[i].2 as u32 - 1;
                 }
-                None => return None,
             }
         }
         let fee = match filter {
@@ -1700,9 +1825,45 @@ impl<'a> Game<'a> {
         self.plan_payment(p, cost).is_some()
     }
 
+    /// `plan_payment`, keeping the rest of the turn's plan payable (`GameExtra::follow`):
+    /// when the plain plan would spend sources the rest needs (the {C}, {U} and {G} of
+    /// Thanos's power-up after he is cast), the rest's coloured symbols are set aside first
+    /// and the cost is paid from the other sources.
+    fn plan_payment_keeping(&self, p: usize, cost: &Mana) -> Option<(Vec<usize>, u8, u32)> {
+        let plain = self.plan_payment(p, cost)?;
+        let follow = self.ext.follow.get();
+        if follow.total() == 0 {
+            return Some(plain);
+        }
+        let srcs = self.sources(p);
+        let without = |used: &[usize]| -> Vec<(usize, u8, u8, bool)> {
+            srcs.iter()
+                .copied()
+                .filter(|s| !used.contains(&s.0))
+                .collect()
+        };
+        // (Mana floating in the pool is left out: it empties between steps.)
+        let rest_ok = |plan: &(Vec<usize>, u8, u32)| -> bool {
+            self.plan_payment_from(p, &follow, &without(&plan.0))
+                .is_some()
+        };
+        if rest_ok(&plain) {
+            return Some(plain);
+        }
+        let symbols = Mana {
+            generic: 0,
+            ..follow
+        };
+        let alt = self
+            .plan_from(p, &symbols, &srcs, None)
+            .and_then(|kept| self.plan_payment_from(p, cost, &without(&kept.0)))
+            .filter(|alt| rest_ok(alt));
+        Some(alt.unwrap_or(plain))
+    }
+
     /// Pays a cost (taps sources, sacrifices Treasures). False if it can't be paid.
     pub fn pay(&mut self, p: usize, cost: &Mana) -> bool {
-        let Some((idxs, from_pool, made)) = self.plan_payment(p, cost) else {
+        let Some((idxs, from_pool, made)) = self.plan_payment_keeping(p, cost) else {
             return false;
         };
         if self.stats.is_some() {
@@ -2370,9 +2531,17 @@ impl<'a> Game<'a> {
                     self.perms[e].attached = Some(self.perms[g].id);
                 }
             }
+            // A Saga enters with a lore counter (CR 714.3a) - two with Doc Samson's "that
+            // many plus one": chapters I and II both trigger.
+            let lore = if c.is(T_SAGA) {
+                let doc = self.rules[ctrl % 8] & R_EXTRA_ANY_COUNTER != 0;
+                1 + i16::from(doc)
+            } else {
+                0
+            };
             for (ai, a) in c.abilities.iter().enumerate() {
                 let fire = a.trig == Trig::Enters && !hushed
-                    || (a.trig == Trig::Chapter(1) && c.is(T_SAGA));
+                    || matches!(a.trig, Trig::Chapter(n) if (n as i16) <= lore);
                 if fire {
                     self.pending.push(Pending {
                         ctrl: ctrl as u8,
@@ -2393,7 +2562,7 @@ impl<'a> Game<'a> {
             }
             if c.is(T_SAGA) {
                 if let Some(e) = self.idx(id) {
-                    self.perms[e].other_counters = 1;
+                    self.perms[e].other_counters = lore;
                 }
             }
             // "As ~ enters, look at an opponent's hand, then choose any card name"
