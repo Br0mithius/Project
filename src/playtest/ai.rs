@@ -3748,7 +3748,11 @@ pub fn before_blocks(g: &mut Game, d: usize, attacks: &[Attack]) {
             }
         }
         if let Some((gain, h, id)) = best {
-            if gain >= 4.5 {
+            // Only when that beats what the card would kill at sorcery speed instead (see
+            // `combat_removal`).
+            let c = &g.players[d].cards[g.players[d].hand[h] as usize];
+            let kept = g.idx(id).map_or(0.0, |t| removal_elsewhere(g, d, c, t));
+            if gain >= 4.5 && gain >= kept {
                 cast_instant(g, d, h, Some(id), "removal on the attacker that hurts most");
             }
         }
@@ -3869,12 +3873,48 @@ fn combat_removal(g: &mut Game, p: usize, attacks: &[Attack]) -> bool {
             consider(g, gain, a, &mut best);
         }
     }
+    // Kept, the card would kill another target at sorcery speed (`removal_elsewhere`): the
+    // swing must beat that, not just a fixed bar. With only `gain >= 4`, game logs showed
+    // Hero's Downfall spent mid-combat on a 2/2 token or a 1/4 while a 4/4 or a commander
+    // was on the table - the one place the instant plays differently from the same card as
+    // a sorcery, and a net loss (switching this use off altogether gained +0.11 to +0.20).
+    // Measured (a Thanos deck with Hero's Downfall, 2 x 40,000 paired games each): our seat
+    // changed +0.09 ± 0.02 win-rate points at focus 1, +0.01 ± 0.01 at focus 2.5; every
+    // seat changed +0.12 ± 0.06 at focus 1, +0.01 ± 0.04 at focus 2.5.
     match best {
-        Some((gain, h, id)) if gain >= 4.0 => {
+        Some((gain, h, id))
+            if gain >= 4.0 && {
+                let c = &g.players[p].cards[g.players[p].hand[h] as usize];
+                gain >= g.idx(id).map_or(0.0, |t| removal_elsewhere(g, p, c, t))
+            } =>
+        {
             cast_instant(g, p, h, Some(id), "removal after blocks: swings the fight")
         }
         _ => false,
     }
+}
+
+/// What removal card `c` is worth to `p` kept for sorcery speed: its best target other
+/// than creature `not` - an opponent's creature it removes and that's worth a removal card -
+/// at what `spell_value` counts for it.
+fn removal_elsewhere(g: &Game, p: usize, c: &SimCard, not: usize) -> f32 {
+    (0..g.perms.len())
+        .filter(|&i| {
+            let x = &g.perms[i];
+            i != not
+                && x.ctrl as usize != p
+                && x.is_creature()
+                && !x.has(HEXPROOF | SHROUD)
+                && removal_kills(g, p, c, i)
+                && worth_removing(g, p, i)
+        })
+        .map(|i| {
+            perm_value(g, i)
+                * weight(g, p, g.perms[i].ctrl as usize)
+                * 0.8
+                * removal_discount(g, p, i)
+        })
+        .fold(0.0, f32::max)
 }
 
 /// Would instant removal `c`, cast by `d`, take creature `i` out of the fight? Damage and

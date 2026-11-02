@@ -589,6 +589,52 @@ fn combat_removal_only_where_it_kills_and_swings_the_fight() {
 }
 
 #[test]
+fn combat_removal_is_kept_for_a_bigger_target() {
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        db.get("Hero's Downfall").unwrap().clone(),
+        card(
+            "Knight",
+            "{2}{W}",
+            "Creature — Knight",
+            "",
+            Some(("3", "3")),
+        ),
+        card("Ogre", "{3}{R}", "Creature — Ogre", "", Some(("4", "4"))),
+        card(
+            "Dragon",
+            "{5}{R}{R}",
+            "Creature — Dragon",
+            "Flying",
+            Some(("8", "8")),
+        ),
+    ]);
+    let fight = |dragon: bool| {
+        let mut g = game(&[&d, &d]);
+        lands(&mut g, 0, 3, 'B');
+        g.players[0].hand = vec![1];
+        let knight = put(&mut g, 0, 2);
+        let ogre = put(&mut g, 1, 3);
+        if dragon {
+            put(&mut g, 1, 4);
+        }
+        let at = vec![Attack {
+            attacker: knight,
+            def: Def::Player(1),
+            blockers: vec![ogre],
+            blocked: true,
+        }];
+        ai::combat_tricks(&mut g, 0, &at);
+        g.idx(ogre).is_none()
+    };
+    assert!(fight(false), "the blocker is the best target: destroyed");
+    // Saving the 3/3 and killing the 4/4 is worth less than the 8/8 flier the card can
+    // kill in the main phase.
+    assert!(!fight(true), "Hero's Downfall waits for the Dragon");
+}
+
+#[test]
 fn hawkeye_attacks_for_his_trick_arrows() {
     let db = db();
     let d = prep(&[
