@@ -5225,3 +5225,28 @@ fn a_saga_enters_with_doc_samsons_extra_lore_counter() {
     );
     assert_eq!(perm(&g, siege).other_counters, 2);
 }
+
+#[test]
+fn a_flash_creature_is_cast_at_its_full_worth_in_the_main_phase() {
+    // Captain Marvel (5/4 flying, lifelink, flash) or a vanilla 5/4 for the same five mana:
+    // the flier. (Flash creatures were valued at 0.6 in the main phase, for an instant-speed
+    // cast that never came.)
+    let db = db();
+    let mut d = prep_db(&db, &["Captain Marvel, Earth's Protector", "Plains"]);
+    d.cards.push(compile(&card(
+        "Brute",
+        "{4}{W}",
+        "Creature — Giant",
+        "",
+        Some(("5", "4")),
+    )));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'W');
+    g.players[0].hand = vec![0, 2];
+    ai::main_phase(&mut g, 0, true);
+    assert_eq!(
+        g.players[0].hand,
+        vec![2],
+        "Captain Marvel cast, the Brute kept"
+    );
+}

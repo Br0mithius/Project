@@ -2694,11 +2694,14 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 return;
             }
             let mut v = spell_value(g, p, idx, back, commander);
-            // Flash creatures and instants are worth more cast at instant speed (end of the
-            // turn before ours, or in combat), so the main phase only uses them if there's
-            // nothing better to do with the mana.
+            // Instants are worth more cast at instant speed (end of the turn before ours, or
+            // in combat), so the main phase only uses them if there's nothing better to do
+            // with the mana. Not a flash creature: its body is worth as much now, and it
+            // was rarely cast later (Captain Marvel, Earth's Protector: 0 of 38 casts at
+            // instant speed, held up to 13 turns; cast at full worth, the planned Thanos
+            // deck won 1.3-1.6 points more in 20,000 games on each of two seeds).
             let c = &pl.cards[idx as usize];
-            if !back && (c.kw & FLASH != 0 || c.is(T_INSTANT)) {
+            if !back && c.is(T_INSTANT) {
                 v *= 0.6;
             }
             // One-for-one removal is kept for a target worth it: a bigger threat may come
