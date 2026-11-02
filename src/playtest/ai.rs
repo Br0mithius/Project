@@ -502,6 +502,23 @@ pub fn damage_target(g: &Game, ctx: &Ctx, to: &crate::abilities::Target, n: i32)
     }
     let t1 = crate::abilities::Target { count: 1, ..*to };
     let cands = g.candidates(ctx, &t1, true);
+    // The creature the spell was cast for (instant removal on an attacker), when this kills
+    // it: a bite cast at an attacker took a creature that wasn't in the fight instead.
+    if let Some(i) = g
+        .focus
+        .and_then(|id| g.idx(id))
+        .filter(|i| cands.contains(i))
+    {
+        let x = &g.perms[i];
+        if x.ctrl as usize != me
+            && x.is_creature()
+            && !x.has(INDESTRUCTIBLE)
+            && x.damage < x.t
+            && x.t - x.damage <= n as i16
+        {
+            return Hit::Perm(x.id);
+        }
+    }
     let best = cands
         .iter()
         .filter(|&&i| {
@@ -4026,7 +4043,7 @@ fn removal_elsewhere(g: &Game, p: usize, c: &SimCard, not: usize) -> f32 {
 
 /// Would instant removal `c`, cast by `d`, take creature `i` out of the fight? Damage and
 /// -N/-N must be enough for its toughness; a fight needs a creature of ours that can kill it.
-fn removal_kills(g: &Game, d: usize, c: &SimCard, i: usize) -> bool {
+pub(crate) fn removal_kills(g: &Game, d: usize, c: &SimCard, i: usize) -> bool {
     let x = &g.perms[i];
     let hp = (x.t - x.damage) as i32;
     let tough = x.has(INDESTRUCTIBLE);
@@ -4051,11 +4068,30 @@ fn removal_kills(g: &Game, d: usize, c: &SimCard, i: usize) -> bool {
         Effect::Destroy(t) => t.hits_their_creatures() && !t.mass && !tough,
         Effect::Exile { target: t, .. } | Effect::Bounce(t) => t.hits_their_creatures() && !t.mass,
         Effect::Damage { amount, to } => {
+            // A bite ("target creature you control deals damage equal to (twice) its
+            // power"): what our biggest creature deals, not any X.
+            let bite = c
+                .abilities
+                .iter()
+                .find(|a| {
+                    a.trig == Trig::Spell && a.text.contains("you control deals damage equal to")
+                })
+                .map(|a| {
+                    let p = best_fighter(g, d).map_or(0, |b| g.perms[b].p.max(0) as i32);
+                    if a.text.contains("equal to twice its power") {
+                        2 * p
+                    } else {
+                        p
+                    }
+                });
             to.hits_their_creatures()
                 && !to.mass
                 && !tough
                 && !x.has(NO_DAMAGE)
-                && (amount.x || amount.n >= hp)
+                && match bite {
+                    Some(n) => n >= hp,
+                    None => amount.x || amount.n >= hp,
+                }
         }
         Effect::Shrink { amount, to, .. } => {
             to.hits_their_creatures() && !to.mass && (amount.x || amount.n >= x.t as i32)

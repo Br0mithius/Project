@@ -5284,3 +5284,43 @@ fn embiggen_fist_sets_base_power_to_the_hand_size() {
     g.recalc();
     assert_eq!(perm(&g, marvel).p, 1, "until end of turn");
 }
+
+#[test]
+fn bite_removal_hits_the_creature_it_was_cast_for() {
+    let db = db();
+    // Punishing Punch: "target creature you control deals damage equal to twice its power to
+    // target creature an opponent controls". Cast at an attacker (the AI's focus), it hits
+    // that attacker, not the opponent's most valuable creature elsewhere.
+    let d0 = deck(&db, &["Punishing Punch", "Forest", "Ravening Warg"]);
+    let d1 = prep(&[
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+        card(
+            "Dragon",
+            "{4}{R}{R}",
+            "Creature — Dragon",
+            "Flying",
+            Some(("4", "4")),
+        ),
+        card("Giant", "{6}{R}", "Creature — Giant", "", Some(("9", "9"))),
+    ]);
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 3, 'G');
+    put(&mut g, 0, 2);
+    let ogre = put(&mut g, 1, 0);
+    let dragon = put(&mut g, 1, 1);
+    g.players[0].hand.push(0);
+    g.focus = Some(ogre);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert!(g.idx(ogre).is_none(), "the focus died");
+    assert!(g.idx(dragon).is_some());
+    // A 2/2's bite (4 damage) doesn't take out a 9/9 attacker: not removal for it.
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 3, 'G');
+    put(&mut g, 0, 2);
+    let giant = put(&mut g, 1, 2);
+    let ogre = put(&mut g, 1, 0);
+    let c = &g.players[0].cards[0];
+    assert!(!ai::removal_kills(&g, 0, c, g.idx(giant).unwrap()));
+    assert!(ai::removal_kills(&g, 0, c, g.idx(ogre).unwrap()));
+}
