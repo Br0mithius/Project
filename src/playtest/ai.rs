@@ -443,6 +443,9 @@ pub fn choose_victims(g: &Game, me: usize, cands: &[usize], n: usize) -> Vec<usi
             };
             let w = if owner == me {
                 -1.0
+            } else if g.ext.destroying && g.perms[i].has(INDESTRUCTIBLE) {
+                // "Destroy target creature" does nothing to an indestructible one.
+                0.0
             } else {
                 // As removal is valued: less on a commander or a player about to die.
                 weight(g, me, owner) * removal_discount(g, me, i)
@@ -1695,6 +1698,28 @@ fn effect_now_with(
                     0.0
                 }
         }
+        // "Create a 4/4 Bird for each creature returned to your hand this way" (The Eagles
+        // Are Coming!): one, for the cheapest creature of ours to replay (see the bounce in
+        // `resolve`) - worth its mana spent again less.
+        Effect::Tokens {
+            power, toughness, ..
+        } if text.contains("returned to your hand this way") => {
+            let cheapest = g
+                .perms
+                .iter()
+                .filter(|x| {
+                    x.ctrl as usize == p
+                        && x.owner as usize == p
+                        && x.is_creature()
+                        && !x.is_token()
+                        && x.commander == 0
+                })
+                .map(|x| x.mv)
+                .min();
+            cheapest.map_or(0.0, |mv| {
+                0.4 + (*power + *toughness).max(0) as f32 * 0.5 - 0.6 * mv as f32
+            })
+        }
         Effect::Tokens {
             amount,
             power,
@@ -1734,6 +1759,18 @@ fn effect_now_with(
             } else {
                 base * 0.5
             }
+        }
+        // "Target creature gains indestructible until end of turn": nothing without a
+        // creature of ours to get it.
+        Effect::Grant { to, .. }
+            if to.whose != Whose::Theirs
+                && to.kind != Kind::It
+                && !g
+                    .perms
+                    .iter()
+                    .any(|x| x.ctrl as usize == p && x.is_creature()) =>
+        {
+            0.0
         }
         Effect::GainLife(n) => n.n as f32 * if g.players[p].life < 12 { 0.3 } else { 0.08 },
         Effect::Drain { amount, each } => {
@@ -1970,7 +2007,9 @@ fn ability_now_with(g: &Game, p: usize, a: &SimAbility, src: Option<u32>, floor:
             .enumerate()
             .map(|(m, r)| {
                 let (text, cr) = a.mode_text(m);
-                match mode_cost(g, p, text) {
+                // A mode with no legal target can't be chosen (CR 700.2a).
+                let legal = g.effects_targets_exist(p, None, src, a, text, &a.effects[r.clone()]);
+                match mode_cost(g, p, text).filter(|_| legal) {
                     Some(c) => {
                         a.effects[r]
                             .iter()
@@ -2012,7 +2051,16 @@ pub fn choose_modes(g: &Game, ctx: &Ctx, ab: &SimAbility, used: u32) -> Vec<usiz
         .filter(|(m, _)| *m >= 32 || used & (1 << m) == 0)
         .map(|(m, r)| {
             let (text, cr) = ab.mode_text(m);
-            let val = match mode_cost(g, ctx.ctrl, text) {
+            // A mode with no legal target can't be chosen (CR 700.2a).
+            let legal = g.effects_targets_exist(
+                ctx.ctrl,
+                ctx.card,
+                ctx.src,
+                ab,
+                text,
+                &ab.effects[r.clone()],
+            );
+            let val = match mode_cost(g, ctx.ctrl, text).filter(|_| legal) {
                 Some(c) => {
                     ab.effects[r.clone()]
                         .iter()
@@ -2170,6 +2218,18 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
     }
     let mut v = 0.0;
     let permanent = !back && c.is_permanent();
+    // A second copy of a legend we have (a commander and its copy in the deck): the legend
+    // rule puts one of them into the graveyard.
+    if permanent
+        && c.is(T_LEGENDARY)
+        && g.perms.iter().any(|x| {
+            x.ctrl as usize == p
+                && x.tok == Tok::None
+                && x.card.is_some_and(|r| g.card(r).name == c.name)
+        })
+    {
+        return 0.0;
+    }
     if permanent {
         if c.is(T_CREATURE) {
             v += c.power.max(0) as f32
@@ -2281,8 +2341,11 @@ fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: bool) -> f32
                 other => g.cond_holds(other, p, None),
             };
             if ok {
-                // Removal waits for a target worth the card.
+                // Removal waits for a target worth the card - one whose ward can be paid
+                // after casting it.
+                let outer = g.ext.ward_extra.replace(c.cost.total());
                 v += ability_now_with(g, p, a, None, true);
+                g.ext.ward_extra.set(outer);
             }
         }
         // Card advantage aside, a sorcery that does nothing now waits.
@@ -3967,7 +4030,24 @@ fn removal_kills(g: &Game, d: usize, c: &SimCard, i: usize) -> bool {
     let x = &g.perms[i];
     let hp = (x.t - x.damage) as i32;
     let tough = x.has(INDESTRUCTIBLE);
+    // "Destroy target creature with power 4 or greater" (Stone by Sunlight): only a creature
+    // the spell may target.
+    let legal = |t: &crate::abilities::Target| {
+        t.restr.is_empty() || g.perm_ok(&t.restr, x, &g.dyn_values(&t.restr, None, d, None))
+    };
+    // Its ward is paid on top of the spell (or the spell is countered).
+    if x.ctrl as usize != d && x.ward > 0 {
+        let outer = g.ext.ward_extra.replace(c.cost.total());
+        let ok = g.ward_payable(d, x);
+        g.ext.ward_extra.set(outer);
+        if !ok {
+            return false;
+        }
+    }
     effects_of(c, false).any(|e| match e {
+        Effect::Destroy(t) if !legal(t) => false,
+        Effect::Exile { target: t, .. } | Effect::Bounce(t) if !legal(t) => false,
+        Effect::Damage { to: t, .. } | Effect::Shrink { to: t, .. } if !legal(t) => false,
         Effect::Destroy(t) => t.hits_their_creatures() && !t.mass && !tough,
         Effect::Exile { target: t, .. } | Effect::Bounce(t) => t.hits_their_creatures() && !t.mass,
         Effect::Damage { amount, to } => {
@@ -4840,7 +4920,14 @@ impl Blocking<'_, '_> {
                 let c = clash(g, a, bl.list());
                 let net = if c.att_dies { perm_value(g, a) } else { 0.0 }
                     - c.dead.iter().map(|&b| perm_value(g, b)).sum::<f32>();
-                if best.as_ref().is_none_or(|x| net > x.0) {
+                // The block that keeps the most damage off us, then the cheapest: a 12/12
+                // trampler double-blocked by a 7/7 and a 3/6 lets nothing through, either
+                // alone lets 5 or 6 through (game logs: a player died to a swing they could
+                // have survived at 1 life).
+                if best
+                    .as_ref()
+                    .is_none_or(|x| c.through < x.2 || c.through == x.2 && net > x.0)
+                {
                     best = Some((net, bl, c.through));
                 }
             }

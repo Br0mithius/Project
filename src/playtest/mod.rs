@@ -662,16 +662,34 @@ impl<'a> Game<'a> {
             }
             pay = Some(how);
         }
+        // A warded target is only worth it when the ward can be paid on top of the spell:
+        // with what's left after casting it, there must still be a target (CR 702.21a).
+        if cost.total() > 0
+            && self
+                .perms
+                .iter()
+                .any(|y| y.ward > 0 && y.ctrl as usize != p)
+        {
+            if let Some(a) = spell_abilities {
+                self.ext.ward_extra.set(cost.total());
+                let ok = self.targets_exist(p, c, a);
+                self.ext.ward_extra.set(0);
+                if !ok {
+                    return None;
+                }
+            }
+        }
         Some((cost, x, pay))
     }
 
     /// Does every permanent a spell's abilities must target ("destroy target creature",
     /// "deals 2 damage to target attacking or blocking creature") have a legal choice for
-    /// player `p`? ("Up to one target" and modal spells may choose none / another mode.)
+    /// player `p`? ("Up to one target" may choose none; a modal spell needs one mode with
+    /// its targets.)
     pub fn targets_exist(&self, p: usize, c: &SimCard, abilities: &[SimAbility]) -> bool {
         abilities
             .iter()
-            .filter(|a| a.trig == Trig::Spell && !a.modal)
+            .filter(|a| a.trig == Trig::Spell)
             .all(|a| self.ability_targets_exist(p, Some(c), None, a))
     }
 
@@ -684,7 +702,6 @@ impl<'a> Game<'a> {
         src: Option<u32>,
         a: &SimAbility,
     ) -> bool {
-        use crate::abilities::{Effect as E, Kind as K, Whose as W};
         // An activated ability's targets are in its effect, after the cost.
         let body = match a.trig {
             Trig::Activated { .. } => a.text.split_once(": ").map_or("", |x| x.1),
@@ -704,11 +721,36 @@ impl<'a> Game<'a> {
                     && most.is_none_or(|m| x.p <= m)
             });
         }
-        if a.modal || !body.contains("target") || body.contains("up to") {
+        // A modal ability needs one mode it can choose (CR 700.2a, 601.2c).
+        if a.modal {
+            return a.mode_groups().into_iter().enumerate().any(|(m, r)| {
+                let (text, _) = a.mode_text(m);
+                self.effects_targets_exist(p, c, src, a, text, &a.effects[r])
+            });
+        }
+        if !body.contains("target") || body.contains("up to") {
+            return true;
+        }
+        self.effects_targets_exist(p, c, src, a, &a.text, &a.effects)
+    }
+
+    /// Has the first target among `effects` (of ability `a`, or one of its modes, worded
+    /// `text`) a legal choice for `p`?
+    pub fn effects_targets_exist(
+        &self,
+        p: usize,
+        c: Option<&SimCard>,
+        src: Option<u32>,
+        a: &SimAbility,
+        text: &str,
+        effects: &[crate::abilities::Effect],
+    ) -> bool {
+        use crate::abilities::{Effect as E, Kind as K, Whose as W};
+        if !text.contains("target") || text.contains("up to") {
             return true;
         }
         // The first target the ability names.
-        let first = a.effects.iter().find_map(|e| match e {
+        let first = effects.iter().find_map(|e| match e {
             E::Destroy(t) | E::Bounce(t) | E::GainControl(t) | E::Fight(t) => Some((t, true)),
             E::Exile { target, .. } | E::Lock { target, .. } => Some((target, true)),
             E::Damage { to, .. } | E::Shrink { to, .. } => Some((to, true)),
@@ -721,20 +763,23 @@ impl<'a> Game<'a> {
         let Some((t, harmful)) = first else {
             return true;
         };
+        // "Target Dwarf you control" (Iron Hills): a creature type names the kind.
+        let typed = t.kind == K::Other && t.restr.subtypes[0] != 0;
         if t.mass
             || t.restr.has(crate::restrict::PREV)
-            || !matches!(
-                t.kind,
-                K::Creature
-                    | K::CreatureOrPlaneswalker
-                    | K::NonlandPermanent
-                    | K::Permanent
-                    | K::Artifact
-                    | K::Enchantment
-                    | K::ArtifactOrEnchantment
-                    | K::Planeswalker
-                    | K::Land
-            )
+            || !typed
+                && !matches!(
+                    t.kind,
+                    K::Creature
+                        | K::CreatureOrPlaneswalker
+                        | K::NonlandPermanent
+                        | K::Permanent
+                        | K::Artifact
+                        | K::Enchantment
+                        | K::ArtifactOrEnchantment
+                        | K::Planeswalker
+                        | K::Land
+                )
         {
             return true;
         }
@@ -745,7 +790,7 @@ impl<'a> Game<'a> {
             card: c,
             card_ref: None,
             subject: None,
-            text: &a.text,
+            text,
             until_eot: a.until_eot,
             overload: false,
             card_restr: a.card_restr,
@@ -2460,12 +2505,27 @@ impl<'a> Game<'a> {
     /// The cleanup step of player `a`'s turn: hand size, damage and "this turn" effects end.
     fn cleanup(&mut self, a: usize) {
         let outer = std::mem::replace(&mut self.cause, audit::Cause::Rule("hand size"));
-        while self.players[a].alive && self.players[a].hand.len() > 7 {
+        // "You have no maximum hand size" (Ms. Marvel, Thought Vessel); "your maximum hand
+        // size is ten" (The Ten Rings).
+        let max = if self.controls_static(a, None, |t| t.contains("no maximum hand size")) {
+            usize::MAX
+        } else if self.controls_static(a, None, |t| t.contains("maximum hand size is ten")) {
+            10
+        } else {
+            7
+        };
+        while self.players[a].alive && self.players[a].hand.len() > max {
             self.discard(a);
         }
         self.cause = outer;
         if self.stats.is_some() {
             self.audit_turn_end(a);
+        }
+        self.ext.hand_power.clear();
+        for id in std::mem::take(&mut self.ext.finality_this_turn) {
+            if let Some(i) = self.idx(id) {
+                self.perms[i].finality = false;
+            }
         }
         for x in self.perms.iter_mut() {
             x.damage = 0;

@@ -434,6 +434,9 @@ pub enum Purpose {
 /// Turn-by-turn facts the rules text asks about, kept apart from the core game state.
 #[derive(Debug, Clone, Default)]
 pub struct GameExtra {
+    /// A "destroy target ..." effect is choosing its targets: indestructible ones are no
+    /// use (`ai::choose_victims`).
+    pub destroying: bool,
     /// Playtest lab: (our seat, how much more every opponent weighs it as a target).
     pub hated: Option<(usize, f32)>,
     /// Counts the turns (for "you may play that card this turn / until your next turn").
@@ -471,6 +474,15 @@ pub struct GameExtra {
     /// Colours (a bit each) the rest of the AI's turn plan still needs: generic costs are
     /// paid from other sources first.
     pub reserve: std::cell::Cell<u8>,
+    /// Mana the spell being planned costs, so its targets' ward is paid from what's left
+    /// (`Game::ward_payable`); 0 otherwise.
+    pub ward_extra: std::cell::Cell<u32>,
+    /// Permanents exiled if they die this turn ("if that creature would die this turn, exile
+    /// it instead"): their `Perm::finality` ends with the turn.
+    pub finality_this_turn: Vec<u32>,
+    /// Creatures whose base power is the number of cards in their controller's hand until
+    /// end of turn (Ms. Marvel's Embiggen Fist).
+    pub hand_power: Vec<u32>,
     /// The last connive discarded a nonland card (its +1/+1 counter is put).
     pub connive_nonland: bool,
     /// This combat's attackers and the player each attacks (or whose planeswalker): "target
@@ -769,8 +781,12 @@ impl<'a> Game<'a> {
     /// self-buffs, locks; then state-based actions.
     pub fn recalc(&mut self) {
         self.tick += 1;
+        let (hand_power, players) = (&self.ext.hand_power, &self.players);
         for x in self.perms.iter_mut() {
-            let (bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+            let (mut bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+            if hand_power.contains(&x.id) {
+                bp = players[x.ctrl as usize % players.len()].hand.len() as i16;
+            }
             let (tp, tt) = x.till.map_or((0, 0), |t| (t.0, t.1));
             x.p = bp + x.counters + x.temp_p + tp;
             x.t = bt + x.counters + x.temp_t + tt;
@@ -2333,10 +2349,15 @@ impl<'a> Game<'a> {
                 || self.perm_rules(&snap) & R_NO_ETB_TRIGGERS != 0);
         if let Some(r) = snap.card.filter(|_| snap.tok == Tok::None) {
             let c = self.card(r);
-            // Legend rule: keep the newer one.
+            // Legend rule: keep the newer one. Same name, not just the same card: a deck
+            // may hold a copy of its commander (the league isn't singleton yet).
             if c.is(T_LEGENDARY) {
                 if let Some(old) = self.perms.iter().position(|x| {
-                    x.id != id && x.ctrl as usize == ctrl && x.card == Some(r) && x.tok == Tok::None
+                    x.id != id
+                        && x.ctrl as usize == ctrl
+                        && x.tok == Tok::None
+                        && x.card
+                            .is_some_and(|o| o == r || self.card(o).name == c.name)
                 }) {
                     self.leave_why = super::audit::LeaveWhy::LegendRule;
                     self.leave(old, Zone::Graveyard, true);

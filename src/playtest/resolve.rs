@@ -800,7 +800,11 @@ impl<'a> Game<'a> {
     pub fn ward_payable(&self, me: usize, x: &Perm) -> bool {
         let w = x.card.map(|r| self.card(r).ward_cost).unwrap_or_default();
         let pl = &self.players[me];
-        let mana_ok = x.ward == 0 || self.can_pay(me, &Mana::generic(x.ward as u32));
+        let mana_ok = x.ward == 0
+            || self.can_pay(
+                me,
+                &Mana::generic(x.ward as u32 + self.ext.ward_extra.get()),
+            );
         let discard_ok = !pl.hand.is_empty();
         if w.discard_or_mana {
             return mana_ok || discard_ok;
@@ -2252,7 +2256,7 @@ impl<'a> Game<'a> {
             return;
         }
         if ctx.text.contains("would die this turn, exile it instead") {
-            self.perms[i].finality = true;
+            self.exile_if_dies_this_turn(i);
         }
         // "If excess damage was dealt this way": beyond what was lethal.
         let x = &mut self.perms[i];
@@ -2272,6 +2276,15 @@ impl<'a> Game<'a> {
         // (Prevented damage isn't dealt: no life for lifelink.)
         if dealt > 0 && src.is_some_and(|s| s.has(LIFELINK) && s.is_creature()) {
             self.gain_life(ctx.ctrl, dealt as i32);
+        }
+    }
+
+    /// "If that creature would die this turn, exile it instead": like a finality counter,
+    /// until the turn ends (`Game::cleanup`).
+    pub fn exile_if_dies_this_turn(&mut self, i: usize) {
+        if !self.perms[i].finality {
+            self.perms[i].finality = true;
+            self.ext.finality_this_turn.push(self.perms[i].id);
         }
     }
 
@@ -2439,7 +2452,10 @@ impl<'a> Game<'a> {
                 let harmful = t.whose != Whose::Yours;
                 let mut n = 0;
                 let mut lost_lands: Vec<usize> = Vec::new();
-                for id in self.choose(ctx, t, harmful) {
+                let outer = std::mem::replace(&mut self.ext.destroying, harmful && !t.mass);
+                let ids = self.choose(ctx, t, harmful);
+                self.ext.destroying = outer;
+                for id in ids {
                     if let Some(i) = self.idx(id) {
                         self.focus_card = self.perms[i].card.filter(|_| !t.mass);
                         let x = self.perms[i].clone();
@@ -2861,6 +2877,11 @@ impl<'a> Game<'a> {
                 let temporary = *until_eot || text.contains("until your next turn");
                 for id in self.choose(ctx, to, harmful) {
                     if let Some(i) = self.idx(id) {
+                        // "Target creature gets -5/-5 until end of turn. If that creature would
+                        // die this turn, exile it instead" (Gnashing of Teeth).
+                        if text.contains("would die this turn, exile it instead") {
+                            self.exile_if_dies_this_turn(i);
+                        }
                         if temporary {
                             self.perms[i].temp_p -= np;
                             self.perms[i].temp_t -= n;
@@ -3089,6 +3110,15 @@ impl<'a> Game<'a> {
             Effect::Draw { amount, you } => {
                 let n = self.x_value(ctx, amount).max(0) as u32;
                 self.last_drawn = n as i32;
+                // "Draw a card. Until end of turn, Ms. Marvel gains "Ms. Marvel's base power is
+                // equal to the number of cards in your hand."" (see `Game::recalc`).
+                if text.contains("base power is equal to the number of cards in your hand") {
+                    if let Some(id) = ctx.src.filter(|&id| self.idx(id).is_some()) {
+                        if !self.ext.hand_power.contains(&id) {
+                            self.ext.hand_power.push(id);
+                        }
+                    }
+                }
                 // "Destroy target creature. Its controller draws a card": the player whose
                 // permanent the ability just hit.
                 let theirs = [
@@ -4241,15 +4271,34 @@ impl<'a> Game<'a> {
                     .perms
                     .iter()
                     .position(|x| x.ctrl as usize == me && x.tok == Tok::Army);
+                // "Amass Goblins N": a 0/0 black Army that's also a Goblin - an Army already
+                // there becomes one too (CR 701.47a) - so "other Goblins you control get
+                // +1/+1" (Dropkick Bomber) counts it.
+                let kind = text
+                    .split("amass")
+                    .nth(1)
+                    .and_then(|r| r.trim_start_matches("es").split_whitespace().next())
+                    .and_then(crate::restrict::subtype_word)
+                    .map(crate::restrict::subtype_name)
+                    .filter(|s| *s != "army");
                 let i = match army {
                     Some(i) => i,
                     None => {
                         let i = self.new_perm(me, me, None, Tok::Army);
+                        self.perms[i].colors = 1 << 2;
+                        if let Some(s) = kind {
+                            self.perms[i].subtypes.push(s.to_string());
+                        }
                         let id = self.perms[i].id;
                         self.after_enter(i);
                         self.idx(id).unwrap_or(0)
                     }
                 };
+                if let Some(s) = kind.filter(|_| i < self.perms.len()) {
+                    if !self.perms[i].subtypes.iter().any(|x| x == s) {
+                        self.perms[i].subtypes.push(s.to_string());
+                    }
+                }
                 if i < self.perms.len() {
                     self.last_targets = vec![self.perms[i].id];
                     self.add_counters(i, k);

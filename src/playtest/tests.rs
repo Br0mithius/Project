@@ -5037,3 +5037,250 @@ fn milled_and_returned_cards_are_the_kind_named() {
     assert_eq!(hand, vec![3, 5], "the two creature cards back");
     assert!(g.players[0].graveyard.contains(&4), "Shock stays");
 }
+
+#[test]
+fn amassed_army_is_a_goblin() {
+    let db = db();
+    // Goblin-town Flunkies: "when ~ enters, amass Goblins 1"; Dropkick Bomber: "other
+    // Goblins you control get +1/+1" - the Army is a Goblin too (CR 701.47a).
+    let d = deck(&db, &["Dropkick Bomber", "Goblin-town Flunkies"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    let army: Vec<&Perm> = g.perms.iter().filter(|x| x.tok == Tok::Army).collect();
+    assert_eq!(army.len(), 1);
+    assert!(army[0].subtypes.iter().any(|s| s == "goblin"));
+    assert_eq!(army[0].colors, 1 << 2, "a black Army");
+    assert_eq!(
+        (army[0].p, army[0].t),
+        (2, 2),
+        "one counter plus the Bomber's +1/+1"
+    );
+}
+
+#[test]
+fn removal_skips_indestructible_and_pays_ward_from_what_is_left() {
+    let d0 = prep(&[
+        Card::basic_land("Swamp", 'B'),
+        card(
+            "Murder",
+            "{1}{B}{B}",
+            "Instant",
+            "Destroy target creature.",
+            None,
+        ),
+    ]);
+    let d1 = prep(&[
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card(
+            "Dragon",
+            "{4}{R}{R}",
+            "Creature — Dragon",
+            "Flying",
+            Some(("6", "6")),
+        ),
+        card(
+            "Warded Wizard",
+            "{4}{U}",
+            "Creature — Wizard",
+            "Ward {3}",
+            Some(("4", "5")),
+        ),
+    ]);
+    // An indestructible Dragon (an indestructible counter): Murder takes the Bear instead.
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 3, 'B');
+    let bear = put(&mut g, 1, 0);
+    let dragon = put(&mut g, 1, 1);
+    let i = g.idx(dragon).unwrap();
+    g.perms[i].kw |= INDESTRUCTIBLE;
+    g.recalc();
+    g.players[0].hand.push(1);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(dragon).is_some());
+    assert!(g.idx(bear).is_none(), "Murder hits what it can destroy");
+    // Ward {3} on the only target: castable with 6 mana, not with 5 (the ward is paid
+    // from what's left after the spell).
+    for (n, ok) in [(5, false), (6, true)] {
+        let mut g = game(&[&d0, &d1]);
+        lands(&mut g, 0, n, 'B');
+        put(&mut g, 1, 2);
+        g.players[0].hand.push(1);
+        assert_eq!(
+            g.can_cast(0, Src::Hand(0), CastOpts::default()),
+            ok,
+            "{} mana",
+            n
+        );
+    }
+}
+
+#[test]
+fn abilities_and_modes_need_their_targets() {
+    let db = db();
+    // Iron Hills: "{2}{R}{W}, {T}, Sacrifice this land: Put two +1/+1 counters on target
+    // Dwarf you control" - not without a Dwarf.
+    let d = deck(
+        &db,
+        &["Iron Hills", "Mountain", "Plains", "Dwalin, Weaponmaster"],
+    );
+    let mut g = game(&[&d, &d]);
+    let hills = put(&mut g, 0, 0);
+    let i = g.idx(hills).unwrap();
+    g.perms[i].tapped = false;
+    lands(&mut g, 0, 2, 'R');
+    lands(&mut g, 0, 2, 'W');
+    let i = g.idx(hills).unwrap();
+    let k = g.abilities_of(&g.perms[i]).len() - 1;
+    assert!(g.activation_plan(0, i, k).is_none(), "no Dwarf to target");
+    put(&mut g, 0, 3);
+    let i = g.idx(hills).unwrap();
+    assert!(g.activation_plan(0, i, k).is_some(), "Dwalin is a Dwarf");
+    // Stone by Sunlight: "destroy target creature with power 4 or greater" or "target
+    // creature ... gains indestructible". Against a 2/2 its removal mode can't be chosen,
+    // and with nothing of ours to protect it isn't worth casting at the end of a turn.
+    let d = deck(&db, &["Stone by Sunlight", "Plains", "Ravening Warg"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'W');
+    put(&mut g, 1, 2);
+    g.players[0].hand.push(0);
+    ai::end_of_turn(&mut g, 0, true);
+    assert_eq!(g.players[0].hand.len(), 1, "Stone by Sunlight kept");
+}
+
+#[test]
+fn survival_blocks_double_up_on_a_trampler() {
+    // 12/12 trample, 3/3, 2/1 and 1/4 attack a player at 10 life with a 7/7 and a 3/6:
+    // either alone in front of the 12/12 lets 5 or 6 through (dead); both together let
+    // nothing through, and the 6 from the rest leaves them alive.
+    let d = prep(&[
+        card(
+            "Hunger",
+            "{10}{G}{G}",
+            "Creature — Dinosaur",
+            "Trample",
+            Some(("12", "12")),
+        ),
+        card("Cat", "{2}{G}", "Creature — Cat", "", Some(("3", "3"))),
+        card(
+            "Scout",
+            "{4}",
+            "Artifact Creature — Robot",
+            "",
+            Some(("2", "1")),
+        ),
+        card("Kid", "{2}{U}", "Creature — Human", "", Some(("1", "4"))),
+        card("Wurm", "{5}{G}{G}", "Creature — Wurm", "", Some(("7", "7"))),
+        card(
+            "Scrounger",
+            "{4}{G}",
+            "Creature — Ape",
+            "",
+            Some(("3", "6")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.players[1].life = 10;
+    let attackers: Vec<u32> = (0..4).map(|k| put(&mut g, 0, k)).collect();
+    put(&mut g, 1, 4);
+    put(&mut g, 1, 5);
+    let at: Vec<Attack> = attackers
+        .iter()
+        .map(|&id| Attack {
+            attacker: id,
+            def: Def::Player(1),
+            blockers: vec![],
+            blocked: false,
+        })
+        .collect();
+    let blocks = ai::declare_blocks(&g, 1, &at);
+    let on_hunger = blocks.iter().filter(|b| b.1 == attackers[0]).count();
+    assert_eq!(on_hunger, 2, "both block the trampler: {:?}", blocks);
+}
+
+#[test]
+fn no_maximum_hand_size_keeps_the_hand() {
+    let db = db();
+    // Ms. Marvel, Kamala Khan: "You have no maximum hand size."
+    let d = deck(&db, &["Ms. Marvel, Kamala Khan", "Island"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    g.players[0].hand = vec![1; 10];
+    g.take_turn(0, true);
+    assert!(g.players[0].hand.len() >= 9, "no discard down to seven");
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1; 10];
+    g.take_turn(0, true);
+    assert!(g.players[0].hand.len() <= 7);
+}
+
+#[test]
+fn exiled_instead_of_dying_this_turn_only() {
+    let db = db();
+    // Gnashing of Teeth: "-5/-5 until end of turn. If that creature would die this turn,
+    // exile it instead" - the 0-toughness death is an exile too.
+    let d = deck(
+        &db,
+        &[
+            "Gnashing of Teeth",
+            "Swamp",
+            "Ravening Warg",
+            "Pinecone Strike",
+            "Mountain",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'B');
+    put(&mut g, 1, 2);
+    g.players[0].hand.push(0);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(
+        g.players[1].exile.contains(&2),
+        "exiled: {:?}",
+        g.players[1]
+    );
+    assert!(!g.players[1].graveyard.contains(&2));
+    // Pinecone Strike's 3 damage on a creature that survives it: dying on a later turn
+    // puts it into the graveyard.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    let warg = put(&mut g, 1, 2);
+    let i = g.idx(warg).unwrap();
+    g.perms[i].counters = 3;
+    g.recalc();
+    g.players[0].hand.push(3);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(warg).is_some(), "a 5/5 survives 3 damage");
+    g.cleanup(0);
+    let i = g.idx(warg).unwrap();
+    g.destroy(i);
+    assert!(
+        g.players[1].graveyard.contains(&2),
+        "the exile ended with the turn"
+    );
+}
+
+#[test]
+fn embiggen_fist_sets_base_power_to_the_hand_size() {
+    let db = db();
+    // Ms. Marvel: "Whenever you cast a spell that targets a creature you control, draw a
+    // card. Until end of turn, Ms. Marvel gains "Ms. Marvel's base power is equal to the
+    // number of cards in your hand.""
+    let d = deck(
+        &db,
+        &["Ms. Marvel, Kamala Khan", "Super Intelligence", "Island"],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 1, 'U');
+    let marvel = put(&mut g, 0, 0);
+    g.players[0].hand = vec![1, 2, 2, 2, 2];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.run_pending();
+    g.recalc();
+    let hand = g.players[0].hand.len() as i16;
+    assert_eq!(hand, 5, "four Islands and the card drawn");
+    assert_eq!(perm(&g, marvel).p, hand);
+    g.cleanup(0);
+    g.recalc();
+    assert_eq!(perm(&g, marvel).p, 1, "until end of turn");
+}

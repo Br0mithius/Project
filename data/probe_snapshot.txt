@@ -8255,6 +8255,7 @@ ABILITIES:
       (no effects read)
   Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets a creature you control, draw a card. until end of turn, ~ gains "~'s base power is equal to the number of cards in your hand.""
       -> You: hand +1, library -1
+      -> Your Ms. Marvel, Kamala Khan: 1/4 -> 4/4
 
 Muldrotha, the Gravetide | {3}{B}{G}{U} | Legendary Creature — Elemental Avatar | 6/6
 TEXT: During each of your turns, you may play a land and cast a permanent spell of each permanent type from your graveyard. (If a card has multiple permanent types, choose one as you play it.)
