@@ -4339,13 +4339,14 @@ fn photon_blast_barrage_copies_x_times() {
         Some(("1", "1")),
     )));
     let mut g = game(&[&d, &d]);
-    let elves: Vec<u32> = (0..4).map(|_| put(&mut g, 1, 2)).collect();
+    let elves: Vec<u32> = (0..6).map(|_| put(&mut g, 1, 2)).collect();
     lands(&mut g, 0, 5, 'R');
     g.players[0].hand = vec![0];
     assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
-    // X = 3: the spell and three copies, each on its own target.
+    // X = 3: the spell and three copies, each on its own target (a copy isn't cast, so it
+    // doesn't copy itself again).
     let alive = elves.iter().filter(|&&e| g.idx(e).is_some()).count();
-    assert_eq!(alive, 0, "four pings for X = 3");
+    assert_eq!(alive, 2, "four pings for X = 3");
 }
 
 #[test]

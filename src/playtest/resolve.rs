@@ -5013,10 +5013,13 @@ impl<'a> Game<'a> {
         };
         self.note(|| format!("  P{} copies {}", me, c.name));
         for (ai, a) in abilities.into_iter().flatten().enumerate() {
-            // (A copy isn't cast: "when you cast this spell" doesn't trigger again.)
+            // (A copy isn't cast: "when you cast this spell" doesn't trigger again. The
+            // text reads "when you cast ~" once compiled: Photon Blast Barrage's copies each
+            // copied the spell again, about 30 instances in all for any X of 1 or more.)
             if a.trig == Trig::Spell
                 && !a.effects.contains(&Effect::Copy)
                 && !a.text.starts_with("when you cast this spell")
+                && !a.text.starts_with("when you cast ~")
             {
                 self.pending.push(Pending {
                     ctrl: me as u8,
