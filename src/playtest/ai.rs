@@ -1998,6 +1998,19 @@ fn rule_now(g: &Game, p: usize, label: &str, src: Option<u32>) -> f32 {
         }
         // A 5/5 flier for an opponent.
         "an opponent creates a creature token" => -3.0,
+        // "You draw two cards and lose 2 life" (Visions of Villainy): never at a life total
+        // it would end.
+        l if l.starts_with("you lose ") && l.ends_with(" life") => {
+            let n: i32 = l["you lose ".len()..l.len() - " life".len()]
+                .trim()
+                .parse()
+                .unwrap_or(1);
+            if g.players[p].life <= n {
+                -100.0
+            } else {
+                -0.15 * n as f32
+            }
+        }
         _ => effect_value(&Effect::Rule(label.to_string())),
     }
 }
@@ -2880,7 +2893,19 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 c.mv as usize > lands_in_play(g, p) + 3 && g.round <= 4
                     || c.is(T_LAND) && lands >= 6
             };
-            if dead && g.can_pay(p, &Mana::generic(*cost as u32)) {
+            // Typecycling for a card type (The Masters of Evil's "search for a Plan card"):
+            // only while the library holds one and the hand doesn't already.
+            let kind_ok = land_kind || find.is_empty() || {
+                let is = |k: &u16| {
+                    let lc = &pl.cards[*k as usize];
+                    lc.has_subtype(find) || lc.name.to_lowercase() == *find
+                };
+                pl.library.iter().any(is) && !pl.hand.iter().any(is)
+            };
+            let pay = c
+                .cycling_mana
+                .unwrap_or_else(|| Mana::generic(*cost as u32));
+            if dead && kind_ok && g.can_pay(p, &pay) {
                 out.push((1.2, *cost as u32, Act::Cycle(h)));
             }
         }
@@ -3518,6 +3543,22 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
             }
             if let Some(h) = choose_land(g, p) {
                 g.play_land(p, h);
+                continue;
+            }
+        }
+        // A rock that makes more than it costs (Sol Ring): cast first, it pays for itself
+        // and leaves more mana for the rest of the turn.
+        if let Some(h) = (0..g.players[p].hand.len()).find(|&h| {
+            let c = &g.players[p].cards[g.players[p].hand[h] as usize];
+            c.is(T_ARTIFACT)
+                && !c.is(T_CREATURE)
+                && c.mana_ability
+                && !c.enters_tapped
+                && c.mana_amount as u32 > c.cost.total()
+                && g.cast_cost(p, Src::Hand(h), CastOpts::default())
+                    .is_some_and(|m| g.can_pay(p, &m))
+        }) {
+            if g.cast(p, Src::Hand(h), CastOpts::default()) {
                 continue;
             }
         }

@@ -5555,3 +5555,68 @@ fn a_filtered_payment_keeps_the_rest_of_the_turn_plan_payable() {
         "a Surveillance Room is left for {{C}}"
     );
 }
+
+#[test]
+fn thor_deals_the_cast_spells_mana_value() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Thor, God of Thunder",
+            "Sol Ring",
+            "Photon Blast Barrage",
+        ],
+    );
+    // Sol Ring (MV 1): 1 damage, not a default 3.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 8, 'R');
+    put(&mut g, 0, 1);
+    g.active = 0;
+    g.players[0].hand = vec![2];
+    let life = g.players[1].life;
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(life - g.players[1].life, 1, "Thor deals Sol Ring's MV 1");
+    // Photon Blast Barrage with X = 3 (MV 5 on the stack): 5 damage.
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 8, 'R');
+    put(&mut g, 0, 1);
+    g.active = 0;
+    g.players[0].hand = vec![3];
+    let life = g.players[1].life;
+    let opts = CastOpts {
+        x: Some(3),
+        ..CastOpts::default()
+    };
+    assert!(g.cast(0, Src::Hand(0), opts));
+    assert_eq!(
+        life - g.players[1].life,
+        5,
+        "X counts in the spell's mana value"
+    );
+}
+
+#[test]
+fn draw_and_lose_life_is_not_cast_at_a_life_total_it_would_end() {
+    let db = db();
+    let d = prep_db(&db, &["Swamp", "Visions of Villainy"]);
+    let run = |life: i32| {
+        let mut g = game(&[&d, &d]);
+        lands(&mut g, 0, 6, 'B');
+        g.players[0].hand = vec![1];
+        g.players[0].life = life;
+        g.active = 0;
+        ai::main_phase(&mut g, 0, false);
+        ai::main_phase(&mut g, 0, true);
+        g.active = 1;
+        ai::end_of_turn(&mut g, 0, true);
+        (g.players[0].alive, g.players[0].life)
+    };
+    let (alive, _) = run(2);
+    assert!(
+        alive,
+        "Visions of Villainy (lose 2 life) isn't cast at 2 life"
+    );
+    let (_, life) = run(20);
+    assert_eq!(life, 18, "at 20 life it is cast");
+}

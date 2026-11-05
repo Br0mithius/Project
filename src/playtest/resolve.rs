@@ -203,8 +203,11 @@ impl<'a> Game<'a> {
                 Some(self.players[me].life)
             } else if m.starts_with("amount of life you gained this turn") {
                 Some(self.players[me].life_gained_turn)
-            } else if m.starts_with("amount of mana spent to cast that spell") {
-                self.casting.map(|(r, _)| self.card(r).mv as i32)
+            } else if m.starts_with("amount of mana spent to cast that spell")
+                || m.starts_with("that spell's mana value")
+            {
+                self.casting
+                    .map(|(r, _)| self.card(r).mv as i32 + self.cur_x.unwrap_or(0))
             } else if m.starts_with("difference") {
                 // "If you have fewer than ten cards in hand, draw cards equal to the difference".
                 Some((10 - self.players[me].hand.len() as i32).max(0))
@@ -278,6 +281,11 @@ impl<'a> Game<'a> {
             || t.contains("equal to the power")
         {
             subject_or_src(&|x| x.p as i32).unwrap_or(a.n)
+        } else if t.contains("that spell's mana value") && self.casting.is_some() {
+            // "Whenever you cast a noncreature spell, ~ deals damage equal to that spell's
+            // mana value" (Thor, God of Thunder): the spell being cast, X included.
+            let (r, _) = self.casting.unwrap();
+            self.card(r).mv as i32 + self.cur_x.unwrap_or(0)
         } else if t.contains("mana value") {
             ctx.subject
                 .and_then(|id| self.idx(id))
