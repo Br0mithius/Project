@@ -19055,6 +19055,24 @@
     "note": "Rules text, cost, type and P/T from the Forge card database (github.com/Card-Forge/forge); number and rarity from its The Hobbit edition list."
   },
   {
+    "name": "Thranduil, Sindarin Liege",
+    "mana_cost": "{2}{G/U}{G/U}",
+    "cmc": 4,
+    "type_line": "Legendary Creature — Elf Noble",
+    "oracle_text": "Other Elves you control get +1/+1.\nLandfall — Whenever a land you control enters, create a 1/1 green Elf creature token.\n\n// Back face: Silvan Rally {1}{G/U}{G/U}\nSorcery — Adventure\nMill four cards, then put up to two land cards from among them into your hand. (Then exile this card. You may cast the creature later from exile.)",
+    "power": "2",
+    "toughness": "3",
+    "rarity": "uncommon",
+    "color_identity": [
+      "G",
+      "U"
+    ],
+    "set": "HOB",
+    "collector_number": "",
+    "confidence": "verified",
+    "note": "Rules text, cost, type and P/T from Mana Mixer's card data (2026-11-12); it was missing from the Forge import."
+  },
+  {
     "name": "Thranduil, the Elvenking",
     "mana_cost": "{2}{B}{G}{U}",
     "cmc": 5,
