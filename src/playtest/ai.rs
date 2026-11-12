@@ -250,6 +250,13 @@ fn perm_value_uncached(g: &Game, i: usize) -> f32 {
     if x.card.is_some_and(|r| g.card(r).mana_ability) && !x.is(T_LAND) {
         v += 1.5;
     }
+    // An attack tax (Propaganda), at a flat rate (`attack_tax_value` reads the table's
+    // weights, which read this).
+    if let Some((n, _)) = x.card.and_then(|r| g.card(r).attack_tax.as_ref()) {
+        if !x.no_abilities && !x.blank {
+            v += 1.0 + 0.5 * *n as f32;
+        }
+    }
     if x.commander > 0 {
         v += 2.5;
     }
@@ -329,9 +336,22 @@ pub fn perm_mv(g: &Game, x: &Perm) -> u8 {
     x.card.map(|r| g.card(r).mv).unwrap_or(0)
 }
 
+/// What a permanent of `p`'s own lost to `p`'s mass effect (a board wipe, Thanos's odd/even)
+/// costs, per point of its worth. An opponent's loss is worth its `weight` x 0.8 (the
+/// table's threats count most), but a wipe hits all three opponents and us at once: our
+/// losses set us back against every one of them, theirs help us against one each (and the
+/// other two as much). Counted at 1 (as a single opponent's at weight 1.25), wipes went off
+/// while we were far ahead (game logs: Fumigate killing Thanos 7/7 and four more of ours for
+/// four of theirs, at 39 life against 9, 18 and 22). Measured, one seat changed against a
+/// table at 1 (16,000 paired games each, a Thanos deck with Fumigate / the control build /
+/// the base build): 1.25 +0.16/+0.10/+0.10, 1.5 +0.33/+0.19/+0.17, 2 +0.64/+0.34/+0.31,
+/// 3 +0.82/+0.62/+0.39 (± 0.15-0.2), 5 +0.02/+0.23/-0.37 win-rate points.
+const OWN_MASS_LOSS: f32 = 2.0;
+
 /// Thanos's power-up: "Choose odd or even. Destroy each other creature with mana value of the
 /// chosen quality." The parity (true = odd) that's best for `p` - opponents' creatures lost,
-/// weighted by how threatening their controller is, minus `p`'s own - and its net value.
+/// weighted by how threatening their controller is, minus `p`'s own (`OWN_MASS_LOSS`) - and
+/// its net value.
 pub fn best_parity(g: &Game, p: usize, src: Option<u32>) -> (bool, f32) {
     let net = |odd: bool| -> f32 {
         g.perms
@@ -342,7 +362,7 @@ pub fn best_parity(g: &Game, p: usize, src: Option<u32>) -> (bool, f32) {
             .map(|(i, x)| {
                 let o = x.ctrl as usize;
                 if o == p {
-                    -perm_value(g, i)
+                    -perm_value(g, i) * OWN_MASS_LOSS
                 } else {
                     perm_value(g, i) * weight(g, p, o) * 0.8
                 }
@@ -820,6 +840,17 @@ pub fn equip_target(g: &Game, me: usize, equip_id: u32) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
+/// An Aura that steals what it enchants (`STEALS_ATTACHED`): Some(true) when it may enchant
+/// any permanent ("you control enchanted permanent"), Some(false) for creatures only.
+pub(crate) fn steals_attached(c: &SimCard) -> Option<bool> {
+    c.abilities.iter().find_map(|a| {
+        a.effects
+            .iter()
+            .any(|e| matches!(e, Effect::Rule(r) if r == STEALS_ATTACHED))
+            .then(|| a.text.contains("enchanted permanent"))
+    })
+}
+
 pub fn aura_target(g: &Game, p: usize, card: CardRef) -> Option<usize> {
     let c = g.card(card);
     // "Enchanted permanent is a Construct creature with base power and toughness 5/5"
@@ -835,10 +866,13 @@ pub fn aura_target(g: &Game, p: usize, card: CardRef) -> Option<usize> {
             })
             .min_by(|&a, &b| perm_value(g, a).partial_cmp(&perm_value(g, b)).unwrap());
     }
+    // "Enchant permanent / You control enchanted permanent" (Confiscate): any nonland
+    // permanent of an opponent's will do.
+    let any = steals_attached(c) == Some(true);
     let creatures: Vec<usize> = (0..g.perms.len())
         .filter(|&i| {
             let x = &g.perms[i];
-            x.is_creature()
+            (x.is_creature() || any && !x.is(T_LAND))
                 && !(x.ctrl as usize != p
                     && (x.has(HEXPROOF | SHROUD) || x.hexproof_from & c.colors != 0))
         })
@@ -1470,12 +1504,21 @@ fn is_spot_removal(c: &SimCard) -> bool {
 }
 
 /// Cards worth casting only in response (counters, Fogs, protection, combat tricks).
+/// A counterspell whose other effects ride on the counter ("Counter target spell. If that
+/// spell's mana value was 2 or less, recruit": Sound the Trumpets) needs a spell to target:
+/// it isn't cast in a main phase or at an end step for its rider. (Game logs: 30 of 43 Sound
+/// the Trumpets cast in a main phase with nothing to counter, often with the very mana
+/// `holdup` had kept open for it. Measured, one seat changed: +0.26 ± 0.07 win-rate points
+/// in 16,000 paired games.) A modal one ("choose one - counter target spell; or draw a
+/// card") still has its other modes.
 fn is_reactive_only(c: &SimCard) -> bool {
     c.is(T_INSTANT)
-        && effects_of(c, false).all(|e| {
+        && (spell_abilities(c, false).iter().any(|a| {
+            a.trig == Trig::Spell && !a.modal && a.effects.contains(&Effect::CounterSpell)
+        }) || effects_of(c, false).all(|e| {
             matches!(e, Effect::CounterSpell | Effect::Fog)
                 || matches!(e, Effect::Pump { until_eot: true, to, .. } | Effect::Grant { until_eot: true, to, .. } if !to.mass)
-        })
+        }))
 }
 
 #[cfg(test)]
@@ -1643,7 +1686,7 @@ fn effect_now_with(
                 .map(|&i| {
                     let o = g.perms[i].ctrl as usize;
                     if o == p {
-                        -perm_value(g, i)
+                        -perm_value(g, i) * OWN_MASS_LOSS
                     } else {
                         perm_value(g, i) * weight(g, p, o) * 0.8
                     }
@@ -2317,6 +2360,16 @@ pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: b
         if c.mana_ability && !c.is(T_LAND) && !(no_gear && c.spend_only.is_some()) {
             v += if g.round <= 5 { 3.0 } else { 1.2 };
         }
+        // "Creatures can't attack you unless their controller pays {2} for each" (Propaganda):
+        // its effect lives outside the ability list (`SimCard::attack_tax`).
+        if let Some((n, cond)) = &c.attack_tax {
+            let now = if g.cond_holds(cond, p, None) {
+                1.0
+            } else {
+                0.4
+            };
+            v += now * attack_tax_value(g, p, *n as u32);
+        }
         if c.is(T_EQUIPMENT) {
             let has_creature = g
                 .perms
@@ -2330,7 +2383,12 @@ pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: b
             }
             if c.harmful_aura {
                 if let Some(t) = aura_target(g, p, (p as u8, idx)) {
-                    v += perm_value(g, t) * 0.8;
+                    v += if steals_attached(c).is_some() {
+                        // Theirs becomes ours: as a lasting `GainControl` is valued.
+                        perm_value(g, t) * weight(g, p, g.perms[t].ctrl as usize) * 0.8 * 1.6
+                    } else {
+                        perm_value(g, t) * 0.8
+                    };
                 }
             }
         }
@@ -2396,7 +2454,17 @@ pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: b
                 // Removal waits for a target worth the card - one whose ward can be paid
                 // after casting it.
                 let outer = g.ext.ward_extra.replace(c.cost.total());
-                v += ability_now_with(g, p, a, None, true);
+                // An X spell valued at the X it would be cast with (`x_variants`).
+                match g.ext.value_x.get().filter(|_| c.cost.x) {
+                    Some(x) => {
+                        let mut at_x = a.clone();
+                        for e in at_x.effects.iter_mut() {
+                            crate::abilities::set_x(e, x, &a.text);
+                        }
+                        v += ability_now_with(g, p, &at_x, None, true);
+                    }
+                    None => v += ability_now_with(g, p, a, None, true),
+                }
                 g.ext.ward_extra.set(outer);
             }
         }
@@ -2419,6 +2487,39 @@ pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: b
         }
     }
     v
+}
+
+/// What a tax of `n` mana per creature attacking `p` (Propaganda) is worth to `p`: the
+/// damage it turns away each turn - every opponent's creatures, a creature turned away for
+/// up to `n + 1` of its power (a bigger one is worth paying for), times the share of that
+/// opponent's attacks that would come at `p` (how much it wants to hurt `p` among its own
+/// opponents, `weight`) - at 0.3 a point of life (as `GainLife` values it when life is
+/// short) over the ~5 turns a game has left when Propaganda comes down (1.5 a point turned
+/// away each turn), more at low life, plus the creatures still to come.
+/// Without it the card was worth nothing to the AI and never cast (game logs: 0 casts in
+/// 93 games that drew it). Measured, one seat changed (16,000 paired games, the base Thanos
+/// build with Propaganda for a creature): +4.0 win-rate points at 0.9 a point, +5.3 at 1.8,
+/// +2.7 at 0.3; with it in play the share of opponents' attackers sent at us fell from 38%
+/// to 22%.
+pub(crate) fn attack_tax_value(g: &Game, p: usize, n: u32) -> f32 {
+    let mut turned_away = 0.0;
+    for o in g.opponents(p) {
+        let power: i32 = g
+            .perms
+            .iter()
+            .filter(|x| x.ctrl as usize == o && x.is_creature() && !x.has(DEFENDER))
+            .map(|x| (x.p.max(0) as i32).min(n as i32 + 1))
+            .sum();
+        if power == 0 {
+            continue;
+        }
+        let total: f32 = g.opponents(o).iter().map(|&q| weight(g, o, q)).sum();
+        if total > 0.0 {
+            turned_away += power as f32 * weight(g, o, p) / total;
+        }
+    }
+    let low = if g.players[p].life <= 12 { 1.5 } else { 1.0 };
+    1.0 + 1.5 * turned_away * low
 }
 
 /// "When you cast this spell, copy it X times."
@@ -2766,6 +2867,35 @@ fn powerup_cost_on_entry(g: &Game, p: usize, c: &SimCard, full: &Mana) -> Mana {
     cost.minus_generic(spare + less)
 }
 
+/// The Xs to plan an instant or sorcery with X in its cost at: about half the mana to
+/// spare (the engine's default) and all of it (one if they're the same). Empty for other
+/// spells, X permanents, "copy it X times" (`barrage_plan`) and an X the engine sizes
+/// itself ("mana value X or less").
+fn x_variants(g: &Game, p: usize, src: Src, idx: u16, back: bool, opts: CastOpts) -> Vec<u32> {
+    let c = &g.players[g.spell_list(p, src)].cards[idx as usize];
+    if back
+        || !c.cost.x
+        || c.is_permanent()
+        || opts.x.is_some()
+        || copies_x_times(c)
+        || c.abilities
+            .iter()
+            .any(|a| a.trig == Trig::Spell && a.text.contains("mana value x or less"))
+    {
+        return Vec::new();
+    }
+    let Some(base) = g.cast_cost(p, src, CastOpts { x: Some(0), ..opts }) else {
+        return Vec::new();
+    };
+    let spare = g.mana_available(p).saturating_sub(base.total());
+    let (half, all) = ((spare / 2).max(1), spare.max(1));
+    if half == all {
+        vec![all]
+    } else {
+        vec![half, all]
+    }
+}
+
 /// Everything `p` could do at sorcery speed, with its value and mana.
 fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     let mut out = Vec::new();
@@ -2795,22 +2925,51 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                 }
                 return;
             }
-            let mut v = spell_value(g, p, idx, back, commander);
-            // Instants are worth more cast at instant speed (end of the turn before ours, or
-            // in combat), so the main phase only uses them if there's nothing better to do
-            // with the mana. Not a flash creature: its body is worth as much now, and it
-            // was rarely cast later (Captain Marvel, Earth's Protector: 0 of 38 casts at
-            // instant speed, held up to 13 turns; cast at full worth, the planned Thanos
-            // deck won 1.3-1.6 points more in 20,000 games on each of two seeds).
             let c = &pl.cards[idx as usize];
-            if !back && c.is(T_INSTANT) {
-                v *= 0.6;
+            let adjust = |mut v: f32| {
+                // Instants are worth more cast at instant speed (end of the turn before ours,
+                // or in combat), so the main phase only uses them if there's nothing better
+                // to do with the mana. Not a flash creature: its body is worth as much now,
+                // and it was rarely cast later (Captain Marvel, Earth's Protector: 0 of 38
+                // casts at instant speed, held up to 13 turns; cast at full worth, the
+                // planned Thanos deck won 1.3-1.6 points more in 20,000 games on each of
+                // two seeds).
+                if !back && c.is(T_INSTANT) {
+                    v *= 0.6;
+                }
+                // One-for-one removal is kept for a target worth it: a bigger threat may
+                // come (half the old hold-back: see `removal_discount`).
+                if !back && is_spot_removal(c) {
+                    v -= (0.75 + 0.2 * g.round as f32).min(2.75);
+                }
+                v
+            };
+            // An X spell (Exsanguinate, Finale of Revelation): with about half the spare
+            // mana on X (what `Game::cast_plan` would pay) and with all of it, each valued
+            // at its own X, planned as twins (`plan_turn` keeps the better plan). Valued at
+            // the card's estimated X instead, Exsanguinate counted as X=3 and was then cast
+            // for X=1 (game logs: 28 of 53 casts at X=1, after the turn's other spells).
+            // Measured, one seat changed (16,000 paired games): +0.99 ± 0.14 win-rate points
+            // with Exsanguinate, +0.08 ± 0.12 with Finale of Revelation.
+            let xs = x_variants(g, p, src, idx, back, opts);
+            if !xs.is_empty() {
+                for x in xs {
+                    let o = CastOpts {
+                        x: Some(x as u16),
+                        ..opts
+                    };
+                    let Some(cx) = g.cast_cost(p, src, o).filter(|m| g.can_pay_for(p, m, why))
+                    else {
+                        continue;
+                    };
+                    let outer = g.ext.value_x.replace(Some(x as i32));
+                    let v = spell_value(g, p, idx, back, commander);
+                    g.ext.value_x.set(outer);
+                    out.push((adjust(v), cx.total(), Act::Cast(src, o)));
+                }
+                return;
             }
-            // One-for-one removal is kept for a target worth it: a bigger threat may come
-            // (half the old hold-back: see `removal_discount`).
-            if !back && is_spot_removal(c) {
-                v -= (0.75 + 0.2 * g.round as f32).min(2.75);
-            }
+            let v = adjust(spell_value(g, p, idx, back, commander));
             out.push((v, cost.total(), Act::Cast(src, opts)));
             // "Copy it X times" (Photon Blast Barrage): also with only the copies for the
             // best kill, the rest of the mana left for other spells (planned as a twin of
@@ -3261,31 +3420,44 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
 fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
     let pl = &g.players[p];
     let rmhold = false;
-    let best = pl
-        .hand
-        .iter()
-        .map(|&c| (c, &pl.cards[c as usize]))
-        .filter(|(_, c)| c.is(T_INSTANT) || has_flash(g, p, c))
-        .map(|(idx, c)| {
+    // Only a card the untapped mana can pay for, colours included: a counterspell's {U}{U}
+    // from a tapped (or missing) blue source was "held up" for nothing (game logs: Sound
+    // the Trumpets held up in 101 turn cycles, castable on opponents' turns in 24). Measured,
+    // one seat changed (16,000 paired games): +0.41 ± 0.13 win-rate points for the control
+    // build (Stasis Snare, Super Villain Lockup, instant removal), +0.09 ± 0.09 for the base
+    // build with Sound the Trumpets. (Keeping the held card's colours untapped while the
+    // rest of the turn is paid, or the hold for the whole turn once decided, measured
+    // -0.1 and -0.2: holding up more costs more development than the counters win.)
+    let best = (0..pl.hand.len())
+        .map(|h| (h, pl.hand[h], &pl.cards[pl.hand[h] as usize]))
+        .filter(|(_, _, c)| c.is(T_INSTANT) || has_flash(g, p, c))
+        .filter_map(|(h, idx, c)| {
+            let cost = g.cast_cost(p, Src::Hand(h), CastOpts::default())?;
+            let why = Purpose::Spell {
+                card: (p as u8, idx),
+                from_hand: true,
+            };
+            if !g.can_pay_for(p, &cost, why) {
+                return None;
+            }
             let mut v = reactive_value(g, p, c);
             // Instant removal: what it would kill now (it's cast before blocks or at the
             // end of the turn before ours, not left to rot in hand).
             if rmhold && is_instant_removal(c) {
                 v = v.max(spell_value(g, p, idx, false, false));
             }
-            (v, c.cost.total())
+            Some((v, cost))
         })
         .filter(|(v, _)| *v >= 1.5)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let Some((value, cost)) = best else { return 0 };
-    if cost > avail {
+    let n = cost.total();
+    if n > avail {
         return 0;
     }
     let full = plan_set(opts, avail, &[]).map(|x| x.1).unwrap_or(0.0);
-    let held = plan_set(opts, avail - cost, &[])
-        .map(|x| x.1)
-        .unwrap_or(0.0);
-    if held + value * 0.6 >= full { cost } else { 0 }
+    let held = plan_set(opts, avail - n, &[]).map(|x| x.1).unwrap_or(0.0);
+    if held + value * 0.6 >= full { n } else { 0 }
 }
 
 /// What an action is, for the log.

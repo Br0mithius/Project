@@ -2851,7 +2851,7 @@ fn parse_face(text: &str, card: &Card) -> Parsed {
 }
 
 /// Puts a known value in place of an effect's estimated X ("where X is ~'s power").
-fn set_x(e: &mut Effect, n: i32, text: &str) {
+pub(crate) fn set_x(e: &mut Effect, n: i32, text: &str) {
     match e {
         Effect::Draw { amount, .. }
         | Effect::Mill { amount }

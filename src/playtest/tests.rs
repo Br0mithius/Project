@@ -5620,3 +5620,185 @@ fn draw_and_lose_life_is_not_cast_at_a_life_total_it_would_end() {
     let (_, life) = run(20);
     assert_eq!(life, 18, "at 20 life it is cast");
 }
+
+// ------------------------------------------------------------ control play
+
+#[test]
+fn ai_counterspell_with_a_rider_waits_for_a_spell() {
+    // "Counter target spell. If that spell's mana value was 2 or less, recruit": nothing to
+    // counter in our main phase or at an end step, so it stays in hand - and still counters.
+    let db = db();
+    let d0 = prep_db(&db, &["Island", "Sound the Trumpets"]);
+    let d1 = prep(&[
+        Card::basic_land("Forest", 'G'),
+        card(
+            "Huge",
+            "{4}{G}{G}",
+            "Creature — Wurm",
+            "Trample",
+            Some(("8", "8")),
+        ),
+    ]);
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 6, 'U');
+    g.players[0].hand = vec![1];
+    assert_eq!(ai::spell_value(&g, 0, 1, false, false), 0.0);
+    ai::main_phase(&mut g, 0, false);
+    ai::main_phase(&mut g, 0, true);
+    ai::end_of_turn(&mut g, 0, true);
+    assert_eq!(g.players[0].hand, vec![1], "not cast for its rider");
+    assert_eq!(tapped_lands(&g, 0), 0);
+    lands(&mut g, 1, 6, 'G');
+    g.players[1].hand = vec![1];
+    assert!(g.cast(1, Src::Hand(0), CastOpts::default()));
+    assert!(g.players[0].graveyard.contains(&1), "it countered the wurm");
+    assert!(!g.perms.iter().any(|x| x.card == Some((1, 1))));
+}
+
+#[test]
+fn ai_values_and_casts_propaganda() {
+    // Its effect is only the attack tax (`SimCard::attack_tax`): worth something to the AI,
+    // more with more attackers across the table.
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Island", 'U'),
+        db.get("Propaganda").unwrap().clone(),
+        card("Ogre", "{3}{R}", "Creature — Ogre", "", Some(("4", "4"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'U');
+    g.players[0].hand = vec![1];
+    let empty = ai::spell_value(&g, 0, 1, false, false);
+    assert!(empty > 0.5, "worth something on an empty board: {}", empty);
+    put(&mut g, 1, 2);
+    put(&mut g, 1, 2);
+    let facing = ai::spell_value(&g, 0, 1, false, false);
+    assert!(
+        facing > empty + 2.0,
+        "two 4/4s across the table: {} vs {}",
+        facing,
+        empty
+    );
+    ai::main_phase(&mut g, 0, false);
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.players[0].hand.is_empty(), "Propaganda was cast");
+    assert_eq!(g.attack_tax(0), 2);
+}
+
+#[test]
+fn ai_x_spell_is_valued_and_cast_at_its_x() {
+    // Exsanguinate with nothing else to cast: all the mana goes into X (not half of it), and
+    // the value the plan used is that X's.
+    let db = db();
+    let d0 = prep_db(&db, &["Swamp", "Exsanguinate"]);
+    let mut g = game(&[&d0, &d0]);
+    lands(&mut g, 0, 8, 'B');
+    g.players[0].hand = vec![1];
+    ai::main_phase(&mut g, 0, false);
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.players[0].hand.is_empty(), "cast");
+    assert_eq!(g.players[1].life, 30 - 6, "X = 6: all eight mana");
+    assert_eq!(g.players[0].life, 30 + 6);
+}
+
+#[test]
+fn ai_holds_up_only_a_counterspell_it_can_pay_for() {
+    // A cheap creature or Sound the Trumpets' {1}{U}{U} kept open: with one blue source the
+    // counter can't be cast on an opponent's turn, so the mana isn't held for it.
+    let db = db();
+    let mut cards: Vec<Card> = ["Swamp", "Island", "Sound the Trumpets"]
+        .iter()
+        .map(|n| db.get(n).unwrap().clone())
+        .collect();
+    cards.push(card(
+        "Rat",
+        "{1}{B}",
+        "Creature — Rat",
+        "",
+        Some(("1", "1")),
+    ));
+    let d = prep(&cards);
+    for (islands, held) in [(1, false), (2, true)] {
+        let mut g = game(&[&d, &d]);
+        g.round = 10;
+        lands(&mut g, 0, 4 - islands, 'B');
+        lands(&mut g, 0, islands, 'U');
+        g.players[0].hand = vec![2, 3];
+        ai::main_phase(&mut g, 0, false);
+        ai::main_phase(&mut g, 0, true);
+        assert_eq!(
+            g.players[0].hand.contains(&3),
+            held,
+            "{} Island(s): the Rat {}",
+            islands,
+            if held { "waits" } else { "is cast" }
+        );
+        assert!(g.players[0].hand.contains(&2), "the counter stays in hand");
+    }
+}
+
+#[test]
+fn ai_wipe_weighs_its_own_losses() {
+    // Fumigate with two 4/4s of ours against a 5/5 and a 2/2: not worth it (our losses set
+    // us back against the whole table); with the board the other way round, it is.
+    let db = db();
+    let d = prep(&[
+        Card::basic_land("Plains", 'W'),
+        db.get("Fumigate").unwrap().clone(),
+        card("Ogre", "{3}{R}", "Creature — Ogre", "", Some(("4", "4"))),
+        card("Giant", "{4}{R}", "Creature — Giant", "", Some(("5", "5"))),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1];
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 2);
+    put(&mut g, 1, 3);
+    put(&mut g, 1, 4);
+    let ahead = ai::spell_value(&g, 0, 1, false, false);
+    assert!(ahead < 0.0, "a wipe while ahead: {}", ahead);
+    let mut g = game(&[&d, &d]);
+    g.players[0].hand = vec![1];
+    put(&mut g, 0, 4);
+    put(&mut g, 1, 2);
+    put(&mut g, 1, 2);
+    put(&mut g, 1, 3);
+    let behind = ai::spell_value(&g, 0, 1, false, false);
+    assert!(behind > 0.0, "a wipe while behind: {}", behind);
+}
+
+#[test]
+fn confiscate_steals_an_opponents_best_permanent() {
+    // "Enchant permanent / You control enchanted permanent": cast on an opponent's best
+    // permanent (not one of ours), which becomes ours.
+    let db = db();
+    let d0 = prep(&[
+        Card::basic_land("Island", 'U'),
+        db.get("Confiscate").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let d1 = prep(&[
+        card(
+            "Huge",
+            "{4}{G}{G}",
+            "Creature — Wurm",
+            "Trample",
+            Some(("8", "8")),
+        ),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 6, 'U');
+    let ours = put(&mut g, 0, 2);
+    let wurm = put(&mut g, 1, 0);
+    put(&mut g, 1, 1);
+    g.players[0].hand = vec![1];
+    assert!(ai::spell_value(&g, 0, 1, false, false) > 8.0);
+    ai::main_phase(&mut g, 0, false);
+    ai::main_phase(&mut g, 0, true);
+    assert!(g.players[0].hand.is_empty(), "cast");
+    let aura = g.perms.iter().find(|x| x.card == Some((0, 1))).unwrap();
+    assert_eq!(aura.attached, Some(wurm));
+    assert_eq!(perm(&g, wurm).ctrl, 0, "the wurm is ours");
+    assert_eq!(perm(&g, ours).ctrl, 0);
+}

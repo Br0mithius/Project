@@ -479,6 +479,8 @@ pub struct GameExtra {
     /// Mana the spell being planned costs, so its targets' ward is paid from what's left
     /// (`Game::ward_payable`); 0 otherwise.
     pub ward_extra: std::cell::Cell<u32>,
+    /// The X the AI is valuing an X spell at (`ai::spell_value`); None: the card's estimate.
+    pub value_x: std::cell::Cell<Option<i32>>,
     /// Permanents exiled if they die this turn ("if that creature would die this turn, exile
     /// it instead"): their `Perm::finality` ends with the turn.
     pub finality_this_turn: Vec<u32>,

@@ -1938,7 +1938,8 @@ impl<'a> Game<'a> {
                     ai::choose_friends(self, me, &cands, 1)
                 };
                 if let (Some(&t), Some(j)) = (pick.first(), self.idx(id)) {
-                    self.perms[j].attached = Some(self.perms[t].id);
+                    let tid = self.perms[t].id;
+                    self.attach_aura(j, tid);
                 }
             }
         } else {

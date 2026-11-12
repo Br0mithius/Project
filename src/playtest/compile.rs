@@ -74,6 +74,9 @@ pub const R_FIRST_CREATURE_FLASH: u32 = 1 << 14;
 pub const R_SPELL_TAX: u32 = 1 << 15;
 /// It taxes attacks on its controller (`SimCard::attack_tax`).
 pub const R_ATTACK_TAX: u32 = 1 << 16;
+/// The rule of an Aura that steals what it enchants ("you control enchanted permanent":
+/// Confiscate): the theft happens as it's attached (`Game::attach_aura`).
+pub const STEALS_ATTACHED: &str = "steals the enchanted permanent";
 /// "As long as you have an enduring story, you may pay {0} rather than pay the equip cost of
 /// the first equip ability you activate each turn" (Kíli).
 pub const R_FREE_FIRST_EQUIP: u32 = 1 << 17;
@@ -3684,6 +3687,10 @@ pub fn compile(card: &Card) -> SimCard {
                     || a.text.contains("doesn't untap")
                     || a.text.contains("loses all abilities")
                     || a.text.contains("gets -"))
+                // "You control enchanted permanent" (Confiscate): it goes on an opponent's.
+                || a.effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::Rule(r) if r == STEALS_ATTACHED))
         });
     // "Spells you cast cost {N} less" / "noncreature spells your opponents cast cost {1}
     // more": (N, whose spells, more, X = power, the first each turn, filter).

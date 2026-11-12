@@ -899,6 +899,24 @@ impl<'a> Game<'a> {
         ok
     }
 
+    /// Aura `j` goes on the permanent `tid`; one that steals it ("you control enchanted
+    /// permanent": Confiscate) takes it over now (for good: the sim doesn't give it back if
+    /// the Aura leaves).
+    pub(crate) fn attach_aura(&mut self, j: usize, tid: u32) {
+        self.perms[j].attached = Some(tid);
+        let steals = self.perms[j]
+            .card
+            .is_some_and(|r| ai::steals_attached(self.card(r)).is_some());
+        let me = self.perms[j].ctrl;
+        if let Some(t) = self.idx(tid).filter(|_| steals) {
+            if self.perms[t].ctrl != me {
+                self.perms[t].ctrl = me;
+                self.perms[t].sick = true;
+                self.tick += 1;
+            }
+        }
+    }
+
     fn cast_inner(&mut self, p: usize, src: Src, opts: CastOpts) -> bool {
         let Some((idx, back)) = self.spell_card(p, src, opts) else {
             return false;
@@ -1189,7 +1207,7 @@ impl<'a> Game<'a> {
                     if warded {
                         self.note(|| "  (the target's ward isn't paid: it's countered)".into());
                     } else if let Some(j) = self.idx(id) {
-                        self.perms[j].attached = Some(tid);
+                        self.attach_aura(j, tid);
                     }
                 }
             }
