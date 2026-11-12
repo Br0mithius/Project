@@ -99,6 +99,65 @@ impl Outcomes {
             games: n as u32,
         }
     }
+
+    /// A paired linear combination of decks' wins, game by game: the mean over the games of
+    /// `sum(weight * won)` and its standard error. `diff(a, b)` is `[(a, 1), (b, -1)]`; an
+    /// interaction ("is the package worth more than its cards apart?") is
+    /// `[(full, 1), (none, -1)]` minus each `(alone_i, 1), (none, -1)`, with the noise of
+    /// every term counted once through the shared games.
+    pub fn contrast(&self, terms: &[(usize, f64)]) -> Measure {
+        let n = self.games as usize;
+        if n == 0 {
+            return Measure::default();
+        }
+        let (mut sum, mut sq) = (0f64, 0f64);
+        for g in 0..n {
+            let x: f64 = terms
+                .iter()
+                .map(|&(d, w)| if self.wins[d][g] { w } else { 0.0 })
+                .sum();
+            sum += x;
+            sq += x * x;
+        }
+        let mean = sum / n as f64;
+        let var = if n > 1 {
+            ((sq - n as f64 * mean * mean) / (n as f64 - 1.0)).max(0.0)
+        } else {
+            0.0
+        };
+        Measure {
+            gain: mean as f32,
+            stderr: (var / n as f64).sqrt() as f32,
+            games: n as u32,
+        }
+    }
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+
+    #[test]
+    fn contrast_matches_diff_and_counts_shared_noise_once() {
+        let o = Outcomes {
+            games: 6,
+            wins: vec![
+                vec![true, true, false, true, false, true],
+                vec![true, false, false, true, false, false],
+                vec![false, false, true, true, false, true],
+            ],
+        };
+        let d = o.diff(0, 1);
+        let c = o.contrast(&[(0, 1.0), (1, -1.0)]);
+        assert!((d.gain - c.gain).abs() < 1e-6);
+        assert!((d.stderr - c.stderr).abs() < 1e-6);
+        // (0 - 1) - (2 - 1) = 0 - 2, game by game.
+        let i = o.contrast(&[(0, 1.0), (1, -1.0), (2, -1.0), (1, 1.0)]);
+        let d02 = o.diff(0, 2);
+        assert!((i.gain - d02.gain).abs() < 1e-6);
+        assert!((i.stderr - d02.stderr).abs() < 1e-6);
+        assert_eq!(o.contrast(&[]).gain, 0.0);
+    }
 }
 
 impl Prepared {
