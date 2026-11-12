@@ -110,6 +110,11 @@ impl Prepared {
             .find(|&i| self.cards[i as usize].name == name)
     }
 
+    /// The card index of library slot `i`.
+    pub fn library_card(&self, i: usize) -> u16 {
+        self.library[i]
+    }
+
     /// Cards in the library (one per copy).
     pub fn library_len(&self) -> usize {
         self.library.len()

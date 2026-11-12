@@ -29,6 +29,8 @@ pub struct CardDb {
     pub edhrec: crate::edhrec::Edhrec,
     /// When the Scryfall Tagger tags were downloaded ("" = never).
     pub tags_date: String,
+    /// Card power measured by playtests across decks (empty until measured).
+    pub sim_values: crate::playtest::simvalues::SimValues,
     /// Normalised name -> position in `cards`, so lookups don't scan the whole set.
     index: HashMap<String, usize>,
     /// Normalised name of each card, same order as `cards` (for searching).
@@ -62,6 +64,7 @@ impl CardDb {
             commander_stats: HashMap::new(),
             edhrec: Default::default(),
             tags_date: String::new(),
+            sim_values: Default::default(),
             index: HashMap::new(),
             norm: Vec::new(),
         };
@@ -79,6 +82,7 @@ impl CardDb {
             .collect();
         let edhrec = crate::edhrec::Edhrec::new(crate::edhrec::load_file(data_dir), self);
         self.edhrec = edhrec;
+        self.sim_values = crate::playtest::simvalues::SimValues::load(data_dir);
         let tags = crate::tags::load_file(data_dir);
         self.tags_date = tags.fetched.clone();
         let tags: HashMap<String, Vec<String>> = tags

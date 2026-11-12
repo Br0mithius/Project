@@ -172,9 +172,21 @@ enum Action {
     ApplyDeck(Deck, String),
     RunLab(crate::lab::Effort),
     StopLab,
+    /// Measure every card's power by playtests (`true`: every league deck too).
+    Measure(bool),
+    StopMeasure,
 }
 
 /// A playtest lab running on a background thread.
+/// Card power being measured by playtests on a background thread.
+struct MeasureJob {
+    done: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    total: usize,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    rx: std::sync::mpsc::Receiver<Vec<crate::playtest::simvalues::Measurement>>,
+    started: std::time::Instant,
+}
+
 struct LabJob {
     progress: std::sync::Arc<crate::lab::Progress>,
     rx: std::sync::mpsc::Receiver<Option<crate::lab::LabReport>>,
@@ -247,6 +259,7 @@ pub struct GuiApp {
     ranking_key: String,
     rank_job: Option<RankJob>,
     lab_job: Option<LabJob>,
+    measure_job: Option<MeasureJob>,
     /// The last playtest lab report.
     lab: Option<crate::lab::LabReport>,
     data_job: Option<std::sync::mpsc::Receiver<String>>,
@@ -394,6 +407,7 @@ impl GuiApp {
             ranking_key: String::new(),
             rank_job: None,
             lab_job: None,
+            measure_job: None,
             lab: None,
             data_job: None,
             force_card_update: false,
@@ -849,6 +863,12 @@ impl GuiApp {
                     self.status = msg;
                 }
                 Action::RunLab(effort) => self.start_lab(effort),
+                Action::Measure(league) => self.start_measure(league),
+                Action::StopMeasure => {
+                    if let Some(j) = self.measure_job.take() {
+                        j.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
                 Action::StopLab => {
                     self.stop_lab();
                     self.status = "Playtest lab stopped.".into();
@@ -2147,6 +2167,62 @@ impl GuiApp {
         });
     }
 
+    fn start_measure(&mut self, league: bool) {
+        if self.measure_job.is_some() {
+            return;
+        }
+        if self.deck.commander.is_none() {
+            self.status = "Choose a commander first: cards are measured in your deck.".into();
+            return;
+        }
+        let (db, coll, rules, deck) = (
+            self.db.clone(),
+            self.coll.clone(),
+            self.rules.clone(),
+            self.deck.clone(),
+        );
+        let job = crate::playtest::simvalues::PoolJob::new(&deck, &db, &coll, &rules, 3000, league);
+        let total = job.size();
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (d, c) = (done.clone(), cancel.clone());
+        std::thread::spawn(move || {
+            let ms = job.run(&rules, &d, &c);
+            let _ = tx.send(ms);
+        });
+        self.measure_job = Some(MeasureJob {
+            done,
+            total,
+            cancel,
+            rx,
+            started: std::time::Instant::now(),
+        });
+    }
+
+    fn poll_measure(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.measure_job else { return };
+        match job.rx.try_recv() {
+            Ok(ms) => {
+                let n = ms.len();
+                self.db.sim_values.add(ms);
+                self.status = match self.db.sim_values.save(&self.data_dir) {
+                    Ok(()) => format!(
+                        "Measured {} cards by playtests - the builder now weighs these results most (saved to {}).",
+                        n,
+                        crate::playtest::simvalues::FILE
+                    ),
+                    Err(e) => format!("Measured {} cards but couldn't save them: {}", n, e),
+                };
+                self.measure_job = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.measure_job = None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(500))
+            }
+        }
+    }
+
     fn stop_lab(&mut self) {
         if let Some(job) = self.lab_job.take() {
             job.progress.cancel();
@@ -2182,6 +2258,7 @@ impl GuiApp {
 
     fn poll_jobs(&mut self, ctx: &egui::Context) {
         self.poll_lab(ctx);
+        self.poll_measure(ctx);
         if let Some(job) = &self.rank_job {
             match job.rx.try_recv() {
                 Ok(ranks) => {
@@ -2350,6 +2427,41 @@ impl GuiApp {
                     .clicked()
                 {
                     acts.push(Action::RunLab(crate::lab::Effort::THOROUGH));
+                }
+            }
+            ui.separator();
+            if let Some(job) = &self.measure_job {
+                let f = (job.done.load(std::sync::atomic::Ordering::Relaxed) as f32
+                    / job.total.max(1) as f32)
+                    .min(1.0);
+                let secs = job.started.elapsed().as_secs_f32();
+                let left = if f > 0.03 {
+                    format!(" · about {} left", fmt_secs(secs * (1.0 - f) / f))
+                } else {
+                    String::new()
+                };
+                ui.add(egui::ProgressBar::new(f).desired_width(300.0).text(format!(
+                    "Measuring card power {:.0}%{}",
+                    f * 100.0,
+                    left
+                )));
+                if ui.button("Stop measuring").clicked() {
+                    acts.push(Action::StopMeasure);
+                }
+            } else {
+                if ui
+                    .add_enabled(has_cmd, egui::Button::new("Measure card power"))
+                    .on_hover_text("Playtests every card in your deck and every other spell you own, each against a vanilla creature of its cost. The builder then weighs these results most.")
+                    .clicked()
+                {
+                    acts.push(Action::Measure(false));
+                }
+                if ui
+                    .add_enabled(has_cmd, egui::Button::new("... and in every league deck"))
+                    .on_hover_text("Also measures the cards of every simulated league opponent's deck: a card's power across many decks and commanders, and how consistent it is.")
+                    .clicked()
+                {
+                    acts.push(Action::Measure(true));
                 }
             }
             ui.separator();

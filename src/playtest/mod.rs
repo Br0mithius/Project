@@ -23,6 +23,7 @@ pub mod probe;
 pub mod resolve;
 #[cfg(test)]
 mod restrict_tests;
+pub mod simvalues;
 pub mod state;
 pub mod targets;
 #[cfg(test)]

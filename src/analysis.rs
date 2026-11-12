@@ -430,7 +430,105 @@ fn multiplayer_adjust(
 
 /// How good `card` would be as the next addition to `deck`. Higher is better.
 /// This is a heuristic to rank options, not gospel - always read the cards.
+/// What a noncreature mana rock adds to its score: the mana it taps for each turn, weighted
+/// by how early it comes down, plus colour fixing in a deck of three or more colours.
+fn rock_points(card: &Card, deck: &Deck, db: &CardDb) -> Option<(f32, String)> {
+    if card.is_land() || card.is_creature() {
+        return None;
+    }
+    let parsed = card.parsed();
+    let mana = parsed
+        .abilities
+        .iter()
+        .filter(|a| {
+            matches!(a.when.first(), Some(When::Activated(c))
+                if c.tap && c.mana == 0 && !c.sacrifice && !c.sacrifice_other)
+        })
+        .flat_map(|a| a.effects.iter())
+        .filter_map(|e| match e {
+            AbEffect::AddMana(n) if !n.x => Some(n.n),
+            _ => None,
+        })
+        .max()?;
+    let mv = card.mana_value();
+    let early = match mv {
+        0 | 1 => 1.0,
+        2 => 0.6,
+        3 => 0.3,
+        _ => 0.15,
+    };
+    let text = card.oracle_text.to_lowercase();
+    let any_colour = text.contains("any color") || text.contains("any one color");
+    let colours = deck
+        .commander
+        .as_ref()
+        .and_then(|c| db.get(c))
+        .map_or(1, |c| c.identity().count());
+    let fixing = if any_colour && colours >= 3 && mv <= 2 {
+        2.5
+    } else {
+        0.0
+    };
+    let pts = 5.0 * mana as f32 * early + fixing;
+    Some((
+        pts,
+        format!(
+            "mana rock: {} mana a turn for {}{}",
+            mana,
+            mv,
+            if fixing > 0.0 { ", fixes colours" } else { "" }
+        ),
+    ))
+}
+
+/// Win-rate points over a vanilla 3-drop -> the score scale: a vanilla 3-drop lands about
+/// where the heuristic puts one, and the spread matches the heuristic's (see `score_card`).
+pub const SIM_BASE: f32 = 5.6;
+pub const SIM_SCALE: f32 = 2.2;
+
+/// A card's score for the deck. When playtests have measured the card (in any decks - see
+/// `playtest::simvalues`), that measured power is the main part of the score, weighted by
+/// how sure the measurement is (more games and more decks, more weight - up to 85%); the
+/// rules-of-thumb score below fills the rest, and stands alone for unmeasured cards.
 pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32, Vec<String>) {
+    let (h, mut why) = score_card_heuristic(card, deck, db, rules);
+    if card.is_land() {
+        return (h, why);
+    }
+    let Some(p) = db.sim_values.power(&card.name) else {
+        return (h, why);
+    };
+    let sure = 1.0 / (1.0 + (p.se / 0.6).powi(2));
+    let w = 0.85 * sure;
+    let measured = SIM_BASE + SIM_SCALE * p.value;
+    why.insert(
+        0,
+        format!(
+            "playtests: {:+.1} win-rate pts over a vanilla 3-drop ({} deck{}{}, weight {:.0}%)",
+            p.value,
+            p.decks,
+            if p.decks == 1 { "" } else { "s" },
+            if p.consistent() {
+                ", consistent"
+            } else if p.decks >= 3 {
+                ", varies by deck"
+            } else {
+                ""
+            },
+            w * 100.0
+        ),
+    );
+    (w * measured + (1.0 - w) * h, why)
+}
+
+/// The rules-of-thumb score (card power, roles, deck needs, synergy) - `score_card` without
+/// the playtest measurements.
+pub fn score_card_heuristic(
+    card: &Card,
+    deck: &Deck,
+    db: &CardDb,
+    rules: &Rules,
+) -> (f32, Vec<String>) {
     let mut why = Vec::new();
     if card.is_land() {
         return (0.0, why);
@@ -526,6 +624,15 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
             why.push(format!("creature tokens ({:.0} body points)", bodies));
         }
     }
+    // A mana rock: mana every turn from the next one on, so the cheaper it is for what it
+    // makes, the more it speeds up the whole game (Sol Ring, Arcane Signet). Playtests put
+    // Sol Ring and Arcane Signet among a deck's best cards; a flat "mana" role didn't.
+    if !creature {
+        if let Some((pts, note)) = rock_points(card, deck, db) {
+            score += pts;
+            why.push(note);
+        }
+    }
     // Permanents that keep producing value (each-turn triggers, repeatable abilities) are
     // worth more in long 4-player games.
     if !creature && !matches!(card.main_type(), "Instant" | "Sorcery") {
@@ -578,7 +685,11 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     }
     // The deck plan's removal and card draw targets, like its creature count.
     let have_removal = st.roles.get(&Role::Removal).copied().unwrap_or(0) as f32;
-    if roles.contains(&Role::Removal) && have_removal < plan.removal {
+    // Only real answers fill the removal target: playtests put 1-3 damage, teamwork and
+    // conditional removal (Helicarrier Strike, Truck Toss, Cruel Alliance) near a vanilla
+    // creature, so they shouldn't crowd out the deck's best cards to reach the count.
+    let real_answer = removal.is_some_and(|r| r.points >= 2.5);
+    if roles.contains(&Role::Removal) && have_removal < plan.removal && real_answer {
         score += 1.0;
         why.push(format!(
             "deck needs removal ({:.0}/{:.0})",
@@ -843,36 +954,22 @@ fn removal_floor(
     if rm.mass || mv > 5 {
         return None;
     }
+    // Only answers to anything get a floor, at a solid creature of their own cost: the
+    // playtests (with the simulator's removal AI fixed) put damage-based, teamwork and
+    // conditional removal near a vanilla creature of the same cost, below the creatures and
+    // mana rocks a floor at "a solid 4-drop" used to push them past.
     let broad = matches!(
         rm.label,
-        "unconditional destroy"
-            | "unconditional exile"
-            | "exile until it leaves"
-            | "steals a creature"
-    ) || matches!(rm.label, "damage-based removal" | "-X/-X removal")
-        && rm.points >= 2.6;
-    let conditional = !broad
-        && matches!(
-            rm.label,
-            "conditional removal" | "damage-based removal" | "-X/-X removal"
-        )
-        && rm.points >= 1.8;
-    if !broad && !conditional {
+        "unconditional destroy" | "unconditional exile" | "steals a creature"
+    );
+    if !broad {
         return None;
     }
-    let base = solid_creature_score(card, mv, deck, db, rules).max(solid_creature_score(
-        card,
-        mv.max(4),
-        deck,
-        db,
-        rules,
-    ));
+    // (At a 3-drop's level whatever it costs: the same answer for more mana never
+    // outranks the cheaper one, and the curve terms tell cheap from slow.)
+    let base = solid_creature_score(card, 3, deck, db, rules);
     let instant = card.type_line.contains("Instant") || card.text_lower().contains("flash");
-    Some(if broad {
-        (base + if instant { 0.5 } else { 0.0 }, "efficient removal")
-    } else {
-        (base - 1.5, "conditional removal")
-    })
+    Some((base + if instant { 0.5 } else { 0.0 }, "efficient removal"))
 }
 
 /// Is `word` mentioned in `text` as something the commander *cares about* (e.g. "Villain
@@ -2363,11 +2460,11 @@ mod tests {
             near.sort_by(|a, b| a.partial_cmp(b).unwrap());
             near[near.len() / 2]
         };
-        let solid = solid_at(3).max(solid_at(4));
+        let solid = solid_at(3);
         let (murder, why) = score("Murder");
         assert!(
             murder >= solid + 0.5 - 1e-3,
-            "instant unconditional removal at least a solid 4-drop and a half ({} vs {}): {:?}",
+            "instant unconditional removal at least a solid 3-drop and a half ({} vs {}): {:?}",
             murder,
             solid,
             why
@@ -2382,8 +2479,13 @@ mod tests {
             small,
             murder
         );
-        // Small Kill costs two: its floor is a solid 2- or 4-drop's, less 1.5.
-        assert!(small >= solid_at(2).max(solid_at(4)) - 1.5 - 1e-3);
+        // Conditional removal gets no floor: playtests put it near a vanilla creature.
+        let (_, small_why) = score("Small Kill");
+        assert!(
+            !small_why.iter().any(|w| w.contains("rated at least")),
+            "{:?}",
+            small_why
+        );
         let (bounce, why) = score("Unsummon");
         assert!(
             !why.iter().any(|w| w.contains("rated at least")),

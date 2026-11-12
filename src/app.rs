@@ -84,6 +84,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Auto-build a complete legal deck (uses current commander if none given)",
     ),
     (
+        "measure",
+        "[games] [league] | show [n]",
+        "Measure every card's power by playtests (your deck, your other spells, and with `league` every league deck); the builder then weighs it most",
+    ),
+    (
         "lab",
         "[quick|thorough] | show | apply",
         "Playtest lab: measure each card, additions and colour sets by playtests; `apply` makes the best combination",
@@ -320,6 +325,7 @@ impl App {
             "cut" | "weak" => self.cut(rest),
             "auto" | "build" => self.auto(rest),
             "lab" | "playtest" => self.lab(rest),
+            "measure" => self.measure(rest),
             "lands" => self.lands(),
             "fill" => self.fill(),
             "hand" => self.hand(),
@@ -1592,6 +1598,90 @@ impl App {
                  `lab thorough` (about five)."
             )
         );
+    }
+
+    fn measure(&mut self, arg: &str) {
+        let words: Vec<&str> = arg.split_whitespace().collect();
+        if words.first() == Some(&"show") {
+            let n: usize = words.get(1).and_then(|w| w.parse().ok()).unwrap_or(40);
+            let all = self.db.sim_values.all();
+            if all.is_empty() {
+                println!("No playtest measurements yet: run `measure`.");
+                return;
+            }
+            println!("Card power by playtests (win-rate points over a vanilla 3-drop):");
+            for (name, p) in all.iter().take(n) {
+                println!(
+                    "  {:+5.1} ± {:.1}  {:2} deck{}{}  {}",
+                    p.value,
+                    p.se,
+                    p.decks,
+                    if p.decks == 1 { " " } else { "s" },
+                    if p.consistent() {
+                        "  consistent"
+                    } else {
+                        "            "
+                    },
+                    name
+                );
+            }
+            if all.len() > n {
+                println!(
+                    "  ... {} more (`measure show {}`)",
+                    all.len() - n,
+                    all.len()
+                );
+            }
+            return;
+        }
+        if self.deck.commander.is_none() {
+            println!(
+                "Choose a commander or auto-build first: the cards are measured in your deck."
+            );
+            return;
+        }
+        let games: u32 = words
+            .iter()
+            .find_map(|w| w.parse().ok())
+            .unwrap_or(3000)
+            .clamp(200, 50_000);
+        let league = words.contains(&"league");
+        let job = crate::playtest::simvalues::PoolJob::new(
+            &self.deck,
+            &self.db,
+            &self.coll,
+            &self.rules,
+            games,
+            league,
+        );
+        let total = job.size();
+        println!(
+            "Measuring {} deck cards and {} other spells you own{} on {} games each ({} games in all)...",
+            job.deck.library_len(),
+            job.extra.len(),
+            if league {
+                ", plus every league deck"
+            } else {
+                ""
+            },
+            games,
+            total
+        );
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let t = std::time::Instant::now();
+        let ms = job.run(&self.rules, &done, &cancel);
+        let n = ms.len();
+        self.db.sim_values.add(ms);
+        match self.db.sim_values.save(&self.data_dir) {
+            Ok(()) => println!(
+                "Measured {} cards in {:.0}s and saved them to {}. `measure show` lists them; the builder now weighs them most.",
+                n,
+                t.elapsed().as_secs_f32(),
+                crate::playtest::simvalues::FILE
+            ),
+            Err(e) => println!("Measured {} cards but couldn't save them: {}", n, e),
+        }
     }
 
     fn lab(&mut self, arg: &str) {
