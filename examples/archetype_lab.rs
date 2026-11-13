@@ -156,9 +156,9 @@ fn main() {
                     package: 16,
                     ..Targets::PLAIN
                 };
-                let ab = archetypes::build(arch, cmd, &db, &coll, &rules, &pkg);
+                let ab = archetypes::build(arch, cmd, &db, &coll, &rules, &pkg).0;
                 let rb =
-                    archetypes::build(arch, cmd, &db, &coll, &rules, &archetypes::targets(arch));
+                    archetypes::build(arch, cmd, &db, &coll, &rules, &archetypes::targets(arch)).0;
                 auto.save(&out.join(format!("{}.auto.txt", s))).unwrap();
                 ab.save(&out.join(format!("{}.arch.txt", s))).unwrap();
                 rb.save(&out.join(format!("{}.rules.txt", s))).unwrap();
@@ -184,7 +184,7 @@ fn main() {
                 };
                 let sub = out.join(arch_slug(arch));
                 for (label, t) in variants() {
-                    let d = archetypes::build(arch, cmd, &db, &coll, &rules, &t);
+                    let d = archetypes::build(arch, cmd, &db, &coll, &rules, &t).0;
                     d.save(&sub.join(format!("{}.txt", label))).unwrap();
                     println!("{} {} {}", sub.display(), label, describe(arch, &d, &db));
                 }

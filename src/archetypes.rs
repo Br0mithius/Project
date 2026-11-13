@@ -519,14 +519,70 @@ impl Targets {
     };
 }
 
-/// The general targets every archetype deck starts from (measured: see `TARGETS`).
-pub const DEFAULT_TARGETS: Targets = Targets {
-    package: 16,
-    ..Targets::PLAIN
-};
+/// The general rules every archetype deck starts from. Paired sweeps (25 archetypes, one
+/// commander each, built from every league card, 4000 games per variant against the
+/// simulated league) measured, against a 16-card archetype package on the builder's own
+/// plan (26 lands, no minimums):
+/// - lands: 24 -2.1 points, 25 -1.0, 27 +0.7, 28 +1.4 (better in 16 archetypes, worse in
+///   3): these decks average 4.2-5.3 mana value, so 27 is the safe general value;
+/// - at least 24 creatures: +3.2 (better in 11, never worse): creature-light builds lose;
+/// - at least 11 card draw: +0.9 (better in 11, worse in 1); 8 draw: no change;
+/// - the archetype package: none -3.2 (worse in 13, better in 6), 24 cards +1.1 (mixed);
+/// - minimum removal (6/9: -0.6/-0.5), counterspells (4: -1.7) and a cap on 6+ drops (2:
+///   -3.6, worse in 16) hurt: the builder's own removal pick and the big threats are better.
+/// - minimum ramp (7/10: +0.3/+0.2) is mixed: per archetype only.
+pub const DEFAULT_TARGETS: Targets = rules(27, 16, 24, 11, 0, 0, 0);
 
-/// Per-archetype targets that playtests found better than `DEFAULT_TARGETS`.
-pub const TARGETS: &[(&str, Targets)] = &[];
+const fn rules(
+    lands: u32,
+    package: u32,
+    creatures: u32,
+    draw: u32,
+    ramp: u32,
+    removal: u32,
+    counters: u32,
+) -> Targets {
+    Targets {
+        lands: Some(lands),
+        package,
+        removal,
+        draw,
+        ramp,
+        creatures,
+        counters,
+        topend: None,
+    }
+}
+
+/// Per-archetype targets: the general rules with the sweep's significant per-archetype
+/// differences (more than 2 standard errors and 1 point better than the general value).
+/// `autobuild` follows only archetypes listed here. Each was retested against the old
+/// auto-build (3 seeds x 12000 games against the simulated league, the same with focus 2.5,
+/// and against a fixed real pod), and kept only when it helped in the league and with focus
+/// and didn't lose significantly against the pod. Dropped, so they keep the plain
+/// auto-build: Reactive control, Aggro / go-wide, Ramp into big threats (no gain), Tokens,
+/// +1/+1 counters, Elves (worse), Treasure, Landfall, Teamwork, Dwarves (better in the
+/// league, worse against the pod).
+pub const TARGETS: &[(&str, Targets)] = &[
+    ("Aristocrats", rules(27, 24, 24, 11, 0, 0, 0)),
+    ("Artifacts", rules(27, 0, 24, 11, 0, 0, 0)),
+    ("Card draw / second card", rules(27, 24, 24, 11, 10, 0, 4)),
+    ("Birds and fliers", rules(26, 24, 24, 11, 0, 0, 0)),
+    ("Adventure", rules(26, 16, 24, 11, 0, 0, 0)),
+    ("Goblins", rules(26, 16, 24, 11, 0, 0, 0)),
+    ("Storied", rules(27, 24, 24, 11, 10, 0, 0)),
+    ("Wolves", rules(27, 24, 24, 11, 10, 0, 0)),
+    ("Lifegain", rules(27, 16, 24, 11, 10, 0, 0)),
+    ("Midrange value", rules(27, 16, 24, 11, 10, 0, 0)),
+    ("Heroes", rules(27, 24, 24, 11, 10, 0, 0)),
+    ("Power-up", rules(28, 16, 24, 11, 0, 0, 0)),
+    ("Spellslinger", rules(27, 16, 24, 11, 0, 0, 0)),
+    ("Stax-lite control", rules(27, 24, 24, 11, 10, 0, 0)),
+    ("Voltron", rules(27, 16, 24, 11, 0, 0, 0)),
+    ("Dinosaurs", DEFAULT_TARGETS),
+    ("Plans", DEFAULT_TARGETS),
+    ("Villains", DEFAULT_TARGETS),
+];
 
 /// The targets to build `arch` with.
 pub fn targets(arch: &SetArchetype) -> Targets {
@@ -547,7 +603,7 @@ pub fn build(
     coll: &Collection,
     rules: &crate::db::Rules,
     t: &Targets,
-) -> Deck {
+) -> (Deck, u32) {
     let scale = rules.deck_size as f32 / 60.0;
     let n = |x: u32| (x as f32 * scale).round() as u32;
     let mut start = Deck::new(&format!("{} ({})", arch.name, cmd.name));
@@ -586,7 +642,7 @@ pub fn build(
             .map(|(_, k)| *k)
             .sum()
     };
-    let fill = |lands: u32| -> Deck {
+    let fill = |lands: u32| -> (Deck, u32) {
         let mut deck = start.clone();
         let slots = main.saturating_sub(lands);
         let spells = |d: &Deck| d.main_count() - analysis::land_count(d, db);
@@ -652,7 +708,8 @@ pub fn build(
                 None => break,
             }
         }
-        deck
+        let short = slots.saturating_sub(spells(&deck));
+        (deck, short)
     };
     let deck = match t.lands {
         Some(l) => fill(n(l)),
@@ -661,7 +718,7 @@ pub fn build(
             let mut lands = analysis::recommended_lands(3.0, rules);
             let mut deck = fill(lands);
             for _ in 0..2 {
-                let new = analysis::recommended_lands(analysis::stats(&deck, db).avg_mv, rules);
+                let new = analysis::recommended_lands(analysis::stats(&deck.0, db).avg_mv, rules);
                 if new == lands {
                     break;
                 }
@@ -671,9 +728,34 @@ pub fn build(
             deck
         }
     };
-    let mut deck = deck;
+    let (mut deck, short) = deck;
     analysis::fill_basics(&mut deck, db, rules);
-    deck
+    (deck, short)
+}
+
+/// Auto-build that follows the commander's archetype: when `cmd` leads an archetype with
+/// playtest-backed targets (`TARGETS`) and no colours or Prismatic Piper are forced, the
+/// deck is built with `build` and those targets; otherwise it's `analysis::autobuild`.
+/// Returns the deck, the spell slots the pool couldn't fill, and the archetype followed.
+pub fn autobuild(
+    cmd: &Card,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &crate::db::Rules,
+    colors: Option<ColorSet>,
+    piper: Option<char>,
+) -> (Deck, u32, Option<&'static SetArchetype>) {
+    if colors.is_none() && piper.is_none() {
+        if let Some(arch) = for_commander(&cmd.name) {
+            if let Some((_, t)) = TARGETS.iter().find(|(n, _)| *n == arch.name) {
+                let (mut deck, short) = build(arch, cmd, db, coll, rules, t);
+                deck.name = format!("auto-{}", cmd.name);
+                return (deck, short, Some(arch));
+            }
+        }
+    }
+    let (deck, short) = analysis::autobuild(cmd, db, coll, rules, colors, piper);
+    (deck, short, None)
 }
 
 use Theme::{Mechanic as M, Tribe as T};
@@ -1156,6 +1238,12 @@ mod tests {
         let all = all(&db);
         let needs: Vec<&str> = analysis::mechanic_needs().collect();
         assert!(ARCHETYPES.len() >= 28);
+        for (n, t) in TARGETS {
+            let a = ARCHETYPES.iter().find(|a| a.name == *n).expect(n);
+            assert!(!a.sparse, "{}", n);
+            assert!(t.lands.is_some_and(|l| (24..=30).contains(&l)), "{}", n);
+            assert!(t.package + t.creatures <= 60, "{}", n);
+        }
         for a in ARCHETYPES {
             for th in a.themes {
                 if let Theme::Mechanic(n) = th {
@@ -1254,6 +1342,9 @@ mod tests {
         );
         assert_eq!(for_commander("Thorin Oakenshield").unwrap().name, "Dwarves");
         assert!(for_commander("Elektra, Daughter of the Hand").is_none());
+        assert_eq!(targets(arch("Elves")), DEFAULT_TARGETS);
+        assert_eq!(targets(arch("Artifacts")).package, 0);
+        assert_eq!(targets(arch("Sneak")), DEFAULT_TARGETS);
     }
 
     /// A deck built around a commander reads as that commander's archetype.
@@ -1276,5 +1367,32 @@ mod tests {
         let best = best_for_deck(&deck, &db).unwrap();
         assert_eq!(best.arch.name, "Elves");
         assert!(best.closeness > 0.8, "{}", best.closeness);
+    }
+
+    /// The archetype build follows its targets: legal size, the land count, the creature
+    /// minimum, and the commander's archetype is detected by `autobuild`.
+    #[test]
+    fn build_follows_targets() {
+        let db = db();
+        let all = all(&db);
+        let mut rules = crate::db::Rules::default();
+        let _ = crate::league::apply_session(&mut rules, 6);
+        let cmd = db.get("Bifur, Melodic Rider").unwrap();
+        let (deck, short, a) = autobuild(cmd, &db, &all, &rules, None, None);
+        assert_eq!(a.unwrap().name, "Storied");
+        assert_eq!(short, 0);
+        assert_eq!(deck.total_count(&rules), 60);
+        let st = analysis::stats(&deck, &db);
+        let t = targets(arch("Storied"));
+        assert_eq!(st.lands, t.lands.unwrap());
+        assert!(st.creatures >= t.creatures, "{} creatures", st.creatures);
+        let r = deck_report(arch("Storied"), &deck, &db).unwrap();
+        assert!(r.cards.len() >= t.package as usize);
+        // Forced colours fall back to the plain auto-build.
+        let (_, _, none) = autobuild(cmd, &db, &all, &rules, Some(cmd.identity()), None);
+        assert!(none.is_none());
+        // Archetypes whose targets didn't hold up keep the plain auto-build.
+        let elf = db.get("Thranduil, Sindarin Liege").unwrap();
+        assert!(autobuild(elf, &db, &all, &rules, None, None).2.is_none());
     }
 }

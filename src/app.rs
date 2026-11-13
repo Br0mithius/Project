@@ -1742,13 +1742,25 @@ impl App {
             );
         }
         self.snapshot();
-        let (mut deck, shortfall) =
-            analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules, Some(plays), None);
+        let (mut deck, shortfall, arch) = crate::archetypes::autobuild(
+            &cmd,
+            &self.db,
+            &self.coll,
+            &self.rules,
+            colors.map(|_| plays),
+            None,
+        );
         deck.name = self.deck.name.clone();
         self.deck = deck;
         println!(
-            "Built a deck around {}. `undo` to go back.\n",
-            self.style.name(&cmd)
+            "Built a deck around {}{}. `undo` to go back.\n",
+            self.style.name(&cmd),
+            arch.map(|a| format!(
+                " following the {} archetype's targets (`archetypes {}`)",
+                a.name,
+                a.name.to_lowercase()
+            ))
+            .unwrap_or_default()
         );
         self.view();
         println!();

@@ -645,8 +645,14 @@ impl GuiApp {
                 }
                 Action::AutoBuild(n, piper) => {
                     if let Some(c) = self.db.get(&n).cloned() {
-                        let (mut d, short) =
-                            analysis::autobuild(&c, &self.db, &self.coll, &self.rules, None, piper);
+                        let (mut d, short, _) = crate::archetypes::autobuild(
+                            &c,
+                            &self.db,
+                            &self.coll,
+                            &self.rules,
+                            None,
+                            piper,
+                        );
                         d.name = self.deck.name.clone();
                         self.deck = d;
                         self.tab = Tab::Build;
