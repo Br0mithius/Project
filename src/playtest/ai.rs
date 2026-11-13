@@ -1800,6 +1800,18 @@ fn effect_now_with(
             theirs - mine
         }
         Effect::CounterSpell | Effect::Fog => 0.0,
+        // "Each player may discard their hand and draw seven cards" (Variable Chaser's Arc
+        // of Fortune): a hand refilled to N for us, and for every opponent short of N.
+        Effect::Draw { amount, .. } if text.contains("each player may discard their hand") => {
+            let n = amount.n.max(1);
+            let refill = |q: usize| (n - g.players[q].hand.len() as i32).max(0);
+            let theirs: f32 = g
+                .opponents(p)
+                .into_iter()
+                .map(|o| 2.5 * refill(o) as f32 * 0.4 * weight(g, p, o))
+                .sum();
+            draw_value(g, p, refill(p)) - theirs
+        }
         Effect::Draw { amount, you: true } => draw_value(g, p, amount.n.max(1)),
         Effect::Draw { amount, .. } => {
             2.5 * amount.n.max(1) as f32

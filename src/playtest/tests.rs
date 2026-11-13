@@ -6169,3 +6169,34 @@ fn equipment_goes_to_the_creature_that_scales_with_it() {
     let t = ai::equip_target(&g, 0, pick2).unwrap();
     assert_eq!(g.perms[t].id, ws, "the second piece too");
 }
+
+#[test]
+fn symmetric_wheel_counts_the_opponents_refill() {
+    // Variable Chaser's prepared Arc of Fortune ("each player may discard their hand and
+    // draw seven cards"): with five cards in our hand and three opponents on empty hands it
+    // refills them by 21 cards and us by 2 - not cast (it was valued as our drawing seven).
+    let db = db();
+    let mut d = prep_db(&db, &["Variable Chaser"]);
+    d.cards.push(compile(&Card::basic_land("Island", 'U')));
+    let mut g = Game::new(&[&d, &d, &d, &d], &Rules::default(), Rng::new(7));
+    for p in g.players.iter_mut() {
+        p.hand.clear();
+        p.library = vec![1; 30];
+        p.command.clear();
+    }
+    g.round = 5;
+    lands(&mut g, 0, 3, 'U');
+    let id = put(&mut g, 0, 0);
+    assert!(perm(&g, id).prepared);
+    g.active = 0;
+    g.players[0].hand = vec![1; 5];
+    ai::main_phase(&mut g, 0, true);
+    assert!(perm(&g, id).prepared, "the wheel isn't cast");
+    // Our hand empty, theirs full: worth it.
+    g.players[0].hand.clear();
+    for o in 1..4 {
+        g.players[o].hand = vec![1; 7];
+    }
+    ai::main_phase(&mut g, 0, true);
+    assert!(!perm(&g, id).prepared, "the wheel is cast");
+}
