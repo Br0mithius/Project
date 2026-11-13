@@ -5344,7 +5344,7 @@ ABILITIES:
   Static: "~ enters with a +1/+1 counter on it."
       (static: shown under "On entering")
   Dies: "when ~ dies, put its counters on up to one target creature you control."
-      -> (nothing changes)
+      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
 
 Grappling Kraken | {4}{U}{U} | Creature — Kraken | 5/6
 TEXT: Landfall — Whenever a land you control enters, tap target creature an opponent controls and put a stun counter on it. (If a permanent with a stun counter would become untapped, remove one from it instead.)
@@ -13408,6 +13408,7 @@ ABILITIES:
 
 Vizier of the Menagerie | {3}{G} | Creature — Snake Cleric | 3/4
 TEXT: You may look at the top card of your library any time. / You may cast creature spells from the top of your library. / You may spend mana as though it were mana of any type to cast creature spells.
+SIM: rules: creature spells cast from the top of your library; mana of any type for your creature spells
 On entering:
       itself: 3/4 
       -> (nothing changes)

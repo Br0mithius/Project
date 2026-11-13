@@ -5980,3 +5980,53 @@ fn bards_company_has_flash_with_a_human() {
     put(&mut g, 0, 2);
     assert!(ai::has_flash(&g, 0, bard), "with a Human it has flash");
 }
+
+/// Every special rule (`Effect::Rule`) the card reader can name is accounted for: played
+/// when it resolves (an arm of `apply_rule`), played elsewhere (combat, casting, compiled
+/// statics), or listed as not played with a reason. A new label fails this test until
+/// someone decides which.
+#[test]
+fn every_special_rule_label_is_accounted_for() {
+    let src = include_str!("resolve.rs");
+    let body = src
+        .split("fn apply_rule(")
+        .nth(1)
+        .expect("apply_rule in resolve.rs");
+    for label in resolve::RULES_MODELLED {
+        assert!(
+            body.contains(&format!("\"{}\"", label)),
+            "\"{}\" is in RULES_MODELLED but apply_rule has no arm for it",
+            label
+        );
+    }
+    let accounted = |l: &str| {
+        resolve::rule_modelled(l)
+            || l.starts_with("its controller gets a ")
+            || resolve::RULES_ELSEWHERE.iter().any(|r| r.0 == l)
+            || resolve::RULES_NOT_PLAYED.iter().any(|r| r.0 == l)
+    };
+    for (_, label) in crate::abilities::RULES {
+        assert!(
+            accounted(label),
+            "special rule \"{}\" unaccounted for",
+            label
+        );
+    }
+    let db = db();
+    for card in &db.cards {
+        let c = compile(card);
+        let back = c.back.iter().flat_map(|b| b.abilities.iter());
+        for a in c.abilities.iter().chain(back) {
+            for e in &a.effects {
+                if let crate::abilities::Effect::Rule(l) = e {
+                    assert!(
+                        accounted(l),
+                        "{}: special rule \"{}\" unaccounted for",
+                        card.name,
+                        l
+                    );
+                }
+            }
+        }
+    }
+}

@@ -296,7 +296,9 @@ fn write_tsv(db: &CardDb, path: &str, groups: Option<&str>) {
             let compiled = (a.text.contains("enters tapped")
                 && (sim.enters_tapped || sim.enters_tapped_unless.is_some()))
                 || (a.text.contains("can't block") && sim.kw & compile::CANT_BLOCK != 0)
-                || (a.text.contains("can't be blocked") && sim.kw & compile::UNBLOCKABLE != 0);
+                || (a.text.contains("can't be blocked") && sim.kw & compile::UNBLOCKABLE != 0)
+                // (A spell face's additional cost: compiled into its cast cost.)
+                || a.text.starts_with("as an additional cost to cast ~");
             if a.effects.is_empty() && compiled {
                 notes.push("compiled into the card's static fields".into());
             } else if a.effects.is_empty() && a.text.starts_with("as ~ enters, choose") {

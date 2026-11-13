@@ -1985,7 +1985,7 @@ fn lasting_lock(s: &str) -> bool {
 }
 
 /// Special rules recognised by their wording: (phrase, plain-language label).
-const RULES: &[(&str, &str)] = &[
+pub const RULES: &[(&str, &str)] = &[
     (
         "is the chosen type in addition",
         "becomes the chosen creature type",

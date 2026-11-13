@@ -2793,16 +2793,7 @@ pub fn effect_handling(e: &crate::abilities::Effect) -> (&'static str, &'static 
             "exact",
             "the best instant/sorcery in your graveyard may be cast again (then exiled)",
         ),
-        E::Rule(label) => {
-            if resolve::rule_modelled(label) {
-                ("approximated", "special rule acted on")
-            } else {
-                (
-                    "no effect",
-                    "special rule named, no effect in a simplified game",
-                )
-            }
-        }
+        E::Rule(label) => resolve::rule_handling(label),
     }
 }
 

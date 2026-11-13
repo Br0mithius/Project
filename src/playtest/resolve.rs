@@ -105,6 +105,157 @@ pub fn rule_modelled(label: &str) -> bool {
     RULES_MODELLED.contains(&label) || label.starts_with("you lose ") && label.ends_with(" life")
 }
 
+/// `Effect::Rule` labels the resolver plays in full (the rest of `RULES_MODELLED` is played
+/// in a simplified way).
+const RULES_EXACT: &[&str] = &[
+    "you lose life equal to it",
+    "its controller gains life equal to its power",
+    "discards your hand",
+    "each player discards their hand",
+    "you lose the game",
+    "sacrifices itself",
+    "taps itself",
+    "exiles itself",
+    "extra land drop",
+    "extra turn",
+    "can't block this turn",
+    "gives poison counters",
+    "stops all life gain",
+    "returns itself to hand",
+    "damage to you",
+    "mills opponents",
+    "reshuffles the graveyard",
+    "transforms",
+    "shuffles itself into its library",
+    "everyone draws an extra card",
+];
+
+/// Labels the parser can name that are played by other parts of the simulator (combat,
+/// casting, compiled statics) rather than when the ability resolves: (label, exact?, how).
+pub const RULES_ELSEWHERE: &[(&str, bool, &str)] = &[
+    (
+        "flyers can't attack you or block your creatures",
+        true,
+        "combat: flyers can't attack its controller or block their creatures",
+    ),
+    (
+        "hard to block",
+        false,
+        "combat: can't be blocked by a creature type, by power N or less/greater, by tokens, by more than one creature",
+    ),
+    (
+        "names a card",
+        false,
+        "names an opponent's card on entering; its activated abilities stop",
+    ),
+    (
+        "shuts off a named card's abilities",
+        false,
+        "names an opponent's card on entering; its activated abilities stop",
+    ),
+    (
+        "looks at an opponent's hand",
+        false,
+        "part of naming a card (Sorcerous Spyglass)",
+    ),
+    (
+        "harness (turns on its infinity ability)",
+        true,
+        "activated by the AI; the ∞ ability works once harnessed",
+    ),
+    (
+        "grants an ability",
+        false,
+        "a quoted trigger a permanent gains becomes its own; \"base power equal to\" grants are played; quoted loyalty / activated abilities given to other permanents are not",
+    ),
+    (
+        "casting restriction",
+        true,
+        "the card can't be cast until its condition holds",
+    ),
+    (
+        "becomes the chosen creature type",
+        false,
+        "\"of the chosen type\" lords pump the type most of your creatures share; the card itself keeps its types",
+    ),
+    (
+        "mana of any type for creatures",
+        true,
+        "creature spells' coloured costs are paid with any mana",
+    ),
+    (
+        "alternative casting cost",
+        false,
+        "removing counters to cast from the graveyard: counters are counted, the cast is rare",
+    ),
+];
+
+/// Labels the parser can name that nothing in the simulator plays, and why that's fine.
+pub const RULES_NOT_PLAYED: &[(&str, &str)] = &[
+    (
+        "copies abilities from the graveyard",
+        "Thranduil, the Elvenking only: Elf activated abilities from the graveyard",
+    ),
+    (
+        "loyalty abilities at instant speed",
+        "Jace's Machinations only: timing of Jace abilities",
+    ),
+    (
+        "enters if an opponent makes you discard it",
+        "Wilt-Leaf Liege only: opponents' discard rarely hits it",
+    ),
+    (
+        "gives an opponent a token",
+        "An Offer You Can't Refuse: the countered spell's controller gets two Treasures",
+    ),
+    (
+        "prevents combat damage to or by one creature",
+        "Fog Bank, Fleeting Flight: one creature's combat damage prevented",
+    ),
+    (
+        "must be blocked",
+        "\"must be blocked this turn if able\" after a team pump: the pump is played, the forced blocks aren't",
+    ),
+    (
+        "protects planeswalkers",
+        "Tomik: only one creature can attack its planeswalkers",
+    ),
+    (
+        "gets an emblem",
+        "an emblem's quoted ability (see \"you get an emblem\")",
+    ),
+];
+
+/// How the simulator handles an `Effect::Rule` label: ("exact" / "approximated" /
+/// "no effect", note).
+pub fn rule_handling(label: &str) -> (&'static str, &'static str) {
+    if let Some(&(_, exact, how)) = RULES_ELSEWHERE.iter().find(|r| r.0 == label) {
+        return (if exact { "exact" } else { "approximated" }, how);
+    }
+    if label.starts_with("its controller gets a ") && label.ends_with(" token") {
+        return (
+            "exact",
+            "the destroyed permanent's controller gets the token",
+        );
+    }
+    if label.starts_with("you lose ") && label.ends_with(" life") {
+        return ("exact", "you lose that much life");
+    }
+    if RULES_EXACT.contains(&label) {
+        return ("exact", "special rule played in full");
+    }
+    if rule_modelled(label) {
+        return ("approximated", "special rule acted on in a simplified way");
+    }
+    match RULES_NOT_PLAYED.iter().find(|r| r.0 == label) {
+        Some(&(_, why)) => ("no effect", why),
+        None => (
+            "no effect",
+            "special rule named, nothing in the simulator plays it",
+        ),
+    }
+}
+
 impl<'a> Game<'a> {
     pub fn src_idx(&self, ctx: &Ctx) -> Option<usize> {
         ctx.src.and_then(|id| self.idx(id))
@@ -5473,6 +5624,20 @@ impl<'a> Game<'a> {
                     if let Some(i) = self.idx(id) {
                         self.perms[i].temp_p -= n;
                     }
+                }
+            }
+            // "When this creature dies, put its counters on up to one target creature you
+            // control" (Graft Surgeon): onto your biggest creature.
+            "moves its counters" => {
+                let n = ctx.snap.as_ref().map_or(0, |s| s.counters.max(0) as i32);
+                let best = (0..self.perms.len())
+                    .filter(|&i| {
+                        let x = &self.perms[i];
+                        x.ctrl as usize == me && x.is_creature() && Some(x.id) != ctx.src
+                    })
+                    .max_by_key(|&i| self.perms[i].p);
+                if let (true, Some(i)) = (n > 0, best) {
+                    self.add_counters(i, n);
                 }
             }
             "heals himself" => {
