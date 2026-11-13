@@ -6030,3 +6030,25 @@ fn every_special_rule_label_is_accounted_for() {
         }
     }
 }
+
+#[test]
+fn paid_enter_trigger_in_hand_does_not_recurse_in_combat() {
+    // Lich's Relic ("When this Equipment enters, you may pay {2}") in hand during our own
+    // combat: valuing the rest of the turn values the Relic, whose paid trigger priced its
+    // {2} against the rest of the turn again - without end (a stack overflow in real games
+    // when Grim Reaper's attack trigger asked what its {3}{B} costs).
+    let db = db();
+    let mut d = prep_db(&db, &["Lich's Relic", "Grim Reaper, Lethal Legionnaire"]);
+    d.cards.push(compile(&Card::basic_land("Swamp", 'B')));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 7, 'B');
+    put(&mut g, 1, 1); // something for the Relic to destroy
+    g.players[0].hand.push(0);
+    g.active = 0;
+    g.in_combat = true;
+    let loss = ai::post_combat_loss(&g, 0, 4);
+    assert!(loss.is_finite() && loss >= 0.0);
+    assert!(!g.ext.planning_rest.get(), "the guard is released");
+    // The Relic is still what the rest of the turn would cast: spending all 7 costs it.
+    assert!(ai::post_combat_loss(&g, 0, 7) > 0.0);
+}

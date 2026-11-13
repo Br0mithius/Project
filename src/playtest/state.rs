@@ -481,6 +481,9 @@ pub struct GameExtra {
     pub ward_extra: std::cell::Cell<u32>,
     /// The X the AI is valuing an X spell at (`ai::spell_value`); None: the card's estimate.
     pub value_x: std::cell::Cell<Option<i32>>,
+    /// `ai::post_combat_loss` is planning the rest of the turn: the spells it values don't
+    /// price their own mana against that plan again (it would recurse without end).
+    pub planning_rest: std::cell::Cell<bool>,
     /// Permanents exiled if they die this turn ("if that creature would die this turn, exile
     /// it instead"): their `Perm::finality` ends with the turn.
     pub finality_this_turn: Vec<u32>,

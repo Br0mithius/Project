@@ -3671,13 +3671,21 @@ pub fn post_combat_loss(g: &Game, p: usize, k: u32) -> f32 {
     if k > avail {
         return 1000.0;
     }
+    // Already valuing the rest of the turn (a spell in that plan whose paid enter trigger
+    // would price its mana against the same plan): the flat price only.
+    if g.ext.planning_rest.replace(true) {
+        return 0.0;
+    }
     let opts = options(g, p, true);
     let worth = |b: u32| plan_payable(g, p, &opts, b, Vec::new()).map_or(0.0, |x| x.1);
     let full = worth(avail);
-    if full <= 0.0 {
-        return 0.0;
-    }
-    (full - worth(avail - k)).max(0.0)
+    let loss = if full <= 0.0 {
+        0.0
+    } else {
+        (full - worth(avail - k)).max(0.0)
+    };
+    g.ext.planning_rest.set(false);
+    loss
 }
 
 /// How many of these optional paid modes (their values, best first; `n` mana each) to pay
