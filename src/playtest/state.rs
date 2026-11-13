@@ -2335,6 +2335,14 @@ impl<'a> Game<'a> {
             }
             _ => (T_ARTIFACT, Vec::new(), 0, 0, 0, 0),
         };
+        // "This creature enters prepared" (Semester Foreseer): its spell copy is castable.
+        let prepared = card.is_some_and(|r| {
+            self.card(r).abilities.iter().any(|a| {
+                a.trig == Trig::Static
+                    && a.effects.contains(&Effect::Prepared)
+                    && a.text.contains("enters prepared")
+            })
+        });
         let mut perm = Perm {
             id,
             owner: owner as u8,
@@ -2369,7 +2377,7 @@ impl<'a> Game<'a> {
             locked: false,
             lock_effect: false,
             crewed: false,
-            prepared: false,
+            prepared,
             loyalty_used: false,
             threaten_from: None,
             holding: Vec::new(),

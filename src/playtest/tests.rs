@@ -6121,3 +6121,16 @@ fn ai_casts_an_attack_trigger_creature_before_combat() {
         "Ingris cast before combat"
     );
 }
+
+#[test]
+fn enters_prepared_creature_is_prepared() {
+    // "This creature enters prepared." (Semester Foreseer, Prudent Fateseer, Pyre Rhymer):
+    // its spell copy can be cast once it's on the battlefield.
+    let db = db();
+    let d = prep_db(&db, &["Semester Foreseer", "Woodwork Prodigy"]);
+    let mut g = game(&[&d, &d]);
+    let id = put(&mut g, 0, 0);
+    assert!(perm(&g, id).prepared, "enters prepared");
+    let other = put(&mut g, 0, 1);
+    assert!(!perm(&g, other).prepared, "only at its upkeep");
+}
