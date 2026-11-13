@@ -1425,6 +1425,14 @@ pub fn has_flash(g: &Game, p: usize, c: &SimCard) -> bool {
     if c.kw & FLASH != 0 {
         return true;
     }
+    // "You may cast ~ as though it had flash if you control a Human" (Bard's Company).
+    if c.abilities.iter().any(|a| {
+        a.trig == Trig::Static
+            && a.text.contains("cast ~ as though it had flash if")
+            && g.cond_holds(&a.cond, p, None)
+    }) {
+        return true;
+    }
     let r = g.rules[p % 8];
     r & R_FLASH_SPELLS != 0
         || r & R_FLASH_AFTER_OPPONENT != 0 && g.cond_holds(&Cond::OpponentCastSpell, p, None)
@@ -3075,6 +3083,12 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
     for (k, &idx) in pl.adventure.iter().enumerate() {
         push_cast(&mut out, Src::Adventure(k), idx, false, false);
     }
+    // Vizier of the Menagerie: a creature on top of the library.
+    if g.rules[p % 8] & R_CREATURES_FROM_TOP != 0 {
+        if let Some(&idx) = pl.library.last() {
+            push_cast(&mut out, Src::Top, idx, false, false);
+        }
+    }
     // Cards in exile we may play (Thor's card, impulse draws, stashed cards).
     for (k, x) in pl.playable.iter().enumerate() {
         let (list, idx) = (x.card.0 as usize, x.card.1);
@@ -3477,6 +3491,7 @@ fn act_name(g: &Game, p: usize, act: &Act) -> String {
                 Src::Command(_) => format!("{} (cmdr)", name),
                 Src::Graveyard(_) => format!("{} (gy)", name),
                 Src::Exile(_) => format!("{} (exile)", name),
+                Src::Top => format!("{} (library top)", name),
                 Src::Adventure(_) => format!("{} (adventure)", name),
                 Src::Prepared(_) => format!("{} (prepared)", name),
             }

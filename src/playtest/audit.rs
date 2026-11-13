@@ -1081,6 +1081,7 @@ impl<'a> Game<'a> {
             Src::Prepared(_) => " (prepared spell copy)".into(),
             Src::Exile(_) if list != p => format!(" from exile (P{}'s card)", list),
             Src::Exile(_) => " from exile".into(),
+            Src::Top => " from the top of the library".into(),
         };
         let mut how = Vec::new();
         for (on, label) in [

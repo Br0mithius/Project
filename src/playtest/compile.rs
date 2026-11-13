@@ -109,6 +109,11 @@ pub const R_EXTRA_ANY_COUNTER: u32 = 1 << 26;
 pub const R_DWARF_TRIGGERS_TWICE: u32 = 1 << 27;
 /// "You may play lands from the top of your library" (Ka-Zar of the Savage Land).
 pub const R_LANDS_FROM_TOP: u32 = 1 << 28;
+/// "You may cast creature spells from the top of your library" (Vizier of the Menagerie).
+pub const R_CREATURES_FROM_TOP: u32 = 1 << 29;
+/// "You may spend mana as though it were mana of any type to cast creature spells" (Vizier
+/// of the Menagerie).
+pub const R_ANY_MANA_CREATURES: u32 = 1 << 30;
 
 /// The rule-changing statics in a face's rules text (card name as "~").
 pub fn rules_of(text: &str) -> u32 {
@@ -140,6 +145,14 @@ pub fn rules_of(text: &str) -> u32 {
         (
             "you may play lands from the top of your library",
             R_LANDS_FROM_TOP,
+        ),
+        (
+            "you may cast creature spells from the top of your library",
+            R_CREATURES_FROM_TOP,
+        ),
+        (
+            "spend mana as though it were mana of any type to cast creature spells",
+            R_ANY_MANA_CREATURES,
         ),
         (
             "you may play a land and cast a permanent spell",

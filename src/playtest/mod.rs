@@ -97,6 +97,8 @@ pub enum Src {
     Prepared(u32),
     /// Index into the cards in exile the player may play (`Player::playable`).
     Exile(usize),
+    /// The top card of the library (Vizier of the Menagerie's creature spells).
+    Top,
 }
 
 /// How an additional cost to cast a spell is paid.
@@ -342,6 +344,17 @@ impl<'a> Game<'a> {
             Src::Graveyard(k) => (*pl.graveyard.get(k)?, false),
             Src::Adventure(k) => (*pl.adventure.get(k)?, false),
             Src::Exile(k) => (pl.playable.get(k)?.card.1, false),
+            Src::Top => {
+                let &c = pl.library.last()?;
+                let card = &pl.cards[c as usize];
+                if self.rules[p % 8] & R_CREATURES_FROM_TOP == 0
+                    || !card.is(T_CREATURE)
+                    || card.is(T_LAND)
+                {
+                    return None;
+                }
+                (c, false)
+            }
             Src::Prepared(id) => {
                 let x = &self.perms[self.idx(id)?];
                 if !x.prepared || x.ctrl as usize != p {
@@ -677,6 +690,12 @@ impl<'a> Game<'a> {
         }
         if opts.offspring {
             cost = cost.plus_generic(c.offspring.unwrap_or(0) as u32);
+        }
+        // Vizier of the Menagerie: any mana pays for creature spells.
+        if !back && c.is(T_CREATURE) && self.rules[p % 8] & R_ANY_MANA_CREATURES != 0 {
+            let x = cost.x;
+            cost = Mana::generic(cost.total());
+            cost.x = x;
         }
         if opts.kicker {
             if let Some(k) = c.kicker {
@@ -1083,6 +1102,9 @@ impl<'a> Game<'a> {
             }
             Src::Adventure(k) => {
                 self.players[p].adventure.remove(k);
+            }
+            Src::Top => {
+                self.players[p].library.pop();
             }
             Src::Prepared(id) => {
                 if let Some(i) = self.idx(id) {

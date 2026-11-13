@@ -335,6 +335,14 @@ fn rule_names(bits: u32) -> String {
             R_LANDS_FROM_TOP,
             "lands played from the top of your library",
         ),
+        (
+            R_CREATURES_FROM_TOP,
+            "creature spells cast from the top of your library",
+        ),
+        (
+            R_ANY_MANA_CREATURES,
+            "mana of any type for your creature spells",
+        ),
     ]
     .iter()
     .filter(|(b, _)| bits & b != 0)

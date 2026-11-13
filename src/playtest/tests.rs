@@ -5936,3 +5936,47 @@ fn cant_be_blocked_by_more_than_one_creature() {
     );
     assert_eq!(g.players[1].life, 4, "but it is blocked");
 }
+
+#[test]
+fn vizier_casts_creatures_from_the_top_with_any_mana() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Plains",
+            "Vizier of the Menagerie",
+            "Gigantosaurus",
+            "Mountain",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 5, 'W');
+    g.players[0].library = vec![3, 3, 2];
+    g.active = 0;
+    assert!(
+        !g.can_cast(0, Src::Top, CastOpts::default()),
+        "no casting from the top without Vizier"
+    );
+    put(&mut g, 0, 1);
+    g.recalc();
+    assert!(
+        g.can_cast(0, Src::Top, CastOpts::default()),
+        "Gigantosaurus on top, paid with Plains"
+    );
+    assert!(g.cast(0, Src::Top, CastOpts::default()));
+    assert_eq!(g.players[0].library, vec![3, 3]);
+    assert!(g.perms.iter().any(|x| x.card == Some((0, 2))));
+    // A land on top isn't a creature spell.
+    assert!(!g.can_cast(0, Src::Top, CastOpts::default()));
+}
+
+#[test]
+fn bards_company_has_flash_with_a_human() {
+    let db = db();
+    let d = prep_db(&db, &["Plains", "Bard's Company", "Raft Security Officer"]);
+    let mut g = game(&[&d, &d]);
+    let bard = &d.cards[1];
+    assert!(!ai::has_flash(&g, 0, bard), "no Human: no flash");
+    put(&mut g, 0, 2);
+    assert!(ai::has_flash(&g, 0, bard), "with a Human it has flash");
+}
