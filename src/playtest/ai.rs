@@ -4105,6 +4105,55 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
     false
 }
 
+fn is_redirect(c: &SimCard) -> bool {
+    c.is(T_INSTANT)
+        && effects_of(c, false).any(|e| matches!(e, Effect::Rule(l) if l == "redirects a spell"))
+}
+
+/// The owner of permanent `id`, which `caster`'s harmful single-target spell or ability is
+/// aimed at, answers with "change the target of target spell or ability with a single
+/// target" (Bolt Bend): the new target is the most valuable of `alts` (legal targets not the
+/// owner's), the caster's own counting a bit more. The new target's id, if it did.
+pub fn redirect(g: &mut Game, owner: usize, caster: usize, id: u32, alts: &[usize]) -> Option<u32> {
+    let i = g.idx(id)?;
+    if perm_value(g, i) < 3.0 || g.is_human(owner) {
+        return None;
+    }
+    let h = hand_find(g, owner, is_redirect)?;
+    let score = |g: &Game, j: usize| {
+        perm_value(g, j)
+            * if g.perms[j].ctrl as usize == caster {
+                1.2
+            } else {
+                1.0
+            }
+    };
+    let best = alts
+        .iter()
+        .copied()
+        .filter(|&j| j != i)
+        .max_by(|&a, &b| score(g, a).partial_cmp(&score(g, b)).unwrap())?;
+    // Worth the card only if the new target matters (else keep it for a better moment).
+    if perm_value(g, best) < 2.0 {
+        return None;
+    }
+    let new_id = g.perms[best].id;
+    g.ext.redirected = false;
+    if !cast_instant(g, owner, h, Some(id), "redirect the spell or ability") {
+        return None;
+    }
+    // (Countered: the original target stays.)
+    if !std::mem::take(&mut g.ext.redirected) {
+        return None;
+    }
+    let new_id = g.idx(new_id).map(|j| g.perms[j].id)?;
+    if g.log.is_some() {
+        let d = g.id_desc(new_id);
+        g.note(|| format!("  -> its target becomes {}", d));
+    }
+    Some(new_id)
+}
+
 /// The owner of a targeted permanent answers with a protection spell if it's worth it.
 pub fn protect(g: &mut Game, owner: usize, id: u32) -> bool {
     let Some(i) = g.idx(id) else { return false };

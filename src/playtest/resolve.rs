@@ -96,6 +96,7 @@ pub const RULES_MODELLED: &[&str] = &[
     "spells cost less this turn",
     "attacks change until your next turn",
     "the next spell this turn is free",
+    "redirects a spell",
     // and "you lose N life" (see `rule_modelled`)
 ];
 
@@ -992,6 +993,25 @@ impl<'a> Game<'a> {
                     self.note(|| "    (the target's ward isn't paid: it's countered)".into());
                     self.ext.ward_countered = true;
                     return Vec::new();
+                }
+                // "Change the target of target spell or ability with a single target" (Bolt
+                // Bend): the owner sends it at something of the caster's (or another
+                // opponent's) instead.
+                if harmful && n == 1 {
+                    let mut alts = self.candidates(ctx, t, true);
+                    if t.whose == Whose::Any {
+                        alts.extend(self.candidates(ctx, t, false));
+                    }
+                    alts.retain(|&j| self.perms[j].ctrl as usize != owner);
+                    if let Some(new_id) = ai::redirect(self, owner, ctx.ctrl, id, &alts) {
+                        let Some(j) = self.idx(new_id) else { continue };
+                        let snap = self.perms[j].clone();
+                        self.actor = ctx.ctrl as u8;
+                        self.emit_about(Ev::Targeted, snap.ctrl as usize, &snap);
+                        self.last_ctrl = Some(snap.ctrl);
+                        out.push(new_id);
+                        continue;
+                    }
                 }
                 if harmful && ai::protect(self, owner, id) {
                     // The owner answered with protection; check the target is still legal.
@@ -6090,6 +6110,8 @@ impl<'a> Game<'a> {
             // simply don't come back; the simulator's recursion only uses what's left there.
             "can't stay in a graveyard" | "exiles cards instead of the graveyard" => {}
             "stops all life gain" => {} // static, checked in `gain_life`
+            // Bolt Bend: the new target is picked where the spell is cast (`ai::redirect`).
+            "redirects a spell" => self.ext.redirected = true,
             // Pain lands, Ancient Tomb, Sulfuric Vortex hitting its own controller.
             "damage to you" => {
                 let n = text

@@ -77,6 +77,10 @@ impl<'a> Game<'a> {
                 return false;
             };
             let what = what.trim_end_matches('.');
+            // "Can't be blocked by tokens" (Duskwatch Hunter).
+            if what == "tokens" {
+                return bl.is_token();
+            }
             if let Some(n) = what
                 .strip_prefix("creatures with power ")
                 .and_then(|r| r.split_whitespace().next())
@@ -383,7 +387,14 @@ impl<'a> Game<'a> {
                 if attacks.iter().any(|x| x.blockers.contains(&b)) {
                     continue;
                 }
+                // "Can't be blocked by more than one creature" (The Tiger God).
+                let one_only = self.static_holds(ai_, |t| {
+                    t.contains("can't be blocked by more than one creature")
+                });
                 if let Some(at) = attacks.iter_mut().find(|x| x.attacker == at_id) {
+                    if one_only && !at.blockers.is_empty() {
+                        continue;
+                    }
                     at.blockers.push(b);
                 }
             }

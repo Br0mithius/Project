@@ -507,6 +507,8 @@ pub struct GameExtra {
     /// The resolving spell or ability targeted something whose ward wasn't paid: it's
     /// countered (the rest of its effects don't happen).
     pub ward_countered: bool,
+    /// A "change the target of target spell or ability" spell (Bolt Bend) just resolved.
+    pub redirected: bool,
     /// State-based actions already announced the deaths of the creatures leaving now.
     pub deaths_announced: bool,
 }

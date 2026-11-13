@@ -5845,3 +5845,94 @@ fn storm_keeps_flyers_off_its_controller() {
         "only the 2/1 ground attacker can get through"
     );
 }
+
+#[test]
+fn bolt_bend_sends_removal_back_at_the_caster() {
+    let db = db();
+    let d0 = prep_db(&db, &["Swamp", "Hero's Downfall", "Savannah Lions"]);
+    let d1 = prep_db(
+        &db,
+        &[
+            "Mountain",
+            "Bolt Bend",
+            "Desert Were-Worm",
+            "Ghalta, Primal Hunger",
+        ],
+    );
+    let mut g = game(&[&d0, &d1]);
+    lands(&mut g, 0, 3, 'B');
+    lands(&mut g, 1, 1, 'R');
+    let lions = put(&mut g, 0, 2);
+    let worm = put(&mut g, 1, 2);
+    let ghalta = put(&mut g, 1, 3);
+    // Player 1 holds Bolt Bend ({R} with a power-4 creature out).
+    g.players[1].hand.push(1);
+    g.players[0].hand.push(1);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(
+        g.idx(ghalta).is_some(),
+        "Bolt Bend saves the targeted Ghalta"
+    );
+    assert!(g.idx(worm).is_some());
+    assert!(
+        g.idx(lions).is_none(),
+        "the Downfall hits the caster's creature instead"
+    );
+    assert!(g.players[1].hand.is_empty(), "Bolt Bend was cast");
+}
+
+#[test]
+fn duskwatch_hunter_cant_be_blocked_by_tokens() {
+    let db = db();
+    let d = prep_db(&db, &["Forest", "Duskwatch Hunter", "Savannah Lions"]);
+    let mut g = game(&[&d, &d]);
+    let hunter = put(&mut g, 0, 1);
+    let lions = put(&mut g, 1, 2);
+    let tok = token(&mut g, 1, 2);
+    let (h, l, t) = (
+        g.idx(hunter).unwrap(),
+        g.idx(lions).unwrap(),
+        g.idx(tok).unwrap(),
+    );
+    assert!(!g.can_block(t, h), "a token can't block Duskwatch Hunter");
+    assert!(g.can_block(l, h), "a nontoken creature can");
+}
+
+#[test]
+fn cant_be_blocked_by_more_than_one_creature() {
+    let d0 = prep(&[card(
+        "The Tiger God",
+        "{3}{G}",
+        "Legendary Creature — Cat God",
+        "The Tiger God can't be blocked by more than one creature.",
+        Some(("4", "4")),
+    )]);
+    let d1 = prep(&[card(
+        "Ogre",
+        "{2}{R}",
+        "Creature — Ogre",
+        "",
+        Some(("3", "3")),
+    )]);
+    let mut g = game(&[&d0, &d1]);
+    let god = put(&mut g, 0, 0);
+    put(&mut g, 1, 0);
+    put(&mut g, 1, 0);
+    // At 4 life the defender must stop it, and two Ogres would kill it.
+    g.players[1].life = 4;
+    let at = vec![Attack {
+        attacker: god,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    let blocks = ai::declare_blocks(&g, 1, &at);
+    assert_eq!(blocks.len(), 2, "the AI would like to double-block");
+    g.active = 0;
+    g.combat(0);
+    assert!(
+        g.idx(god).is_some(),
+        "only one Ogre may block: the god survives"
+    );
+    assert_eq!(g.players[1].life, 4, "but it is blocked");
+}
