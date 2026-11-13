@@ -3335,6 +3335,33 @@ fn waits_for_combat(g: &Game, p: usize, act: &Act) -> bool {
                 && a.effects.iter().any(
                     |e| matches!(e, Effect::Pump { to, .. } | Effect::Grant { to, .. } if to.mass),
                 )
+            // "Whenever a creature you control attacks / deals combat damage to a player"
+            // (Ingris Stingerquill): this turn's attackers trigger it already.
+            || matches!(&a.trig, Trig::Event(Ev::EachAttacker | Ev::OthersAttack | Ev::CombatDamageAny, f)
+                if f.yours != Some(false) && !a.effects.is_empty())
+    }) && !pumps_team_on_entry(g, p, c)
+}
+
+/// One of `p`'s permanents pumps the team until end of turn when creature `c` is cast or
+/// enters ("whenever another nontoken Hero you control enters, ... creatures you control get
+/// +1/+1 until end of turn": Black Panther, Vanguard): cast before combat, the attack gets it.
+fn pumps_team_on_entry(g: &Game, p: usize, c: &SimCard) -> bool {
+    g.perms.iter().filter(|x| x.ctrl as usize == p).any(|x| {
+        g.abilities_of(x).iter().any(|a| {
+            let Trig::Event(Ev::OtherEnters | Ev::Cast, f) = &a.trig else {
+                return false;
+            };
+            f.yours != Some(false)
+                && (f.types == 0 || f.types & c.types != 0)
+                && f.not_types & c.types == 0
+                && !f.token
+                && f.subtype
+                    .as_ref()
+                    .is_none_or(|sub| c.subtypes.iter().any(|t| t == sub))
+                && a.effects.iter().any(|e| {
+                    matches!(e, Effect::Pump { until_eot: true, to, power, .. } if to.mass && *power > 0)
+                })
+        })
     })
 }
 

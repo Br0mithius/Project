@@ -6052,3 +6052,72 @@ fn paid_enter_trigger_in_hand_does_not_recurse_in_combat() {
     // The Relic is still what the rest of the turn would cast: spending all 7 costs it.
     assert!(ai::post_combat_loss(&g, 0, 7) > 0.0);
 }
+
+#[test]
+fn ai_casts_a_creature_before_combat_when_it_pumps_the_team() {
+    // Black Panther, Vanguard: "whenever another nontoken Hero you control enters, ...
+    // creatures you control get +1/+1 until end of turn". A Hero in hand is cast before
+    // combat (game logs: Heroes held both Heroes until after a full swing that lost two
+    // creatures); a non-Hero still waits until after combat.
+    let db = db();
+    let mut d = prep_db(&db, &["Black Panther, Vanguard"]);
+    d.cards.push(compile(&Card::basic_land("Forest", 'G')));
+    d.cards.push(compile(&card(
+        "Recruit",
+        "{1}{G}",
+        "Creature — Human Hero",
+        "",
+        Some(("2", "2")),
+    )));
+    d.cards.push(compile(&card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    )));
+    let on = |g: &Game, idx: u16| {
+        g.perms
+            .iter()
+            .any(|x| x.ctrl == 0 && x.card.is_some_and(|c| c.1 == idx))
+    };
+    for (idx, before) in [(2u16, true), (3u16, false)] {
+        let mut g = game(&[&d, &d]);
+        lands(&mut g, 0, 2, 'G');
+        put(&mut g, 0, 0);
+        g.active = 0;
+        g.players[0].hand = vec![idx];
+        ai::main_phase(&mut g, 0, false);
+        assert_eq!(on(&g, idx), before, "card {} cast before combat", idx);
+    }
+}
+
+#[test]
+fn ai_casts_an_attack_trigger_creature_before_combat() {
+    // Ingris Stingerquill ("whenever a creature you control attacks, that creature deals 1
+    // damage to each opponent"): cast before combat, this turn's attackers trigger it.
+    let db = db();
+    let mut d = prep_db(&db, &["Ingris Stingerquill"]);
+    d.cards.push(compile(&Card::basic_land("Mountain", 'R')));
+    d.cards.push(compile(&Card::basic_land("Swamp", 'B')));
+    d.cards.push(compile(&card(
+        "Bear",
+        "{1}{G}",
+        "Creature — Bear",
+        "",
+        Some(("2", "2")),
+    )));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    lands(&mut g, 0, 1, 'B');
+    put(&mut g, 0, 3);
+    g.active = 0;
+    g.players[0].hand = vec![0];
+    ai::main_phase(&mut g, 0, false);
+    assert!(
+        g.perms
+            .iter()
+            .any(|x| x.ctrl == 0 && x.card.is_some_and(|c| c.1 == 0)),
+        "Ingris cast before combat"
+    );
+}
