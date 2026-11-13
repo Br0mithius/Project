@@ -3354,8 +3354,23 @@ fn rock_first(g: &Game, p: usize, post: bool) -> Option<usize> {
     let cost = opts[i].1;
     let after_mana = (avail + c.mana_amount as u32).saturating_sub(cost);
     let full = plan_payable(g, p, &opts, avail, Vec::new()).map_or(0.0, |x| x.1);
-    let rest = plan_payable(g, p, &opts, after_mana, vec![i]).map_or(0.0, |x| x.1);
-    (opts[i].0 > 0.3 && rest + opts[i].0 >= full).then_some(h)
+    let (set, rest) = plan_payable(g, p, &opts, after_mana, vec![i]).unwrap_or_default();
+    if opts[i].0 <= 0.3 || rest + opts[i].0 < full {
+        return None;
+    }
+    // The rock's mana is colourless: the rest's generic costs take it, and the rock plus the
+    // rest's coloured part must be payable from what we have now.
+    let mut need = set
+        .iter()
+        .filter_map(|&k| act_cost(g, p, &opts[k].2))
+        .fold(Mana::default(), |a, m| mana_sum(a, &m));
+    let amount = c.mana_amount as u32;
+    if !set.is_empty() && (need.generic as u32) < amount {
+        return None;
+    }
+    need.generic = (need.generic as u32).saturating_sub(amount) as _;
+    let rock = g.cast_cost(p, Src::Hand(h), CastOpts::default())?;
+    g.can_pay(p, &mana_sum(need, &rock)).then_some(h)
 }
 
 /// Picks the set of actions worth the most for the mana (a small knapsack); returns the
