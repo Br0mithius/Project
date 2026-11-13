@@ -645,8 +645,14 @@ impl GuiApp {
                 }
                 Action::AutoBuild(n, piper) => {
                     if let Some(c) = self.db.get(&n).cloned() {
-                        let (mut d, short) =
-                            analysis::autobuild(&c, &self.db, &self.coll, &self.rules, None, piper);
+                        let (mut d, short, _) = crate::archetypes::autobuild(
+                            &c,
+                            &self.db,
+                            &self.coll,
+                            &self.rules,
+                            None,
+                            piper,
+                        );
                         d.name = self.deck.name.clone();
                         self.deck = d;
                         self.tab = Tab::Build;
@@ -3534,6 +3540,27 @@ impl GuiApp {
                         plan.removal,
                         plan.draw
                     ));
+                    if let Some(best) = crate::archetypes::best_for_deck(&self.deck, &self.db) {
+                        ui.label(
+                            RichText::new(format!(
+                                "Plays most like: {} ({:.0}%)",
+                                best.arch.name,
+                                best.closeness * 100.0
+                            ))
+                            .small(),
+                        )
+                        .on_hover_text(format!(
+                            "{}\n{} fitting cards: {}",
+                            best.arch.plan,
+                            best.cards.len(),
+                            best.cards
+                                .iter()
+                                .take(12)
+                                .map(|(c, _)| c.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
                     ui.add_space(6.0);
                     ui.label(RichText::new("Card types").strong());
                     for (t, n) in &st.types {

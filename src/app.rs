@@ -36,6 +36,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Explain a commander's ranking (and its best Prismatic Piper colour)",
     ),
     (
+        "archetypes",
+        "[name|set|commander|traits]",
+        "Deck archetypes and set traits: how close your pool is to each, which owned cards fit, and the deck's best fit",
+    ),
+    (
         "ratings",
         "",
         "Download EDHREC data, Scryfall tags and Playgroup.gg commander win rates",
@@ -311,6 +316,7 @@ impl App {
             "show" | "card" | "info" => self.show(rest),
             "commanders" => self.commanders(),
             "why" => self.why(rest),
+            "archetypes" | "archetype" | "arch" => self.archetypes(rest),
             "ratings" => self.ratings(),
             "update-cards" => self.update_cards(),
             "import" => self.import(rest),
@@ -786,6 +792,174 @@ impl App {
         println!(
             "`why <commander>` explains one; `auto <name> [colours]` builds it; `piper <colour>` adds The Prismatic Piper."
         );
+    }
+
+    /// `archetypes`: every archetype with how close the pool is; with a query, the details
+    /// of the matching ones (themes, commanders, key cards, owned cards that fit).
+    fn archetypes(&self, q: &str) {
+        use crate::archetypes as ar;
+        let found = ar::find(q);
+        if found.is_empty() {
+            println!(
+                "No archetype matches '{}'. Try `archetypes` for the list.",
+                q
+            );
+            return;
+        }
+        let detail = !q.trim().is_empty() && found.len() <= 3;
+        if !detail {
+            println!(
+                "{}",
+                self.style
+                    .bold("Archetype                  Set  Pool   Fit  Enablers Payoffs  Commanders you own")
+            );
+            let mut rows: Vec<_> = found
+                .iter()
+                .map(|a| ar::pool_report(a, &self.db, &self.coll))
+                .collect();
+            rows.sort_by(|a, b| b.closeness.partial_cmp(&a.closeness).unwrap());
+            for r in &rows {
+                println!(
+                    "{} {:<4} {:>4.0}% {:>5} {:>8.0} {:>7.0}  {}{}",
+                    pad(r.arch.name, 26),
+                    if r.arch.set.is_empty() {
+                        "-"
+                    } else {
+                        r.arch.set
+                    },
+                    r.closeness * 100.0,
+                    r.cards.len(),
+                    r.enablers,
+                    r.payoffs,
+                    if r.commanders.is_empty() {
+                        "-".to_string()
+                    } else {
+                        r.commanders.join(", ")
+                    },
+                    if r.arch.sparse {
+                        "  (too few cards to build)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            if let Some(best) = ar::best_for_deck(&self.deck, &self.db) {
+                println!(
+                    "\nYour deck plays most like {} ({:.0}%: {} fitting cards).",
+                    self.style.bold(best.arch.name),
+                    best.closeness * 100.0,
+                    best.cards.len()
+                );
+            }
+            println!("`archetypes <name>` for an archetype's cards.");
+            return;
+        }
+        for a in found {
+            let r = ar::pool_report(a, &self.db, &self.coll);
+            println!(
+                "{}{} - {}",
+                self.style.bold(a.name),
+                if a.set.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", a.set)
+                },
+                a.plan
+            );
+            let themes: Vec<String> = a.themes.iter().map(|t| t.label()).collect();
+            println!("  Themes: {}", themes.join(", "));
+            let own = |n: &str| {
+                if self.coll.owned(n) > 0 {
+                    "owned"
+                } else {
+                    "not owned"
+                }
+            };
+            println!(
+                "  Commanders: {}",
+                a.commanders
+                    .iter()
+                    .map(|n| format!("{} ({})", n, own(n)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            if !a.key_cards.is_empty() {
+                println!(
+                    "  Key cards: {}",
+                    a.key_cards
+                        .iter()
+                        .map(|n| format!("{} ({})", n, own(n)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            let t = ar::targets(a);
+            println!(
+                "  Build targets: {} lands, {} archetype cards first{}{}{}{}{}{}",
+                t.lands.map(|l| l.to_string()).unwrap_or("default".into()),
+                t.package,
+                if t.removal > 0 {
+                    format!(", removal {}+", t.removal)
+                } else {
+                    String::new()
+                },
+                if t.draw > 0 {
+                    format!(", draw {}+", t.draw)
+                } else {
+                    String::new()
+                },
+                if t.ramp > 0 {
+                    format!(", ramp {}+", t.ramp)
+                } else {
+                    String::new()
+                },
+                if t.creatures > 0 {
+                    format!(", creatures {}+", t.creatures)
+                } else {
+                    String::new()
+                },
+                if t.counters > 0 {
+                    format!(", counterspells {}+", t.counters)
+                } else {
+                    String::new()
+                },
+                t.topend
+                    .map(|m| format!(", at most {} cards of 6+ mana", m))
+                    .unwrap_or_default()
+            );
+            println!(
+                "  Your pool: {:.0}% of a working deck - {} fitting cards, {:.0} enablers (wants {:.0}), {:.0} payoffs (wants {:.0}){}",
+                r.closeness * 100.0,
+                r.cards.len(),
+                r.enablers,
+                ar::ENABLERS_WANTED,
+                r.payoffs,
+                ar::PAYOFFS_WANTED,
+                if a.sparse {
+                    " - too few cards in the league sets to build on"
+                } else {
+                    ""
+                }
+            );
+            for (c, f) in r.cards.iter().take(30) {
+                println!(
+                    "    {} {:<8} {}",
+                    pad(&c.name, 34),
+                    if f.is_payoff() { "payoff" } else { "enabler" },
+                    f.themes.join(", ")
+                );
+            }
+            if r.cards.len() > 30 {
+                println!("    ... and {} more", r.cards.len() - 30);
+            }
+            if let Some(d) = ar::deck_report(a, &self.deck, &self.db) {
+                println!(
+                    "  Your deck: {:.0}% ({} fitting cards).",
+                    d.closeness * 100.0,
+                    d.cards.len()
+                );
+            }
+        }
     }
 
     fn why(&self, q: &str) {
@@ -1568,13 +1742,25 @@ impl App {
             );
         }
         self.snapshot();
-        let (mut deck, shortfall) =
-            analysis::autobuild(&cmd, &self.db, &self.coll, &self.rules, Some(plays), None);
+        let (mut deck, shortfall, arch) = crate::archetypes::autobuild(
+            &cmd,
+            &self.db,
+            &self.coll,
+            &self.rules,
+            colors.map(|_| plays),
+            None,
+        );
         deck.name = self.deck.name.clone();
         self.deck = deck;
         println!(
-            "Built a deck around {}. `undo` to go back.\n",
-            self.style.name(&cmd)
+            "Built a deck around {}{}. `undo` to go back.\n",
+            self.style.name(&cmd),
+            arch.map(|a| format!(
+                " following the {} archetype's targets (`archetypes {}`)",
+                a.name,
+                a.name.to_lowercase()
+            ))
+            .unwrap_or_default()
         );
         self.view();
         println!();

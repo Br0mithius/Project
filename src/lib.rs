@@ -4,6 +4,7 @@
 pub mod abilities;
 pub mod analysis;
 pub mod app;
+pub mod archetypes;
 pub mod card;
 pub mod db;
 pub mod deck;
