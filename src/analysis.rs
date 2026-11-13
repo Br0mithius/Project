@@ -810,13 +810,16 @@ impl AbilityGate {
             g = g.min(self.equipment);
         }
         for (tribe, ratio) in &self.tribes {
-            // A whole word ("elf" isn't the end of "itself, ").
-            let word = t.match_indices(tribe.as_str()).any(|(i, _)| {
-                !t[..i]
-                    .chars()
-                    .next_back()
-                    .is_some_and(|c| c.is_alphabetic())
-            });
+            // A whole word ("elf" isn't the end of "itself, "), or its plural ("elves").
+            let starts_word = |w: &str| {
+                t.match_indices(w).any(|(i, _)| {
+                    !t[..i]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphabetic())
+                })
+            };
+            let word = starts_word(tribe) || starts_word(&crate::archetypes::plural(tribe));
             if word && cares_about(t, tribe) {
                 g = g.min(*ratio);
             }
@@ -846,7 +849,8 @@ fn ability_gate(deck: &Deck, db: &CardDb, rules: &Rules) -> AbilityGate {
     }
     let mut tribes: Vec<String> = [
         "hero", "villain", "robot", "human", "soldier", "dragon", "elf", "goblin", "zombie",
-        "wizard", "spider", "angel", "cat", "dwarf", "orc",
+        "wizard", "spider", "angel", "cat", "dwarf", "orc", "wolf", "halfling", "bird", "dinosaur",
+        "vampire", "knight",
     ]
     .iter()
     .map(|t| t.to_string())
@@ -977,6 +981,21 @@ fn removal_floor(
 fn cares_about(text: &str, word: &str) -> bool {
     let w = word.to_lowercase();
     let plural = format!("{}s", w);
+    // "Other Elves you control", "two or more other Wolves", "Dwarves you control": the
+    // plural doesn't start with the singular, so look for it too.
+    let irregular = crate::archetypes::plural(&w);
+    if !irregular.starts_with(&w)
+        && [
+            format!("{} you control", irregular),
+            format!("other {}", irregular),
+            format!("nontoken {}", irregular),
+            format!("{} creatures you control", w),
+        ]
+        .iter()
+        .any(|p| text.contains(p.as_str()))
+    {
+        return true;
+    }
     [
         format!("{} spell", w),
         format!("{} card", w),
@@ -1183,6 +1202,7 @@ const MECHANICS: &[Mechanic] = &[
                 |e| matches!(e, Event::Cast(w) if w.contains("instant") || w.contains("sorcery") || w.contains("noncreature")),
                 &["instant or sorcery", "noncreature spell"],
             )
+            .max(0.6 * yes(c.parsed().has_keyword("prowess")))
         },
         enabler: |c| yes(matches!(c.main_type(), "Instant" | "Sorcery")),
     },
@@ -1192,11 +1212,12 @@ const MECHANICS: &[Mechanic] = &[
         wanted: 6.0,
         gates: false,
         points: 0.6,
+        // Prowess is a noncreature-spell trigger too (Thor Odinson has it twice).
         payoff: |c| {
             yes(has_event(
                 c,
                 |e| matches!(e, Event::Cast(w) if w.contains("noncreature")),
-            ))
+            ) || c.parsed().has_keyword("prowess"))
         },
         enabler: |c| {
             yes(!c.is_creature() && !c.is_land() && !matches!(c.main_type(), "Instant" | "Sorcery"))
@@ -1404,6 +1425,9 @@ const MECHANICS: &[Mechanic] = &[
                 .iter()
                 .any(|a| a.is(&When::Attacks) || a.is(&When::CombatDamage))
                 || has_event(c, |e| matches!(e, Event::OthersAttack))
+                // Raid: "if you attacked this turn" (Perforating Artist).
+                || c.text_lower().contains("raid —")
+                || c.text_lower().contains("if you attacked this turn")
             {
                 1.0
             } else {
@@ -1493,10 +1517,15 @@ const MECHANICS: &[Mechanic] = &[
             let power: i32 = c.power.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
             (yes(power >= 4)
                 + yes(c.parsed().makes_creature_tokens())
-                + yes(c.text_lower().contains("teamwork")))
+                + yes(c.text_lower().contains("teamwork"))
+                + yes(taps_matter(c.text_lower())))
             .min(1.0)
         },
-        enabler: |c| yes(c.parsed().has_keyword("teamwork")),
+        // Teamwork spells, and Vehicles' crew costs, tap your creatures.
+        enabler: |c| {
+            let p = c.parsed();
+            yes(p.has_keyword("teamwork")).max(0.5 * yes(p.has_keyword("crew")))
+        },
     },
     Mechanic {
         label: "damage effect boosted by the commander",
@@ -1583,7 +1612,133 @@ const MECHANICS: &[Mechanic] = &[
                 .any(|(_, e)| matches!(e, AbEffect::Amass(_))))
         },
     },
+    Mechanic {
+        label: "power-up creature for a power-up commander",
+        need: "power-up creatures",
+        wanted: 5.0,
+        // Hulk's discount is a bonus; he's a fine body without other power-up cards.
+        gates: false,
+        points: 1.0,
+        payoff: |c| yes(c.text_lower().contains("power-up abilit")),
+        enabler: |c| {
+            yes(c
+                .parsed()
+                .abilities
+                .iter()
+                .any(|a| a.when.iter().any(|w| matches!(w, When::PowerUp(_)))))
+        },
+    },
+    Mechanic {
+        label: "scry/surveil for a surveil commander",
+        need: "scry/surveil cards",
+        wanted: 8.0,
+        gates: true,
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("whenever you scry")
+                || t.contains("whenever you surveil")
+                || t.contains("scried or surveilled"))
+        },
+        // Empower Jace makes a Jace token whose ability surveils.
+        enabler: |c| {
+            let p = c.parsed();
+            yes(p.effects().any(|(_, e)| matches!(e, AbEffect::Scry(_))))
+                .max(0.5 * yes(p.effects().any(|(_, e)| matches!(e, AbEffect::Empower(_)))))
+        },
+    },
+    Mechanic {
+        label: "flier for a fliers commander",
+        need: "creatures with flying",
+        wanted: 10.0,
+        gates: true,
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("creatures you control with flying")
+                || t.contains("creature you control with flying")
+                || t.contains("flying creatures you control"))
+        },
+        enabler: |c| yes(c.is_creature() && c.parsed().has_keyword("flying")),
+    },
+    Mechanic {
+        label: "Treasure for a Treasure commander",
+        need: "Treasure makers",
+        wanted: 5.0,
+        gates: true,
+        points: 1.0,
+        payoff: |c| {
+            let t = c.text_lower();
+            yes(t.contains("mana from a treasure")
+                || t.contains("sacrifice a treasure")
+                || t.contains("treasures you control")
+                || t.contains("treasure you control"))
+        },
+        enabler: |c| {
+            yes(c.parsed().effects().any(|(a, e)| {
+                matches!(e, AbEffect::ItemTokens { kind, .. } if kind.contains("treasure"))
+                    && !a.text.contains(". they create ")
+            }))
+        },
+    },
+    Mechanic {
+        label: "creature tokens for an anthem",
+        need: "creature tokens for anthems",
+        wanted: 6.0,
+        gates: false,
+        points: 0.6,
+        // "Creatures you control get +1/+1" is worth more the wider the board.
+        payoff: |c| {
+            yes(c.parsed().effects().any(|(_, e)| {
+                matches!(e, AbEffect::Pump { to, .. } if to.mass && to.whose == crate::abilities::Whose::Yours)
+            }))
+        },
+        enabler: |c| yes(c.parsed().makes_creature_tokens()),
+    },
 ];
+
+/// "Whenever a creature you control becomes tapped" (Captain America, Living Legend): pays
+/// off teamwork and crew costs.
+fn taps_matter(t: &str) -> bool {
+    t.contains("creature you control becomes tapped")
+        || t.contains("creatures you control become tapped")
+}
+
+/// The `need` of every mechanic the builder reads (see `MECHANICS`), e.g. "Equipment".
+pub fn mechanic_needs() -> impl Iterator<Item = &'static str> {
+    MECHANICS.iter().map(|m| m.need)
+}
+
+/// How strongly `card` rewards the mechanic with this `need` (0..1; the commander reading,
+/// so loose heuristics count), or None for an unknown need.
+pub fn mechanic_payoff(need: &str, card: &Card) -> Option<f32> {
+    MECHANICS
+        .iter()
+        .find(|m| m.need == need)
+        .map(|m| (m.payoff)(card))
+}
+
+/// A card's clear payoff for a mechanic, as deck synergy reads it (only strong payoffs).
+pub fn mechanic_deck_payoff(need: &str, card: &Card) -> Option<f32> {
+    MECHANICS
+        .iter()
+        .find(|m| m.need == need)
+        .map(|m| deck_payoff(m, card))
+}
+
+/// How well `card` feeds the mechanic with this `need` (0..1), or None for an unknown need.
+pub fn mechanic_feed(need: &str, card: &Card) -> Option<f32> {
+    MECHANICS
+        .iter()
+        .find(|m| m.need == need)
+        .map(|m| feed(m, card))
+}
+
+/// Does `text` (lower case) care about creature type `word` ("other Elves you control",
+/// "Villain spell") rather than just name it?
+pub fn cares_about_type(text: &str, word: &str) -> bool {
+    cares_about(text, word)
+}
 
 /// Bonus for cards that play into what the commander rewards: creature types it cares
 /// about (Villain spells, other Heroes...) and the mechanics in `MECHANICS`.
@@ -1668,7 +1823,8 @@ pub fn commander_support(cmd: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
     let ct = cmd.text_lower();
     for sub in [
         "villain", "hero", "dwarf", "elf", "goblin", "orc", "human", "robot", "cat", "dragon",
-        "angel", "zombie", "wizard", "soldier", "spider",
+        "angel", "zombie", "wizard", "soldier", "spider", "wolf", "halfling", "bird", "dinosaur",
+        "vampire", "knight", "pirate",
     ] {
         if cares_about(ct, sub) {
             let have: f32 = cards
@@ -1679,7 +1835,7 @@ pub fn commander_support(cmd: &Card, deck: &Deck, db: &CardDb, rules: &Rules) ->
             let mut name = sub.to_string();
             name[..1].make_ascii_uppercase();
             out.push(Support {
-                need: format!("{}s", name),
+                need: crate::archetypes::plural(&name),
                 payoff: 1.0,
                 have,
                 wanted: 12.0 * scale,
@@ -1794,7 +1950,10 @@ fn with_profile<R>(deck: &Deck, db: &CardDb, f: impl FnOnce(&mut DeckProfile) ->
 fn deck_payoff(m: &Mechanic, c: &Card) -> f32 {
     if m.need == "Teamwork spells" {
         // Cards that reward teamwork, not the teamwork spells themselves.
-        return yes(c.text_lower().contains("teamwork") && !c.parsed().has_keyword("teamwork"));
+        let t = c.text_lower();
+        return yes(
+            (t.contains("teamwork") && !c.parsed().has_keyword("teamwork")) || taps_matter(t),
+        );
     }
     let p = (m.payoff)(c);
     if p >= 0.75 { p } else { 0.0 }
@@ -2009,6 +2168,9 @@ pub fn autobuild(
         }
     }
 
+    // A big pool (or the full card list) can hold more on-colour lands than the deck plays.
+    trim_lands(&mut deck, db, wanted, land_range(rules).0);
+
     // Pick spells, then re-check the land count against the resulting curve.
     let base = deck.clone();
     let mut lands = recommended_lands(3.0, rules);
@@ -2031,6 +2193,36 @@ pub fn autobuild(
     }
     fill_basics(&mut deck, db, rules);
     (deck, shortfall)
+}
+
+/// Keeps at most `max` lands in `deck`: the ones making the most of `wanted` (then the ones
+/// that enter untapped). Without this a five-colour commander with a big pool would take
+/// every on-colour land it owns and overflow the deck.
+pub fn trim_lands(deck: &mut Deck, db: &CardDb, wanted: ColorSet, max: u32) {
+    let mut lands: Vec<(String, u32, f32)> = resolved(deck, db)
+        .into_iter()
+        .filter(|(c, _)| c.is_land())
+        .map(|(c, n)| {
+            let colors = (c.produces().0 & wanted.0).count_ones() as f32;
+            let tapped = c.text_lower().contains("enters tapped")
+                && !c.text_lower().contains("enters tapped unless");
+            (
+                c.name.clone(),
+                n,
+                colors * 2.0 + if tapped { 0.0 } else { 1.0 },
+            )
+        })
+        .collect();
+    let mut total: u32 = lands.iter().map(|l| l.1).sum();
+    lands.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap().then_with(|| b.0.cmp(&a.0)));
+    for (name, n, _) in lands {
+        if total <= max {
+            break;
+        }
+        let k = n.min(total - max);
+        deck.remove(&name, k);
+        total -= k;
+    }
 }
 
 pub fn land_count(deck: &Deck, db: &CardDb) -> u32 {
