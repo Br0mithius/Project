@@ -829,15 +829,32 @@ pub fn equip_target(g: &Game, me: usize, equip_id: u32) -> Option<usize> {
                 0.0
             };
             let lifelink_bonus = if x.has(DOUBLE_STRIKE) { 2.0 } else { 0.0 };
+            // "Gets +2/+0 for each Equipment attached to him" (Winter Soldier): each piece
+            // is worth that much more on it, and piling them up is the plan.
+            let (scale, _) = equip_scaling(g, i);
             (
-                x.p as f32 + evasive + lifelink_bonus
-                    - geared * 1.5
+                x.p as f32 + evasive + lifelink_bonus + scale
+                    - if scale > 0.0 { 0.0 } else { geared * 1.5 }
                     - if x.sick { 0.5 } else { 0.0 },
                 i,
             )
         })
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
         .map(|(_, i)| i)
+}
+
+/// What one more Equipment attached to creature `i` adds through its own "for each
+/// Equipment attached" statics: (power, value as `effect_value` counts it).
+fn equip_scaling(g: &Game, i: usize) -> (f32, f32) {
+    g.abilities_of(&g.perms[i])
+        .iter()
+        .filter(|a| a.trig == Trig::Static && a.text.contains("equipment attached to"))
+        .flat_map(|a| a.effects.iter())
+        .filter_map(|e| match e {
+            Effect::Pump { power, .. } if *power > 0 => Some((*power as f32, effect_value(e))),
+            _ => None,
+        })
+        .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1))
 }
 
 /// An Aura that steals what it enchants (`STEALS_ATTACHED`): Some(true) when it may enchant
@@ -3298,7 +3315,7 @@ fn options(g: &Game, p: usize, post: bool) -> Vec<(f32, u32, Act)> {
                             .sum::<f32>(),
                         (None, Tok::Equip(p, t)) => p as f32 + 0.5 * t as f32,
                         _ => 0.0,
-                    };
+                    } + equip_scaling(g, t).1;
                     out.push((1.0 + bonus, cost.total(), Act::Equip(x.id, tid)));
                 }
             }
