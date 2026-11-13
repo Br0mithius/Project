@@ -6165,3 +6165,30 @@ fn symmetric_wheel_counts_the_opponents_refill() {
     ai::main_phase(&mut g, 0, true);
     assert!(!perm(&g, id).prepared, "the wheel is cast");
 }
+
+#[test]
+fn ai_casts_a_rock_first_when_its_mana_pays_for_the_rest() {
+    // Three lands, Mind Stone ({2}, taps for {C}) and a 2-drop: Mind Stone first, then the
+    // 2-drop with the last land and the Stone's own mana (it was planned at its full cost,
+    // so only the 2-drop was cast and the Stone waited).
+    let db = db();
+    let mut d = prep_db(&db, &["Mind Stone"]);
+    d.cards.push(compile(&Card::basic_land("Mountain", 'R')));
+    d.cards.push(compile(&card(
+        "Drake",
+        "{1}{R}",
+        "Creature — Drake",
+        "Flying, haste",
+        Some(("3", "3")),
+    )));
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'R');
+    g.active = 0;
+    g.players[0].hand = vec![0, 2];
+    ai::main_phase(&mut g, 0, true);
+    assert!(
+        g.players[0].hand.is_empty(),
+        "both cast: {:?}",
+        g.players[0].hand
+    );
+}

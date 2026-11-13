@@ -3326,6 +3326,38 @@ pub(crate) fn mana_only(a: &SimAbility) -> bool {
         && a.effects.iter().all(|e| matches!(e, Effect::AddMana(_)))
 }
 
+/// A mana rock in hand (untapped, not a creature, making less than it costs: `main_phase`
+/// casts the others outright) that the turn's plan loses nothing by casting first: the
+/// plan for the mana left plus the rock's own mana is worth at least the plan without it
+/// (game logs: a Dwarves deck on three lands held Mind Stone for turns behind its 2-drops,
+/// planned at its full cost).
+fn rock_first(g: &Game, p: usize, post: bool) -> Option<usize> {
+    let pl = &g.players[p];
+    let h = (0..pl.hand.len()).find(|&h| {
+        let c = &pl.cards[pl.hand[h] as usize];
+        c.is(T_ARTIFACT)
+            && !c.is(T_CREATURE)
+            && c.mana_ability
+            && c.mana_count.is_none()
+            && !c.enters_tapped
+            && c.mana_amount >= 1
+            && (c.mana_amount as u32) < c.cost.total()
+            && g.cast_cost(p, Src::Hand(h), CastOpts::default())
+                .is_some_and(|m| g.can_pay(p, &m))
+    })?;
+    let c = &pl.cards[pl.hand[h] as usize];
+    let opts = options(g, p, post);
+    let i = opts
+        .iter()
+        .position(|o| matches!(o.2, Act::Cast(Src::Hand(k), _) if k == h))?;
+    let avail = g.mana_available(p);
+    let cost = opts[i].1;
+    let after_mana = (avail + c.mana_amount as u32).saturating_sub(cost);
+    let full = plan_payable(g, p, &opts, avail, Vec::new()).map_or(0.0, |x| x.1);
+    let rest = plan_payable(g, p, &opts, after_mana, vec![i]).map_or(0.0, |x| x.1);
+    (opts[i].0 > 0.3 && rest + opts[i].0 >= full).then_some(h)
+}
+
 /// Picks the set of actions worth the most for the mana (a small knapsack); returns the
 /// best one to do first.
 /// Creature spells that don't help this turn's combat wait until after it (they can't attack
@@ -3792,6 +3824,13 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
                 && g.cast_cost(p, Src::Hand(h), CastOpts::default())
                     .is_some_and(|m| g.can_pay(p, &m))
         }) {
+            if g.cast(p, Src::Hand(h), CastOpts::default()) {
+                continue;
+            }
+        }
+        // A rock that makes mana the turn it enters (Mind Stone, Commander's Sphere) costs
+        // only the difference this turn: cast first when the rest of the turn still fits.
+        if let Some(h) = rock_first(g, p, post) {
             if g.cast(p, Src::Hand(h), CastOpts::default()) {
                 continue;
             }
