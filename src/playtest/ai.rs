@@ -5921,7 +5921,11 @@ pub fn declare_attacks_why(
             let blockers = blocker_toughness(g, o);
             let life = g.players[o].life;
             // Evasive attackers first, then the biggest.
-            let mut order = ready.clone();
+            let mut order: Vec<usize> = ready
+                .iter()
+                .copied()
+                .filter(|&a| g.may_attack_player(a, o))
+                .collect();
             order.sort_by_key(|&a| !evades_all(g, o, a));
             // Attack tax: only the attackers the mana pays for.
             let ltax = g.attack_tax(o);
@@ -6007,9 +6011,12 @@ pub fn declare_attacks_why(
         .map(|x| x.0)
         .filter(|id| !spares.contains(id))
         .collect();
-    let goad_ok = |a: usize, o: usize| match g.perms[a].goad {
-        Some(gd) if opps.len() > 1 => gd as usize != o,
-        _ => true,
+    let goad_ok = |a: usize, o: usize| {
+        g.may_attack_player(a, o)
+            && match g.perms[a].goad {
+                Some(gd) if opps.len() > 1 => gd as usize != o,
+                _ => true,
+            }
     };
     // Group plan: send a group at one opponent, predict their blocks with the blocking AI,
     // drop attackers that would just die, and keep the best opponent's plan.

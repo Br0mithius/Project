@@ -95,9 +95,27 @@ impl<'a> Game<'a> {
     }
 
     /// Can blocker `b` block attacker `a` (evasion, protection, "can't block")?
+    /// "Creatures with flying can't attack you or block creatures you control" (Storm,
+    /// Windrider): does player `d` control a permanent saying so?
+    pub fn flyers_barred(&self, d: usize) -> bool {
+        (0..self.perms.len()).any(|i| {
+            self.perms[i].ctrl as usize == d
+                && self.static_holds(i, |t| t.contains("creatures with flying can't attack you"))
+        })
+    }
+
+    /// May creature `i` attack player `d`? (Storm, Windrider keeps flyers off its controller.)
+    pub fn may_attack_player(&self, i: usize, d: usize) -> bool {
+        !(self.perms[i].has(FLYING) && self.flyers_barred(d))
+    }
+
     pub fn can_block(&self, b: usize, a: usize) -> bool {
         let (bl, at) = (&self.perms[b], &self.perms[a]);
         if !bl.is_creature() || bl.tapped || bl.locked || bl.has(CANT_BLOCK) {
+            return false;
+        }
+        // Storm, Windrider: flyers can't block its controller's creatures.
+        if bl.has(FLYING) && self.flyers_barred(at.ctrl as usize) {
             return false;
         }
         if at.has(UNBLOCKABLE) {
@@ -159,6 +177,11 @@ impl<'a> Game<'a> {
         } else {
             ai::declare_attacks(self, a)
         };
+        // Storm, Windrider: flyers can't attack its controller.
+        declared.retain(|(id, def)| match (*def, self.idx(*id)) {
+            (Def::Player(d), Some(i)) => self.may_attack_player(i, d),
+            _ => true,
+        });
         // "Creatures can't attack you unless their controller pays {2} for each": what
         // can't be paid for stays home.
         if self.rule_anywhere(R_ATTACK_TAX) {

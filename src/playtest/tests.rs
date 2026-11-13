@@ -5802,3 +5802,46 @@ fn confiscate_steals_an_opponents_best_permanent() {
     assert_eq!(perm(&g, wurm).ctrl, 0, "the wurm is ours");
     assert_eq!(perm(&g, ours).ctrl, 0);
 }
+
+#[test]
+fn storm_keeps_flyers_off_its_controller() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Plains",
+            "Storm, Windrider",
+            "Spectral Sailor",
+            "Savannah Lions",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    let flyer = put(&mut g, 1, 2);
+    let ground = put(&mut g, 1, 3);
+    let my_lions = put(&mut g, 0, 3);
+    for x in g.perms.iter_mut() {
+        x.sick = false;
+    }
+    g.recalc();
+    let fi = g.idx(flyer).unwrap();
+    let gi = g.idx(ground).unwrap();
+    assert!(
+        !g.may_attack_player(fi, 0),
+        "a flyer can't attack Storm's controller"
+    );
+    assert!(g.may_attack_player(gi, 0), "a ground creature still can");
+    let li = g.idx(my_lions).unwrap();
+    assert!(
+        !g.can_block(fi, li),
+        "a flyer can't block Storm's controller's creatures"
+    );
+    // In combat: the flyer stays home, the ground creature attacks.
+    let life = g.players[0].life;
+    g.active = 1;
+    g.combat(1);
+    assert!(
+        g.players[0].life >= life - 2,
+        "only the 2/1 ground attacker can get through"
+    );
+}
