@@ -758,6 +758,34 @@ pub fn autobuild(
     (deck, short, None)
 }
 
+/// Can `cmd` lead `arch`: it's one of the archetype's commanders, or it rewards one of its
+/// themes, and it has the archetype's colours.
+pub fn commander_fits(arch: &SetArchetype, cmd: &Card) -> bool {
+    cmd.can_be_commander()
+        && arch.color_set().is_subset_of(cmd.identity())
+        && (arch.commanders.contains(&cmd.name.as_str())
+            || arch.themes.iter().any(|t| t.read(cmd).0 >= 0.75))
+}
+
+/// Auto-build `cmd` as `arch`: `autobuild` when `arch` is the archetype the commander leads
+/// anyway, otherwise `build` with the archetype's targets. Returns the deck and the spell
+/// slots the pool couldn't fill.
+pub fn autobuild_as(
+    arch: &'static SetArchetype,
+    cmd: &Card,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &crate::db::Rules,
+) -> (Deck, u32) {
+    let (deck, short, followed) = autobuild(cmd, db, coll, rules, None, None);
+    if followed.is_some_and(|a| std::ptr::eq(a, arch)) {
+        return (deck, short);
+    }
+    let (mut deck, short) = build(arch, cmd, db, coll, rules, &targets(arch));
+    deck.name = format!("auto-{}", cmd.name);
+    (deck, short)
+}
+
 use Theme::{Mechanic as M, Tribe as T};
 
 const fn commander(
@@ -1232,6 +1260,21 @@ mod tests {
 
     /// Every named card exists and every commander can lead; every mechanic theme is one
     /// the builder reads; buildable archetypes have enough cards in the database.
+    #[test]
+    fn autobuild_as_builds_the_chosen_archetype() {
+        let db = db();
+        let all = all(&db);
+        let rules = crate::db::Rules::default();
+        let a = arch("Voltron");
+        let cmd = db.get(a.commanders[0]).unwrap();
+        assert!(commander_fits(a, cmd));
+        let (d, _) = autobuild_as(a, cmd, &db, &all, &rules);
+        assert_eq!(d.commander.as_deref(), Some(cmd.name.as_str()));
+        assert_eq!(d.main_count(), d.main_target(&rules));
+        let r = deck_report(a, &d, &db).unwrap();
+        assert!(r.cards.len() >= 10, "{} fitting cards", r.cards.len());
+    }
+
     #[test]
     fn catalogue_matches_the_card_database() {
         let db = db();

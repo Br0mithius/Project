@@ -15,6 +15,7 @@ pub mod ai;
 pub mod audit;
 pub mod combat;
 pub mod compile;
+pub mod coverage;
 pub mod human;
 #[cfg(test)]
 mod human_tests;
@@ -25,6 +26,7 @@ pub mod resolve;
 mod restrict_tests;
 pub mod simvalues;
 pub mod state;
+pub mod synergy;
 pub mod targets;
 #[cfg(test)]
 mod tests;

@@ -21,6 +21,7 @@ pub mod ratings;
 pub mod restrict;
 pub mod season;
 pub mod setdata;
+pub mod table;
 pub mod tags;
 pub mod ui;
 pub mod upgrades;
