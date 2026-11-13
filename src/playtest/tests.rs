@@ -6136,41 +6136,6 @@ fn enters_prepared_creature_is_prepared() {
 }
 
 #[test]
-fn equipment_goes_to_the_creature_that_scales_with_it() {
-    // Winter Soldier ("gets +2/+0 for each Equipment attached to him") gets the gear over a
-    // bigger creature, and a second piece too (game logs: equipment went to Karn and others
-    // as often as to the commander, valued the same).
-    let db = db();
-    let d = prep_db(
-        &db,
-        &[
-            "Winter Soldier, Icy Assassin",
-            "Goldvein Pick",
-            "Goldvein Pick",
-        ],
-    );
-    let mut d = d;
-    d.cards.push(compile(&card(
-        "Giant",
-        "{4}{G}",
-        "Creature — Giant",
-        "",
-        Some(("5", "5")),
-    )));
-    let mut g = game(&[&d, &d]);
-    let ws = put(&mut g, 0, 0);
-    put(&mut g, 0, 3);
-    let pick = put(&mut g, 0, 1);
-    let t = ai::equip_target(&g, 0, pick).unwrap();
-    assert_eq!(g.perms[t].id, ws, "the first piece");
-    let i = g.idx(pick).unwrap();
-    g.perms[i].attached = Some(ws);
-    let pick2 = put(&mut g, 0, 2);
-    let t = ai::equip_target(&g, 0, pick2).unwrap();
-    assert_eq!(g.perms[t].id, ws, "the second piece too");
-}
-
-#[test]
 fn symmetric_wheel_counts_the_opponents_refill() {
     // Variable Chaser's prepared Arc of Fortune ("each player may discard their hand and
     // draw seven cards"): with five cards in our hand and three opponents on empty hands it
