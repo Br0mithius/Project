@@ -3342,6 +3342,13 @@ fn rock_first(g: &Game, p: usize, post: bool) -> Option<usize> {
             && !c.enters_tapped
             && c.mana_amount >= 1
             && (c.mana_amount as u32) < c.cost.total()
+            // Free, unrestricted mana: not a filter ("{1}, {T}: Add one mana", Giant's
+            // Boulder) nor "spend this mana only to cast a planeswalker spell".
+            && c.abilities.iter().any(|a| {
+                mana_only(a)
+                    && matches!(a.trig, Trig::Activated { mana: 0, tap: true, .. })
+                    && !a.text.contains("spend this mana only")
+            })
             && g.cast_cost(p, Src::Hand(h), CastOpts::default())
                 .is_some_and(|m| g.can_pay(p, &m))
     })?;
