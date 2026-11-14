@@ -33,6 +33,22 @@ pub enum Archetype {
     Big,
     /// Instant/sorcery or noncreature-spell payoffs: fewer creatures, more interaction.
     Spells,
+    /// Answers, wipes and locks first, a few finishers (the stax-lite / reactive control
+    /// archetypes).
+    Control,
+    /// An archetype from the catalogue (`archetypes`), with the targets of the plain kind
+    /// that suits it.
+    Named(&'static str, Base),
+}
+
+/// The plain kind behind a catalogue archetype (its curve and count targets).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Base {
+    Aggro,
+    Midrange,
+    Big,
+    Spells,
+    Control,
 }
 
 impl Archetype {
@@ -42,6 +58,8 @@ impl Archetype {
             Archetype::Midrange => "midrange",
             Archetype::Big => "big mana",
             Archetype::Spells => "spells",
+            Archetype::Control => "control",
+            Archetype::Named(name, _) => name,
         }
     }
 }
@@ -168,17 +186,51 @@ pub fn archetype(cmd: &Card) -> (Archetype, Vec<String>) {
     (best.1, why)
 }
 
+/// The plain kind of deck a catalogue archetype plays like.
+fn base_of(name: &str) -> Base {
+    let n = name.to_lowercase();
+    if n.contains("control") {
+        Base::Control
+    } else if n.contains("aggro") || n.contains("go-wide") || n.contains("goblin") {
+        Base::Aggro
+    } else if n.contains("ramp") || n.contains("dinosaur") || n.contains("landfall") {
+        Base::Big
+    } else if n.contains("spellslinger") || n.contains("card draw") || n.contains("adventure") {
+        Base::Spells
+    } else {
+        Base::Midrange
+    }
+}
+
 /// Targets for a deck led by `cmd` (midrange targets without a commander).
 pub fn plan_for(cmd: Option<&Card>, rules: &Rules) -> Plan {
-    let (arch, signals) = cmd
-        .map(archetype)
-        .unwrap_or((Archetype::Midrange, Vec::new()));
+    // The archetype catalogue first: a commander that leads one of its archetypes gets that
+    // archetype's name and the targets of the plain kind that suits it.
+    let (arch, signals) = match cmd.and_then(|c| crate::archetypes::for_commander(&c.name)) {
+        Some(a) => (
+            Archetype::Named(a.name, base_of(a.name)),
+            vec![format!("leads the {} archetype", a.name)],
+        ),
+        None => cmd
+            .map(archetype)
+            .unwrap_or((Archetype::Midrange, Vec::new())),
+    };
+    let base = match arch {
+        Archetype::Named(_, b) => b,
+        Archetype::Aggro => Base::Aggro,
+        Archetype::Midrange => Base::Midrange,
+        Archetype::Big => Base::Big,
+        Archetype::Spells => Base::Spells,
+        Archetype::Control => Base::Control,
+    };
     // Per 60 cards with ~26 lands (33 nonland cards each).
-    let (curve, creatures, removal, draw): ([f32; 6], (f32, f32), f32, f32) = match arch {
-        Archetype::Aggro => ([5.0, 9.0, 8.0, 6.0, 3.0, 2.0], (18.0, 24.0), 5.0, 3.0),
-        Archetype::Midrange => (CURVE_TARGET_60, (15.0, 20.0), 7.0, 5.0),
-        Archetype::Big => ([3.0, 6.0, 7.0, 7.0, 6.0, 4.0], (13.0, 18.0), 6.0, 5.0),
-        Archetype::Spells => ([4.0, 8.0, 8.0, 6.0, 4.0, 3.0], (9.0, 14.0), 8.0, 7.0),
+    let (curve, creatures, removal, draw): ([f32; 6], (f32, f32), f32, f32) = match base {
+        Base::Aggro => ([5.0, 9.0, 8.0, 6.0, 3.0, 2.0], (18.0, 24.0), 5.0, 3.0),
+        Base::Midrange => (CURVE_TARGET_60, (15.0, 20.0), 7.0, 5.0),
+        Base::Big => ([3.0, 6.0, 7.0, 7.0, 6.0, 4.0], (13.0, 18.0), 6.0, 5.0),
+        Base::Spells => ([4.0, 8.0, 8.0, 6.0, 4.0, 3.0], (9.0, 14.0), 8.0, 7.0),
+        // Measured: Thanos control wins with ~17 creatures, 8+ answers and steady draw.
+        Base::Control => ([3.0, 7.0, 7.0, 7.0, 5.0, 4.0], (14.0, 19.0), 9.0, 7.0),
     };
     let scale = rules.deck_size as f32 / 60.0;
     Plan {

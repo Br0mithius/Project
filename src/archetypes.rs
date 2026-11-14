@@ -577,7 +577,10 @@ pub const TARGETS: &[(&str, Targets)] = &[
     ("Heroes", rules(27, 24, 24, 11, 10, 0, 0)),
     ("Power-up", rules(28, 16, 24, 11, 0, 0, 0)),
     ("Spellslinger", rules(27, 16, 24, 11, 0, 0, 0)),
-    ("Stax-lite control", rules(27, 24, 24, 11, 10, 0, 0)),
+    // Package 16, not 24: a 24-card package filled the deck with on-theme but weak cards
+    // (Rapid Rescue, HULK SMASH!) and left out Captain Marvel; the sweep that chose 24
+    // compared against an illegal 121-card build.
+    ("Stax-lite control", rules(27, 16, 18, 11, 10, 0, 0)),
     ("Voltron", rules(27, 16, 24, 11, 0, 0, 0)),
     ("Dinosaurs", DEFAULT_TARGETS),
     ("Plans", DEFAULT_TARGETS),
@@ -596,6 +599,9 @@ pub fn targets(arch: &SetArchetype) -> Targets {
 /// Builds a singleton/normal deck for `cmd` from `coll` the way `analysis::autobuild` does,
 /// following `t`: the archetype package first, then the minimum counts, then the best
 /// remaining cards (no more 6+ drops than `t.topend`), on `t.lands` lands.
+/// The builder score a package card needs (about a fair creature of its cost).
+pub const PACKAGE_FLOOR: f32 = 6.0;
+
 pub fn build(
     arch: &SetArchetype,
     cmd: &Card,
@@ -656,10 +662,13 @@ pub fn build(
                 .filter(|c| analysis::available(c, &deck, coll, rules) > 0)
                 .filter_map(|c| {
                     let f = arch.fit(c);
-                    f.fits().then(|| {
-                        let s = analysis::score_card(c, &deck, db, rules).0;
-                        (c, s + 1.5 * f.score())
-                    })
+                    if !f.fits() {
+                        return None;
+                    }
+                    // On theme isn't enough: only cards about as good as a fair creature of
+                    // their cost go in first (weak fits wait for the general fill).
+                    let s = analysis::score_card(c, &deck, db, rules).0;
+                    (s >= PACKAGE_FLOOR).then(|| (c, s + 1.5 * f.score()))
                 })
                 .collect();
             cands.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
