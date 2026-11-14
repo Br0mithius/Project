@@ -13,6 +13,8 @@ const NOTE: Color32 = Color32::from_rgb(255, 190, 110);
 pub struct TableUi {
     /// The opponent being edited.
     pub editing: Option<usize>,
+    /// The trade-picks paste box.
+    pub picks_text: String,
 }
 
 impl GuiApp {
@@ -63,6 +65,10 @@ impl GuiApp {
                 ui.label(RichText::new("Player").strong());
                 ui.label(RichText::new("Commander").strong());
                 ui.label(RichText::new("Deck").strong());
+                ui.label(RichText::new("Trade picks").strong()).on_hover_text(
+                    "Cards they got in the trade market. The ones in their colours are assumed to be \
+                     in their deck (in place of its weakest cards) when you play against them.",
+                );
                 ui.label("");
                 ui.end_row();
                 for (i, o) in self.table.opponents.iter_mut().enumerate() {
@@ -84,6 +90,19 @@ impl GuiApp {
                             ui.label(o.commander.as_str());
                             ui.label(RichText::new(format!("not playable: {}", e)).color(NOTE));
                         }
+                    }
+                    let picks: Vec<String> = self
+                        .table
+                        .picks
+                        .iter()
+                        .find(|(k, _)| k.trim().eq_ignore_ascii_case(o.player.trim()))
+                        .map(|(_, v)| v.iter().map(|p| p.card.clone()).collect())
+                        .unwrap_or_default();
+                    if picks.is_empty() {
+                        ui.label(RichText::new("none tracked").weak());
+                    } else {
+                        ui.label(format!("{} cards", picks.len()))
+                            .on_hover_text(picks.join("\n"));
                     }
                     ui.horizontal(|ui| {
                         let editing = self.table_ui.editing == Some(i);
@@ -126,7 +145,7 @@ impl GuiApp {
                 self.table_ui.editing = Some(self.table.opponents.len() - 1);
                 changed = true;
             }
-            let n = self.table.next_decks(&self.db).len();
+            let n = self.table.next_count(&self.db);
             ui.label(
                 RichText::new(format!("{} playable decks ticked for the next table", n))
                     .small()
@@ -140,6 +159,54 @@ impl GuiApp {
         {
             changed |= self.table_editor(ui, i);
         }
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new("Everyone's trade picks")
+            .id_salt("trade_picks")
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(
+                        "Paste each player's trade-market cards: the player's name and a colon on one line, then one \
+                         card per line (a Mana Mixer league export works too). A player's list replaces what was \
+                         tracked for them. Cards in an opponent's colours are assumed to be in their deck for playtests.",
+                    )
+                    .small(),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.table_ui.picks_text)
+                        .hint_text("Drake:\nLlanowar Elves\nPelakka Wurm\n\nJD:\nUltron, Artificial Malevolence")
+                        .desired_rows(4)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!self.table_ui.picks_text.trim().is_empty(), egui::Button::new("Import picks"))
+                        .clicked()
+                    {
+                        match self.table.import_picks(&self.table_ui.picks_text) {
+                            Ok((p, c)) => {
+                                self.status = format!("Tracked {} trade picks for {} players.", c, p);
+                                self.table_ui.picks_text.clear();
+                                changed = true;
+                            }
+                            Err(e) => self.status = e,
+                        }
+                    }
+                    if !self.table.picks.is_empty() && ui.button("Forget all picks").clicked() {
+                        self.table.picks.clear();
+                        changed = true;
+                    }
+                });
+                for (player, list) in &self.table.picks {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}: {}",
+                            player,
+                            list.iter().map(|p| p.card.as_str()).collect::<Vec<_>>().join(" · ")
+                        ))
+                        .small(),
+                    );
+                }
+            });
         if changed {
             self.save_table();
         }

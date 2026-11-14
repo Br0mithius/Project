@@ -2716,7 +2716,7 @@ impl GuiApp {
             ui.label(RichText::new("Play against").strong()).on_hover_text("Who the lab's games are against");
             ui.horizontal_wrapped(|ui| {
                         let before = self.settings.lab_target;
-            let at_table = self.table.next_decks(&self.db).len();
+            let at_table = self.table.next_count(&self.db);
             egui::ComboBox::from_id_salt("lab_target")
                 .selected_text(self.settings.lab_target.label())
                 .show_ui(ui, |ui| {
@@ -2847,12 +2847,7 @@ impl GuiApp {
             &self.lab
         };
         if show_table {
-            let names: Vec<String> = self
-                .table
-                .next_decks(&self.db)
-                .iter()
-                .map(|(p, d)| format!("{} ({})", p, d.commander.clone().unwrap_or_default()))
-                .collect();
+            let names: Vec<String> = self.table.next_names(&self.db);
             ui.label(
                 RichText::new(format!("Against your next table: {}", names.join(", ")))
                     .strong()
