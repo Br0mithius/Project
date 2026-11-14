@@ -95,9 +95,13 @@ impl GuiApp {
         ui.separator();
         // Moves to the next line as a whole rather than breaking the name.
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-        ui.label("Plays like");
         if ui
-            .link(RichText::new(a.name).strong().color(GOLD).size(15.0))
+            .link(
+                RichText::new(format!("Plays like {}", a.name))
+                    .strong()
+                    .color(GOLD)
+                    .size(15.0),
+            )
             .on_hover_text(format!(
                 "The archetype this deck fits best: {:.0}% of a working {} deck ({} fitting cards). Click to see it on the Archetypes tab.",
                 close * 100.0,

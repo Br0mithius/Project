@@ -246,10 +246,10 @@ impl GuiApp {
         rows.sort_by(|a, b| {
             let o = match sort {
                 PowerSort::Value => a.1.value.partial_cmp(&b.1.value).unwrap(),
-                PowerSort::Name => b.0.cmp(&a.0),
-                PowerSort::Se => b.1.se.partial_cmp(&a.1.se).unwrap(),
+                PowerSort::Name => a.0.cmp(&b.0),
+                PowerSort::Se => a.1.se.partial_cmp(&b.1.se).unwrap(),
                 PowerSort::Decks => a.1.decks.cmp(&b.1.decks),
-                PowerSort::Spread => b.1.spread.partial_cmp(&a.1.spread).unwrap(),
+                PowerSort::Spread => a.1.spread.partial_cmp(&b.1.spread).unwrap(),
             };
             o.then_with(|| b.0.cmp(&a.0))
         });
@@ -281,10 +281,11 @@ impl GuiApp {
                             (PowerSort::Spread, "Spread"),
                         ] {
                             let arrow = if self.extra.sort == s {
-                                if self.extra.descending {
-                                    " ⏷"
-                                } else {
-                                    " ⏶"
+                                match (s == PowerSort::Name, self.extra.descending) {
+                                    (true, false) => " (A-Z)",
+                                    (true, true) => " (Z-A)",
+                                    (false, true) => " (high first)",
+                                    (false, false) => " (low first)",
                                 }
                             } else {
                                 ""
