@@ -93,6 +93,8 @@ impl GuiApp {
         }
         let a = &ARCHETYPES[i];
         ui.separator();
+        // Moves to the next line as a whole rather than breaking the name.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         ui.label("Plays like");
         if ui
             .link(RichText::new(a.name).strong().color(GOLD).size(15.0))
@@ -108,6 +110,7 @@ impl GuiApp {
             self.tab = Tab::Archetypes;
         }
         ui.label(RichText::new(format!("{:.0}%", close * 100.0)).color(pct_color(close)));
+        ui.style_mut().wrap_mode = None;
     }
 
     pub(super) fn archetypes_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
@@ -164,7 +167,7 @@ impl GuiApp {
         let h = ui.available_height();
         let list_w = (ui.available_width() * 0.46).clamp(320.0, 520.0);
         ui.horizontal_top(|ui| {
-            ui.allocate_ui(vec2(list_w, h), |ui| {
+            ui.allocate_ui_with_layout(vec2(list_w, h), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_width(list_w);
                 ScrollArea::vertical()
                     .id_salt("arch_list")
@@ -237,7 +240,7 @@ impl GuiApp {
             });
             ui.separator();
             let w = ui.available_width();
-            ui.allocate_ui(vec2(w, h), |ui| {
+            ui.allocate_ui_with_layout(vec2(w, h), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.set_width(w);
                 ScrollArea::vertical()
                     .id_salt("arch_detail")
@@ -446,7 +449,11 @@ impl GuiApp {
                     };
                     let t = RichText::new(label);
                     if ui
-                        .link(if own { t.color(GOOD) } else { t.weak() })
+                        .link(if own || in_deck {
+                            t.color(GOOD)
+                        } else {
+                            t.weak()
+                        })
                         .clicked()
                     {
                         acts.push(Action::Select(n.to_string()));
@@ -486,7 +493,13 @@ impl GuiApp {
                                 Color32::from_gray(170)
                             }),
                     );
-                    ui.label(RichText::new(themes).small().weak());
+                    let short: String = if themes.chars().count() > 40 {
+                        format!("{}...", themes.chars().take(38).collect::<String>())
+                    } else {
+                        themes.clone()
+                    };
+                    ui.label(RichText::new(short).small().weak())
+                        .on_hover_text(themes.as_str());
                     ui.label(RichText::new(if *in_deck { "in deck" } else { "" }).small());
                     ui.end_row();
                 }

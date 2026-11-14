@@ -1319,7 +1319,7 @@ impl GuiApp {
                     .collect()
             })
             .clone();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let frac = (total as f32 / size.max(1) as f32).min(1.0);
             ui.add(
                 egui::ProgressBar::new(frac)
@@ -4025,6 +4025,8 @@ impl GuiApp {
     }
 
     fn season_body(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        self.table_section(ui);
+        ui.add_space(6.0);
         ui.heading("Season 2 schedule & rules");
         let next = league::upcoming_session().number;
         egui::Grid::new("schedule")
@@ -4122,7 +4124,6 @@ impl GuiApp {
                     self.rev += 1;
                 }
             });
-        self.table_section(ui);
         self.opponents_section(ui);
         ui.collapsing("Advanced: change rules by hand", |ui| {
             let mut changed = false;

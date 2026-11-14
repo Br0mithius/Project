@@ -281,7 +281,11 @@ impl GuiApp {
                             (PowerSort::Spread, "Spread"),
                         ] {
                             let arrow = if self.extra.sort == s {
-                                if self.extra.descending { " v" } else { " ^" }
+                                if self.extra.descending {
+                                    " ⏷"
+                                } else {
+                                    " ⏶"
+                                }
                             } else {
                                 ""
                             };
@@ -682,11 +686,10 @@ impl GuiApp {
                 });
                 ui.add_space(6.0);
                 let i = &r.interaction;
-                ui.label(
-                    pts(i)
-                        .size(18.0)
-                        .strong(),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Interaction").size(18.0).strong());
+                    ui.label(pts(i).size(18.0).strong());
+                });
                 ui.label(if i.z() > 2.0 {
                     RichText::new("Interaction: these cards are clearly worth more together than apart (synergy).").color(GOOD)
                 } else if i.z() < -2.0 {

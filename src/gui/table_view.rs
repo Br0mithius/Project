@@ -204,7 +204,8 @@ impl GuiApp {
             );
             egui::ScrollArea::vertical()
                 .id_salt(("table_list", i))
-                .max_height(220.0)
+                .max_height(260.0)
+                .min_scrolled_height(200.0)
                 .show(ui, |ui| {
                     changed |= ui
                         .add(
