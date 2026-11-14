@@ -29,7 +29,7 @@ use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::playtest::compile::{SimCard, compile};
 use msh_deckbuilder::playtest::lab::{Measure, play_all};
-use msh_deckbuilder::playtest::simvalues::vanilla;
+use msh_deckbuilder::playtest::synergy::stand_in;
 use msh_deckbuilder::playtest::{self, Prepared};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
@@ -59,10 +59,6 @@ fn untyped(c: &Card, sub: &str) -> Card {
         format!("{} — {}", head, rest.join(" "))
     };
     out
-}
-
-fn stand_in(c: &Card) -> SimCard {
-    compile(&vanilla(c.mana_value().max(1)))
 }
 
 fn main() {
@@ -201,65 +197,38 @@ fn main() {
             pts(&o.contrast(&[(0, 1.0), (1, -1.0), (2, -1.0), (3, 1.0)]))
         );
     } else if !pkg.is_empty() {
-        let n = pkg.len();
-        let out = |skip: &[usize]| -> Prepared {
-            let swaps: Vec<(u16, SimCard)> = (0..n)
-                .filter(|i| skip.contains(i))
-                .map(|i| (index(&pkg[i]), stand_in(card(&pkg[i]))))
-                .collect();
-            base.with_swaps(&swaps)
-        };
-        let all: Vec<usize> = (0..n).collect();
-        // 0 full, 1 none, 2.. alone_i, then leave-one-out_i.
-        let mut decks = vec![base.with_swaps(&[]), out(&all)];
-        for i in 0..n {
-            let others: Vec<usize> = all.iter().copied().filter(|&j| j != i).collect();
-            decks.push(out(&others));
+        let r = playtest::synergy::package_synergy(
+            &deck,
+            &pkg,
+            &db,
+            &rules,
+            &gauntlet,
+            games,
+            seed,
+            &AtomicUsize::new(0),
+            &AtomicBool::new(false),
+        )
+        .unwrap_or_else(|e| panic!("{}", e))
+        .expect("not cancelled");
+        for (add, cut) in &r.swapped_in {
+            println!("{} put in for {} (not in the deck)", add, cut);
         }
-        for i in 0..n {
-            decks.push(out(&[i]));
-        }
-        let o = run(&decks);
         println!(
             "full deck {:.2}%  package out {:.2}%",
-            o.win_rate(0) * 100.0,
-            o.win_rate(1) * 100.0
+            r.full_win * 100.0,
+            r.out_win * 100.0
         );
         println!("{:>16}  {:>16}  card", "alone", "in the package");
-        for i in 0..n {
-            println!(
-                "{}  {}  {}",
-                pts(&o.diff(2 + i, 1)),
-                pts(&o.diff(0, 2 + n + i)),
-                pkg[i]
-            );
+        for (i, c) in r.cards.iter().enumerate() {
+            println!("{}  {}  {}", pts(&r.alone[i]), pts(&r.in_package[i]), c);
         }
-        let whole = o.diff(0, 1);
-        let mut terms = vec![(0usize, 1.0f64), (1, -1.0)];
-        for i in 0..n {
-            terms.push((2 + i, -1.0));
-            terms.push((1, 1.0));
-        }
-        let alone_sum = o.contrast(
-            &(0..n)
-                .flat_map(|i| [(2 + i, 1.0), (1usize, -1.0)])
-                .collect::<Vec<_>>(),
-        );
-        let loo_sum = o.contrast(
-            &(0..n)
-                .flat_map(|i| [(0usize, 1.0), (2 + n + i, -1.0)])
-                .collect::<Vec<_>>(),
-        );
         println!(
             "package {}   sum alone {}   sum in package {}",
-            pts(&whole),
-            pts(&alone_sum),
-            pts(&loo_sum)
+            pts(&r.package),
+            pts(&r.sum_alone),
+            pts(&r.sum_in_package)
         );
-        println!(
-            "interaction (package - sum alone) {}",
-            pts(&o.contrast(&terms))
-        );
+        println!("interaction (package - sum alone) {}", pts(&r.interaction));
     }
 
     if !tribe.is_empty() {

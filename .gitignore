@@ -15,3 +15,4 @@ data/public_pool.txt
 data/opponents.json
 data/gauntlet_cache.json
 data/gauntlet_cache.json.tmp*
+data/table.json

@@ -2,10 +2,13 @@
 //! (commanders, draft helper, trades & VP, stats, season rules, collection).
 
 use eframe::egui;
+mod arch_tab;
 mod cards;
 mod images;
+mod lab_extra;
 mod opponents;
 mod play;
+mod table_view;
 
 use crate::analysis::{self, SimResult, curve_label};
 use crate::card::{BASIC_FOR_COLOR, COLORS, Card, ColorSet, Role};
@@ -51,13 +54,15 @@ enum Tab {
     Season,
     Collection,
     Play,
+    Archetypes,
 }
 
-const TABS: [(Tab, &str); 10] = [
+const TABS: [(Tab, &str); 11] = [
     (Tab::Build, "Deck Builder"),
     (Tab::Lab, "Playtest Lab"),
     (Tab::Play, "Play"),
     (Tab::Commanders, "Commanders"),
+    (Tab::Archetypes, "Archetypes"),
     (Tab::Draft, "Draft Helper"),
     (Tab::Trade, "Trades & VP"),
     (Tab::Upgrades, "Upgrades"),
@@ -98,6 +103,37 @@ struct Settings {
     weights: crate::ranking::Weights,
     /// Playtest lab run started when a commander is chosen or a deck auto-built.
     lab_auto: LabAuto,
+    /// Who the playtest lab plays against.
+    lab_target: LabTarget,
+}
+
+/// The opponents the playtest lab plays against.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+enum LabTarget {
+    /// The simulated league's decks.
+    League,
+    /// The real opponents ticked as at the next table (My table).
+    Table,
+    /// One lab against each, reported apart.
+    Both,
+}
+
+impl LabTarget {
+    fn label(self) -> &'static str {
+        match self {
+            LabTarget::League => "simulated league",
+            LabTarget::Table => "my next table",
+            LabTarget::Both => "both (reported apart)",
+        }
+    }
+
+    fn league(self) -> bool {
+        self != LabTarget::Table
+    }
+
+    fn table(self) -> bool {
+        self != LabTarget::League
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -135,6 +171,7 @@ impl Default for Settings {
             zoom_width: 400.0,
             weights: crate::ranking::Weights::default(),
             lab_auto: LabAuto::Thorough,
+            lab_target: LabTarget::League,
         }
     }
 }
@@ -175,6 +212,11 @@ enum Action {
     /// Measure every card's power by playtests (`true`: every league deck too).
     Measure(bool),
     StopMeasure,
+    /// Auto-build archetype `ARCHETYPES[i]` around a commander.
+    AutoBuildArch(usize, String),
+    /// Start / stop the card synergy (package) test.
+    RunSynergy,
+    StopSynergy,
 }
 
 /// A playtest lab running on a background thread.
@@ -188,10 +230,45 @@ struct MeasureJob {
 }
 
 struct LabJob {
-    progress: std::sync::Arc<crate::lab::Progress>,
-    rx: std::sync::mpsc::Receiver<Option<crate::lab::LabReport>>,
+    /// One lab per opponent set, run one after the other: (against my table?, progress).
+    phases: Vec<(bool, std::sync::Arc<crate::lab::Progress>)>,
+    /// (against my table?, the report or None when stopped).
+    rx: std::sync::mpsc::Receiver<(bool, Option<crate::lab::LabReport>)>,
+    /// Reports still to come.
+    pending: usize,
     commander: String,
     started: std::time::Instant,
+}
+
+impl LabJob {
+    fn fraction(&self) -> f32 {
+        let n = self.phases.len().max(1) as f32;
+        self.phases.iter().map(|(_, p)| p.fraction()).sum::<f32>() / n
+    }
+
+    /// The running phase's stage, with which opponents when there are two phases.
+    fn stage(&self) -> String {
+        let cur = self
+            .phases
+            .iter()
+            .find(|(_, p)| p.fraction() < 1.0 && !p.stage().is_empty())
+            .or(self.phases.last());
+        match cur {
+            Some((table, p)) if self.phases.len() > 1 => format!(
+                "{} ({})",
+                p.stage(),
+                if *table { "my table" } else { "league" }
+            ),
+            Some((_, p)) => p.stage(),
+            None => String::new(),
+        }
+    }
+
+    fn cancel(&self) {
+        for (_, p) in &self.phases {
+            p.cancel();
+        }
+    }
 }
 
 /// A commander ranking being built on a background thread.
@@ -214,6 +291,10 @@ struct Memo {
     trade: Option<((u32, usize), Vec<(Card, u32, u32, String)>)>,
     weakest: Option<Vec<(String, f32)>>,
     upgrades: Option<Vec<crate::upgrades::Upgrade>>,
+    /// Every archetype's fit for the pool and the deck (Archetypes tab).
+    arch_rows: Option<Vec<arch_tab::ArchRow>>,
+    /// The archetype the deck plays best: (index, closeness, fitting cards).
+    best_arch: Option<Option<(usize, f32, usize)>>,
 }
 
 pub struct GuiApp {
@@ -271,6 +352,21 @@ pub struct GuiApp {
     memo: Memo,
     /// The Play tab's game.
     play: play::PlayState,
+    /// The last playtest lab report against my next table.
+    lab_table: Option<crate::lab::LabReport>,
+    /// Show the table report (when both exist).
+    lab_show_table: bool,
+    /// Playtest Lab sub-view.
+    lab_view: lab_extra::LabView,
+    /// Measured card power list, the card synergy test.
+    extra: lab_extra::ExtraState,
+    /// Archetypes tab.
+    arch: arch_tab::ArchState,
+    /// My table: the real opponents (data/table.json) and their editor.
+    table: crate::table::Table,
+    table_ui: table_view::TableUi,
+    /// How the simulator handles each card, computed when first shown.
+    coverage: std::collections::HashMap<String, crate::playtest::coverage::CardCoverage>,
 }
 
 /// "45 s", "3 min".
@@ -415,7 +511,16 @@ impl GuiApp {
             rev: 1,
             memo: Memo::default(),
             play: Default::default(),
+            lab_table: None,
+            lab_show_table: false,
+            lab_view: Default::default(),
+            extra: Default::default(),
+            arch: Default::default(),
+            table: crate::table::Table::default(),
+            table_ui: Default::default(),
+            coverage: Default::default(),
         };
+        app.table = crate::table::Table::load(&app.data_dir);
         app.deck.name = app.deck_name.clone();
         app.refresh_saved_decks();
         if app.coll.total() == 0 {
@@ -543,6 +648,7 @@ impl GuiApp {
         }
         let tex = self.full_texture(card);
         let w = self.settings.zoom_width;
+        let power = lab_extra::power_line(&self.db, &card.name);
         resp.on_hover_ui_at_pointer(|ui| {
             card_widget(
                 ui,
@@ -558,6 +664,9 @@ impl GuiApp {
             if let Some(n) = &note {
                 ui.label(RichText::new(n).small());
             }
+            if let Some(p) = &power {
+                ui.label(RichText::new(p).small());
+            }
         })
     }
 
@@ -568,6 +677,8 @@ impl GuiApp {
             !matches!(
                 a,
                 Action::Select(_)
+                    | Action::RunSynergy
+                    | Action::StopSynergy
                     | Action::Copy(..)
                     | Action::Simulate
                     | Action::NewHand
@@ -879,6 +990,35 @@ impl GuiApp {
                     self.stop_lab();
                     self.status = "Playtest lab stopped.".into();
                 }
+                Action::AutoBuildArch(i, n) => {
+                    let arch = &crate::archetypes::ARCHETYPES[i];
+                    if let Some(c) = self.db.get(&n).cloned() {
+                        let (mut d, short) = crate::archetypes::autobuild_as(
+                            arch,
+                            &c,
+                            &self.db,
+                            &self.coll,
+                            &self.rules,
+                        );
+                        d.name = self.deck.name.clone();
+                        self.deck = d;
+                        self.tab = Tab::Build;
+                        chose_commander = true;
+                        self.status = if short > 0 {
+                            format!(
+                                "Built a {} deck around {} - your pool ran {} cards short, so extra basics fill the gap. Undo goes back.",
+                                arch.name, n, short
+                            )
+                        } else {
+                            format!(
+                                "Built a {} deck around {}. Tweak it, or press Undo to go back.",
+                                arch.name, n
+                            )
+                        };
+                    }
+                }
+                Action::RunSynergy => self.start_synergy(),
+                Action::StopSynergy => self.stop_synergy(),
             }
             if self.deck != before {
                 self.history.push(before);
@@ -1148,7 +1288,7 @@ impl GuiApp {
             });
         });
         ui.add_space(2.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (t, label) in TABS {
                 let sel = self.tab == t;
                 let text = RichText::new(label).size(15.0);
@@ -1179,7 +1319,7 @@ impl GuiApp {
                     .collect()
             })
             .clone();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let frac = (total as f32 / size.max(1) as f32).min(1.0);
             ui.add(
                 egui::ProgressBar::new(frac)
@@ -1204,15 +1344,14 @@ impl GuiApp {
                     }
                 });
             }
+            self.best_archetype_label(ui);
             // The playtest lab, running or done.
             let lab = if let Some(job) = &self.lab_job {
-                Some(format!(
-                    "Playtest lab {:.0}%...",
-                    job.progress.fraction() * 100.0
-                ))
+                Some(format!("Playtest lab {:.0}%...", job.fraction() * 100.0))
             } else {
                 self.lab
                     .as_ref()
+                    .or(self.lab_table.as_ref())
                     .filter(|r| self.deck.commander.as_deref() == Some(r.commander.as_str()))
                     .map(|r| match &r.best {
                         Some(b) if b.deck.cards == self.deck.cards => {
@@ -1565,6 +1704,7 @@ impl GuiApp {
                 league::vp_value(&card),
                 league::claim_cost(&card)
             ));
+            self.card_facts(ui, &card);
             if !card.tags.is_empty() {
                 ui.label(RichText::new(format!("Scryfall tags: {}", card.tags.join(", "))).small())
                     .on_hover_text("Community Tagger tags from Scryfall - used to confirm roles and synergy");
@@ -2151,22 +2291,61 @@ impl GuiApp {
         if self.lab.as_ref().is_some_and(|r| r.commander != cmd.name) {
             self.lab = None;
         }
+        if self
+            .lab_table
+            .as_ref()
+            .is_some_and(|r| r.commander != cmd.name)
+        {
+            self.lab_table = None;
+        }
+        let target = self.settings.lab_target;
+        let table = if target.table() {
+            let g = crate::table::gauntlet(&self.table, &self.db);
+            if g.is_empty() {
+                self.status = "No one is ticked as at your next table (Season & Rules > My table) - the lab can't play against it.".into();
+                if !target.league() {
+                    return;
+                }
+                None
+            } else {
+                Some(g)
+            }
+        } else {
+            None
+        };
         let (db, coll, rules, deck) = (
             self.db.clone(),
             self.coll.clone(),
             self.rules.clone(),
             self.deck.clone(),
         );
-        let progress = std::sync::Arc::new(crate::lab::Progress::new());
+        let mut phases = Vec::new();
+        if target.league() {
+            phases.push((false, std::sync::Arc::new(crate::lab::Progress::new())));
+        }
+        if table.is_some() {
+            phases.push((true, std::sync::Arc::new(crate::lab::Progress::new())));
+        }
         let (tx, rx) = std::sync::mpsc::channel();
-        let p = progress.clone();
+        let ps = phases.clone();
         let name = cmd.name.clone();
         std::thread::spawn(move || {
-            let report = crate::lab::explore(&cmd, &deck, &db, &coll, &rules, effort, &p);
-            let _ = tx.send(report);
+            for (is_table, p) in ps {
+                let report = match &table {
+                    Some(g) if is_table => {
+                        crate::lab::explore_with(&cmd, &deck, &db, &coll, &rules, effort, g, &p)
+                    }
+                    _ => crate::lab::explore(&cmd, &deck, &db, &coll, &rules, effort, &p),
+                };
+                let stopped = report.is_none();
+                if tx.send((is_table, report)).is_err() || stopped {
+                    return;
+                }
+            }
         });
         self.lab_job = Some(LabJob {
-            progress,
+            pending: phases.len(),
+            phases,
             rx,
             commander: name,
             started: std::time::Instant::now(),
@@ -2231,7 +2410,7 @@ impl GuiApp {
 
     fn stop_lab(&mut self) {
         if let Some(job) = self.lab_job.take() {
-            job.progress.cancel();
+            job.cancel();
         }
     }
 
@@ -2243,19 +2422,38 @@ impl GuiApp {
             return;
         }
         match job.rx.try_recv() {
-            Ok(Some(report)) => {
+            Ok((is_table, Some(report))) => {
+                let against = if is_table {
+                    "against your next table"
+                } else {
+                    "against the simulated league"
+                };
                 self.status = match &report.best {
                     Some(b) => format!(
-                        "Playtest lab finished: a combination of {} swaps measured {} win-rate points - see the Playtest Lab tab.",
+                        "Playtest lab {} finished: a combination of {} swaps measured {} win-rate points - see the Playtest Lab tab.",
+                        against,
                         b.swaps.len(),
                         crate::lab::pts_se(&b.gain)
                     ),
-                    None => "Playtest lab finished: no change beat the current build (details on the Playtest Lab tab).".into(),
+                    None => format!(
+                        "Playtest lab {} finished: no change beat the current build (details on the Playtest Lab tab).",
+                        against
+                    ),
                 };
-                self.lab = Some(report);
-                self.lab_job = None;
+                if is_table {
+                    self.lab_table = Some(report);
+                } else {
+                    self.lab = Some(report);
+                }
+                self.lab_show_table = is_table;
+                let left = job.pending - 1;
+                if left == 0 {
+                    self.lab_job = None;
+                } else if let Some(j) = &mut self.lab_job {
+                    j.pending = left;
+                }
             }
-            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => self.lab_job = None,
+            Ok((_, None)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => self.lab_job = None,
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(300))
             }
@@ -2265,6 +2463,7 @@ impl GuiApp {
     fn poll_jobs(&mut self, ctx: &egui::Context) {
         self.poll_lab(ctx);
         self.poll_measure(ctx);
+        self.poll_synergy(ctx);
         if let Some(job) = &self.rank_job {
             match job.rx.try_recv() {
                 Ok(ranks) => {
@@ -2395,7 +2594,31 @@ impl GuiApp {
                 t
             }
         };
-        ui.heading("Playtest lab");
+        ui.horizontal(|ui| {
+            ui.heading("Playtest lab");
+            ui.separator();
+            for (v, label) in [
+                (lab_extra::LabView::Deck, "Deck lab"),
+                (lab_extra::LabView::Power, "Measured card power"),
+                (lab_extra::LabView::Synergy, "Card synergy test"),
+            ] {
+                let sel = self.lab_view == v;
+                let text = RichText::new(label).size(15.0);
+                let text = if sel {
+                    text.strong().color(Color32::from_rgb(255, 205, 80))
+                } else {
+                    text
+                };
+                if ui.selectable_label(sel, text).clicked() {
+                    self.lab_view = v;
+                }
+            }
+        });
+        match self.lab_view {
+            lab_extra::LabView::Power => return self.power_view(ui, acts),
+            lab_extra::LabView::Synergy => return self.synergy_view(ui, acts),
+            lab_extra::LabView::Deck => {}
+        }
         ui.label(
             "The deck builder picks cards by score, and scores can be wrong. The lab plays your deck and changed versions \
              of it through the same simulated 4-player games, measures what each card and each possible addition is worth, \
@@ -2405,7 +2628,7 @@ impl GuiApp {
         ui.horizontal_wrapped(|ui| {
             let has_cmd = self.deck.commander.is_some();
             if let Some(job) = &self.lab_job {
-                let f = job.progress.fraction();
+                let f = job.fraction();
                 let secs = job.started.elapsed().as_secs_f32();
                 let left = if f > 0.03 {
                     format!(" · about {} left", fmt_secs(secs * (1.0 - f) / f))
@@ -2414,7 +2637,7 @@ impl GuiApp {
                 };
                 ui.add(egui::ProgressBar::new(f).desired_width(360.0).text(format!(
                     "{} {:.0}%{}",
-                    job.progress.stage(),
+                    job.stage(),
                     f * 100.0,
                     left
                 )));
@@ -2483,9 +2706,62 @@ impl GuiApp {
             if self.settings.lab_auto != before {
                 self.save_settings();
             }
+            ui.separator();
+            ui.label("Test against:");
+            let before = self.settings.lab_target;
+            let at_table = self.table.next_decks(&self.db).len();
+            egui::ComboBox::from_id_salt("lab_target")
+                .selected_text(self.settings.lab_target.label())
+                .show_ui(ui, |ui| {
+                    for t in [LabTarget::League, LabTarget::Table, LabTarget::Both] {
+                        ui.selectable_value(&mut self.settings.lab_target, t, t.label());
+                    }
+                })
+                .response
+                .on_hover_text(format!(
+                    "My next table: the real opponents ticked on Season & Rules > My table ({} decks ready). \
+                     Their decks are the fixed opponents of every game, in shuffled seats.",
+                    at_table
+                ));
+            if self.settings.lab_target != before {
+                self.save_settings();
+            }
+            if self.settings.lab_target.table() && at_table == 0 {
+                ui.label(RichText::new("no one ticked at your next table yet").color(NOTE));
+            }
         });
         ui.separator();
-        let Some(r) = &self.lab else {
+        if self.lab.is_some() && self.lab_table.is_some() {
+            ui.horizontal(|ui| {
+                ui.label("Results against:");
+                ui.selectable_value(&mut self.lab_show_table, false, "the simulated league");
+                ui.selectable_value(&mut self.lab_show_table, true, "my next table");
+            });
+        }
+        let show_table = match (&self.lab, &self.lab_table) {
+            (Some(_), Some(_)) => self.lab_show_table,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        let r = if show_table {
+            &self.lab_table
+        } else {
+            &self.lab
+        };
+        if show_table {
+            let names: Vec<String> = self
+                .table
+                .next_decks(&self.db)
+                .iter()
+                .map(|(p, d)| format!("{} ({})", p, d.commander.clone().unwrap_or_default()))
+                .collect();
+            ui.label(
+                RichText::new(format!("Against your next table: {}", names.join(", ")))
+                    .strong()
+                    .color(Color32::from_rgb(150, 200, 255)),
+            );
+        }
+        let Some(r) = r else {
             ui.label(if self.lab_job.is_some() {
                 "Playtesting in the background - you can keep building meanwhile."
             } else if self.deck.commander.is_none() {
@@ -3749,6 +4025,8 @@ impl GuiApp {
     }
 
     fn season_body(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        self.table_section(ui);
+        ui.add_space(6.0);
         ui.heading("Season 2 schedule & rules");
         let next = league::upcoming_session().number;
         egui::Grid::new("schedule")
@@ -4232,6 +4510,13 @@ impl eframe::App for GuiApp {
                 egui::CentralPanel::default().show(ui, |ui| self.season_tab(ui, &mut acts));
             }
             Tab::Play => self.play_tab(ui),
+            Tab::Archetypes => {
+                Panel::right("inspector_a")
+                    .resizable(true)
+                    .default_size(330.0)
+                    .show(ui, |ui| self.inspector(ui, &mut acts));
+                egui::CentralPanel::default().show(ui, |ui| self.archetypes_tab(ui, &mut acts));
+            }
             Tab::Collection => {
                 Panel::right("inspector_p")
                     .resizable(true)
