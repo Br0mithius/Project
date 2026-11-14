@@ -484,6 +484,18 @@ fn multiplayer_adjust(
 /// This is a heuristic to rank options, not gospel - always read the cards.
 /// What a noncreature mana rock adds to its score: the mana it taps for each turn, weighted
 /// by how early it comes down, plus colour fixing in a deck of three or more colours.
+/// The N of a Vehicle's "Crew N" keyword line (not a card named "... Crew").
+fn crew_number(card: &Card) -> Option<u32> {
+    card.oracle_text.lines().find_map(|l| {
+        let rest = l.trim().strip_prefix("Crew ")?;
+        rest.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .ok()
+    })
+}
+
 fn rock_points(card: &Card, deck: &Deck, db: &CardDb) -> Option<(f32, String)> {
     if card.is_land() || card.is_creature() {
         return None;
@@ -683,6 +695,16 @@ pub fn score_card_heuristic(
         if let Some((pts, note)) = rock_points(card, deck, db) {
             score += pts;
             why.push(note);
+        }
+    }
+    // Crew is a cost: it taps creatures that then can't attack or block until your next turn,
+    // and a high crew number often can't be paid at all. Crew 1-2 is nearly free; each point
+    // above that costs (Dependable Quinjet's crew 4 made it a 3-mana rock in practice).
+    if let Some(n) = crew_number(card) {
+        if n >= 3 {
+            let pen = 0.8 * (n as f32 - 2.0);
+            score -= pen;
+            why.push(format!("crew {} is hard to pay (taps your blockers)", n));
         }
     }
     // Permanents that keep producing value (each-turn triggers, repeatable abilities) are

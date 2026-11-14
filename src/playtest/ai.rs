@@ -4753,7 +4753,11 @@ pub fn crew_for_combat(g: &mut Game, a: usize) {
             .filter(|&i| !g.perms[i].sick)
             .map(|i| g.perms[i].p)
             .sum();
-        if !helpers.is_empty() && helper_power < g.perms[vi].base_p {
+        // The crew stay tapped through every opponent's turn: no blocking until our next
+        // untap. Only give up those blockers when the table isn't threatening our life.
+        let danger = danger_before_turn(g, a, a);
+        let safe = g.players[a].life > 2 * danger + 5;
+        if !helpers.is_empty() && helper_power < g.perms[vi].base_p && safe {
             g.crew(a, v);
         }
     }
