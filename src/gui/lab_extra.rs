@@ -302,8 +302,9 @@ impl GuiApp {
                                 }
                             }
                         }
-                        ui.label("");
-                        ui.label("");
+                        ui.label(RichText::new("Trust").strong())
+                            .on_hover_text("Consistent: measured in 3+ decks with similar results");
+                        ui.label(RichText::new("Yours").strong());
                         ui.end_row();
                         for (name, p) in &rows {
                             if ui.link(name.as_str()).clicked() {
@@ -485,11 +486,16 @@ impl GuiApp {
 
     pub(super) fn synergy_view(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.label(
-            "Are some cards worth more together than apart? Pick 2-8 cards: the test plays your deck with parts of the \
-             package swapped for neutral stand-ins (a vanilla creature of the same cost), all on the same games. \
-             Each card alone (the rest out), each card in the package (left out alone), the whole package, and the \
-             interaction: the package minus the sum of the cards alone (positive = synergy). Cards from your pool \
-             that aren't in the deck go in place of its weakest spells.",
+            "Are some cards worth more together than apart? Pick 2 to 8 cards and run the test. It plays your deck \
+             with and without them (a plain creature of the same cost stands in) and compares what the cards are \
+             worth alone with what they are worth together. A positive interaction means they help each other.",
+        );
+        ui.label(
+            RichText::new(
+                "Cards from your pool that aren't in the deck replace its weakest spells for the test; your deck itself doesn't change.",
+            )
+            .small()
+            .weak(),
         );
         ui.add_space(4.0);
         let running = self.extra.syn_job.is_some();
@@ -613,12 +619,13 @@ impl GuiApp {
                 let n = self.extra.syn_cards.len().max(2);
                 ui.label(
                     RichText::new(format!(
-                        "{} deck-games",
+                        "{} games in total",
                         crate::playtest::synergy::package_size(n, self.extra.syn_games)
                     ))
                     .small()
                     .weak(),
-                );
+                )
+                .on_hover_text("More games give a more certain answer but take longer.");
             }
         });
         ui.separator();

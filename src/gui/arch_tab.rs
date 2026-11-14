@@ -289,32 +289,39 @@ impl GuiApp {
         ui.add_space(4.0);
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Your pool:").strong());
+            // Bar on one line, the counts underneath: side by side, the counts wrapped mid-phrase.
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Your pool").strong());
                 ui.add(
                     egui::ProgressBar::new(p.closeness)
-                        .desired_width(140.0)
-                        .text(format!("{:.0}%", p.closeness * 100.0)),
+                        .desired_width(180.0)
+                        .text(format!("{:.0}% fit", p.closeness * 100.0)),
                 );
-                ui.label(format!(
+            });
+            ui.label(
+                RichText::new(format!(
                     "{} fitting cards · {:.0} enablers (wants {:.0}) · {:.0} payoffs (wants {:.0})",
                     p.cards.len(),
                     p.enablers,
                     ar::ENABLERS_WANTED,
                     p.payoffs,
                     ar::PAYOFFS_WANTED
-                ));
-            });
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Your deck:").strong());
-                match &d {
-                    Some(d) => {
+                ))
+                .small(),
+            );
+            ui.add_space(4.0);
+            ui.vertical(|ui| match &d {
+                Some(d) => {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Your deck").strong());
                         ui.add(
                             egui::ProgressBar::new(d.closeness)
-                                .desired_width(140.0)
-                                .text(format!("{:.0}%", d.closeness * 100.0)),
+                                .desired_width(180.0)
+                                .text(format!("{:.0}% fit", d.closeness * 100.0)),
                         );
-                        ui.label(format!(
+                    });
+                    ui.label(
+                        RichText::new(format!(
                             "{} fitting cards · {:.0} enablers · {:.0} payoffs{}",
                             d.cards.len(),
                             d.enablers,
@@ -324,14 +331,17 @@ impl GuiApp {
                             } else {
                                 " · the commander leads it"
                             }
-                        ));
-                    }
-                    None => {
-                        ui.label(
-                            RichText::new("not in your deck's colours (or no commander yet)")
-                                .weak(),
-                        );
-                    }
+                        ))
+                        .small(),
+                    );
+                }
+                None => {
+                    ui.label(
+                        RichText::new(
+                            "Your deck: not in your deck's colours (or no commander yet)",
+                        )
+                        .weak(),
+                    );
                 }
             });
         });

@@ -424,5 +424,14 @@ pub fn identity_dots(ui: &mut Ui, id: ColorSet, d: f32) {
 
 /// A frame colour made readable as text on the dark background.
 pub fn lighten_for_text(c: Color32) -> Color32 {
-    lighten(c, 0.35)
+    // Lighten, then keep lightening until the text is readable on the dark background
+    // (black and colourless frames came out mid-grey, below comfortable contrast).
+    let mut out = lighten(c, 0.35);
+    let lum = |c: Color32| 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
+    let mut t = 0.15;
+    while lum(out) < 175.0 && t <= 1.0 {
+        out = lighten(c, 0.35 + t);
+        t += 0.15;
+    }
+    out
 }

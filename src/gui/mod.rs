@@ -105,6 +105,10 @@ struct Settings {
     lab_auto: LabAuto,
     /// Who the playtest lab plays against.
     lab_target: LabTarget,
+    /// Size of everything on screen (1.0 = normal). Ctrl + / Ctrl - change it too.
+    text_scale: f32,
+    /// Brighter secondary text, for readability.
+    high_contrast: bool,
 }
 
 /// The opponents the playtest lab plays against.
@@ -172,6 +176,8 @@ impl Default for Settings {
             weights: crate::ranking::Weights::default(),
             lab_auto: LabAuto::Thorough,
             lab_target: LabTarget::League,
+            text_scale: 1.0,
+            high_contrast: false,
         }
     }
 }
@@ -407,6 +413,23 @@ fn migrate_old_images(data_dir: &std::path::Path, images_dir: &std::path::Path, 
     let _ = std::fs::remove_dir(&old); // only succeeds if now empty
 }
 
+/// Secondary ("weak") text colour: the default dark-theme grey is dim at small sizes, so it
+/// is lifted a little always, and to near-white in high-contrast mode.
+fn apply_contrast(ctx: &egui::Context, high: bool) {
+    ctx.global_style_mut(|s| {
+        s.visuals.weak_text_color = Some(if high {
+            Color32::from_gray(215)
+        } else {
+            Color32::from_gray(160)
+        });
+        if high {
+            s.visuals.override_text_color = Some(Color32::from_gray(245));
+        } else {
+            s.visuals.override_text_color = None;
+        }
+    });
+}
+
 impl GuiApp {
     fn new(cc: &eframe::CreationContext<'_>, data_dir: PathBuf) -> GuiApp {
         let ctx = &cc.egui_ctx;
@@ -423,7 +446,8 @@ impl GuiApp {
             for (style, id) in s.text_styles.iter_mut() {
                 id.size = match style {
                     egui::TextStyle::Heading => 20.0,
-                    egui::TextStyle::Small => 11.0,
+                    // 12, not 11: the smallest text is notes people do need to read.
+                    egui::TextStyle::Small => 12.0,
                     _ => 14.0,
                 };
             }
@@ -433,6 +457,9 @@ impl GuiApp {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
         settings.weights.replace_old_defaults();
+        settings.text_scale = settings.text_scale.clamp(0.8, 1.8);
+        ctx.set_zoom_factor(settings.text_scale);
+        apply_contrast(ctx, settings.high_contrast);
         let mut error = None;
         let mut db = CardDb::load(&data_dir.join("cards.json")).unwrap_or_else(|e| {
             error = Some(e);
@@ -454,6 +481,16 @@ impl GuiApp {
         rules.data_dir = Some(data_dir.clone());
         let current = paths::decks_dir(&data_dir).join("_current.txt");
         let deck = Deck::load(&current, &db).unwrap_or_else(|_| Deck::new("my deck"));
+        let welcome: String = match &deck.commander {
+            Some(c) => format!(
+                "Welcome back - your {} deck is open. Click any card to inspect it.",
+                c
+            ),
+            None => {
+                "Welcome! Pick a commander on the Commanders tab, or click any card to inspect it."
+                    .into()
+            }
+        };
         let deck_name = if deck.name == "_current" {
             "my deck".into()
         } else {
@@ -473,9 +510,7 @@ impl GuiApp {
             images,
             tab: Tab::Build,
             selected: None,
-            status:
-                "Welcome! Pick a commander on the Commanders tab, or click any card to inspect it."
-                    .into(),
+            status: welcome,
             search: String::new(),
             colors: [false; 6],
             type_filter: 0,
@@ -1100,7 +1135,8 @@ impl GuiApp {
     // ------------------------------------------------------------------ chrome
 
     fn top_bar(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
-        ui.horizontal(|ui| {
+        // Wrapped, so a narrow window or large text size never pushes Settings off screen.
+        ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("MSH Deckbuilder").heading().strong().color(Color32::from_rgb(255, 205, 80)));
             ui.separator();
             // Session picker.
@@ -1280,6 +1316,31 @@ impl GuiApp {
                         self.save_settings();
                     }
                 });
+                ui.separator();
+                ui.label(RichText::new("Readability").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Text and controls size");
+                    let r = ui.add(
+                        egui::Slider::new(&mut self.settings.text_scale, 0.8..=1.8)
+                            .step_by(0.05)
+                            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+                    );
+                    if r.changed() {
+                        ui.ctx().set_zoom_factor(self.settings.text_scale);
+                    }
+                    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                        self.save_settings();
+                    }
+                })
+                .response
+                .on_hover_text("Ctrl and + / Ctrl and - also change it, Ctrl and 0 resets it.");
+                if ui
+                    .checkbox(&mut self.settings.high_contrast, "High-contrast text (brighter notes and hints)")
+                    .changed()
+                {
+                    apply_contrast(ui.ctx(), self.settings.high_contrast);
+                    self.save_settings();
+                }
                 ui.separator();
                 ui.label("Card size in lists");
                 if ui.add(egui::Slider::new(&mut self.settings.card_width, 100.0..=240.0)).changed() {
@@ -1517,7 +1578,11 @@ impl GuiApp {
                         ui.selectable_value(&mut self.role_filter, Some(r), r.label());
                     }
                 });
-            ui.label("Max MV");
+            // A label that doesn't wrap moves to the next line whole instead of breaking
+            // mid-word (a nested horizontal layout can't wrap, and widened the panel instead).
+            ui.spacing_mut().slider_width = 90.0;
+            ui.add(egui::Label::new("Max MV").extend())
+                .on_hover_text("Highest mana value to show");
             ui.add(
                 egui::Slider::new(&mut self.mv_max, 0..=7).custom_formatter(|v, _| {
                     if v >= 7.0 {
@@ -1575,7 +1640,8 @@ impl GuiApp {
             ))
             .small()
             .weak(),
-        );
+        )
+        .on_hover_text("The badge on each card is copies in your deck / copies you own.");
         let w = self.settings.card_width;
         ScrollArea::vertical()
             .id_salt("pool_scroll")
@@ -2024,89 +2090,96 @@ impl GuiApp {
             });
         }
         let used = cols.iter().filter(|c| !c.is_empty()).count().max(1) as f32;
-        let w = ((ui.available_width() - used * 10.0) / used).clamp(96.0, 150.0);
+        let w = ((ui.available_width() - used * 10.0) / used).clamp(104.0, 150.0);
         let step = w * 0.25;
-        ui.horizontal_top(|ui| {
-            for (i, col) in cols.iter().enumerate() {
-                if col.is_empty() {
-                    continue;
-                }
-                ui.vertical(|ui| {
-                    let count: u32 = col.iter().map(|(_, n)| n).sum();
-                    let title = if i == 6 {
-                        "Lands".to_string()
-                    } else {
-                        format!("MV {}", curve_label(i))
-                    };
-                    ui.label(RichText::new(format!("{} ({})", title, count)).strong());
-                    if col.is_empty() {
-                        ui.allocate_space(vec2(w, 10.0));
-                        return;
-                    }
-                    let full = card_size(w);
-                    let height = full.y + step * (col.len() as f32 - 1.0);
-                    let (area, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
-                    for (k, (card, n)) in col.iter().enumerate() {
-                        let top = area.top() + step * k as f32;
-                        let rect = egui::Rect::from_min_size(pos2(area.left(), top), full);
-                        let hit = if k + 1 == col.len() {
-                            rect
+        // As many columns per row as fit: with many mana values in a narrow window the columns
+        // used to run off the right edge, hiding the 6+ and Lands columns.
+        let shown: Vec<usize> = (0..cols.len()).filter(|&i| !cols[i].is_empty()).collect();
+        let per_row = ((ui.available_width() + 10.0) / (w + 10.0))
+            .floor()
+            .max(1.0) as usize;
+        for chunk in shown.chunks(per_row) {
+            ui.horizontal_top(|ui| {
+                for &i in chunk {
+                    let col = &cols[i];
+                    ui.vertical(|ui| {
+                        let count: u32 = col.iter().map(|(_, n)| n).sum();
+                        let title = if i == 6 {
+                            "Lands".to_string()
                         } else {
-                            egui::Rect::from_min_size(rect.min, vec2(w, step))
+                            format!("MV {}", curve_label(i))
                         };
-                        let resp = ui.interact(
-                            hit,
-                            ui.scope_id().with(("deckcard", &card.name)),
-                            Sense::click(),
-                        );
-                        let tex = if self.settings.real_images && ui.is_rect_visible(rect) {
-                            self.images.thumb(card)
-                        } else {
-                            None
-                        };
-                        paint_card(
-                            ui,
-                            rect,
-                            &CardLook {
-                                card,
-                                width: w,
-                                image: tex.as_ref(),
-                                badge: if *n > 1 {
-                                    Some(format!("x{}", n))
-                                } else {
-                                    None
+                        ui.label(RichText::new(format!("{} ({})", title, count)).strong());
+                        if col.is_empty() {
+                            ui.allocate_space(vec2(w, 10.0));
+                            return;
+                        }
+                        let full = card_size(w);
+                        let height = full.y + step * (col.len() as f32 - 1.0);
+                        let (area, _) = ui.allocate_exact_size(vec2(w, height), Sense::hover());
+                        for (k, (card, n)) in col.iter().enumerate() {
+                            let top = area.top() + step * k as f32;
+                            let rect = egui::Rect::from_min_size(pos2(area.left(), top), full);
+                            let hit = if k + 1 == col.len() {
+                                rect
+                            } else {
+                                egui::Rect::from_min_size(rect.min, vec2(w, step))
+                            };
+                            let resp = ui.interact(
+                                hit,
+                                ui.scope_id().with(("deckcard", &card.name)),
+                                Sense::click(),
+                            );
+                            let tex = if self.settings.real_images && ui.is_rect_visible(rect) {
+                                self.images.thumb(card)
+                            } else {
+                                None
+                            };
+                            paint_card(
+                                ui,
+                                rect,
+                                &CardLook {
+                                    card,
+                                    width: w,
+                                    image: tex.as_ref(),
+                                    badge: if *n > 1 {
+                                        Some(format!("x{}", n))
+                                    } else {
+                                        None
+                                    },
+                                    dimmed: false,
+                                    selected: self.selected.as_deref() == Some(card.name.as_str()),
                                 },
-                                dimmed: false,
-                                selected: self.selected.as_deref() == Some(card.name.as_str()),
-                            },
-                            resp.hovered(),
-                        );
-                        if resp.clicked() {
-                            acts.push(Action::Select(card.name.clone()));
-                        }
-                        if resp.double_clicked() {
-                            acts.push(Action::Remove(card.name.clone(), 1));
-                        }
-                        let name = card.name.clone();
-                        let resp = self.with_zoom(
-                            resp,
-                            card,
-                            Some("Click to inspect · double-click to remove one".into()),
-                        );
-                        resp.context_menu(|ui| {
-                            if ui.button("Remove one").clicked() {
-                                acts.push(Action::Remove(name.clone(), 1));
-                                ui.close();
+                                resp.hovered(),
+                            );
+                            if resp.clicked() {
+                                acts.push(Action::Select(card.name.clone()));
                             }
-                            if ui.button("Add another").clicked() {
-                                acts.push(Action::Add(name.clone(), 1));
-                                ui.close();
+                            if resp.double_clicked() {
+                                acts.push(Action::Remove(card.name.clone(), 1));
                             }
-                        });
-                    }
-                });
-            }
-        });
+                            let name = card.name.clone();
+                            let resp = self.with_zoom(
+                                resp,
+                                card,
+                                Some("Click to inspect · double-click to remove one".into()),
+                            );
+                            resp.context_menu(|ui| {
+                                if ui.button("Remove one").clicked() {
+                                    acts.push(Action::Remove(name.clone(), 1));
+                                    ui.close();
+                                }
+                                if ui.button("Add another").clicked() {
+                                    acts.push(Action::Add(name.clone(), 1));
+                                    ui.close();
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+            ui.add_space(4.0);
+        }
     }
 
     fn list_deck(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
@@ -2225,15 +2298,23 @@ impl GuiApp {
     }
 
     fn build_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
-        Panel::right("inspector")
+        // Sized from the window, so the deck in the middle always keeps room: with a small
+        // window or large text the three panels used to overlap.
+        let total = ui.ctx().content_rect().width();
+        let insp_max = (total * 0.3).clamp(220.0, 480.0);
+        let insp = Panel::right("inspector")
             .resizable(true)
-            .default_size(330.0)
-            .size_range(260.0..=480.0)
-            .show(ui, |ui| self.inspector(ui, acts));
-        Panel::left("pool")
+            .default_size(330.0f32.min(insp_max))
+            .size_range(220.0f32.min(insp_max)..=insp_max)
+            .show(ui, |ui| self.inspector(ui, acts))
+            .response
+            .rect
+            .width();
+        let max_pool = (total - insp - 420.0).clamp(260.0, 900.0);
+        Panel::left("pool_panel")
             .resizable(true)
-            .default_size(470.0)
-            .size_range(300.0..=900.0)
+            .default_size(470.0f32.min(max_pool))
+            .size_range(260.0..=max_pool)
             .show(ui, |ui| self.pool_panel(ui, acts));
         egui::CentralPanel::default().show(ui, |ui| self.deck_panel(ui, acts));
     }
@@ -2625,8 +2706,40 @@ impl GuiApp {
              and confirms the best combination on fresh games. Your deck only changes if you apply a suggestion.",
         );
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            let has_cmd = self.deck.commander.is_some();
+        let has_cmd = self.deck.commander.is_some();
+        if !has_cmd {
+            ui.label(RichText::new("Pick a commander in the Deck Builder first - the lab tests the deck you are building.").color(NOTE));
+        }
+        // One labelled row per job, so the controls read top to bottom instead of wrapping
+        // into one long line.
+        egui::Grid::new("lab_controls").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+            ui.label(RichText::new("Play against").strong()).on_hover_text("Who the lab's games are against");
+            ui.horizontal_wrapped(|ui| {
+                        let before = self.settings.lab_target;
+            let at_table = self.table.next_decks(&self.db).len();
+            egui::ComboBox::from_id_salt("lab_target")
+                .selected_text(self.settings.lab_target.label())
+                .show_ui(ui, |ui| {
+                    for t in [LabTarget::League, LabTarget::Table, LabTarget::Both] {
+                        ui.selectable_value(&mut self.settings.lab_target, t, t.label());
+                    }
+                })
+                .response
+                .on_hover_text(format!(
+                    "My next table: the real opponents ticked on Season & Rules > My table ({} decks ready). \
+                     Their decks are the fixed opponents of every game, in shuffled seats.",
+                    at_table
+                ));
+            if self.settings.lab_target != before {
+                self.save_settings();
+            }
+            if self.settings.lab_target.table() && at_table == 0 {
+                ui.label(RichText::new("no one ticked at your next table yet").color(NOTE));
+            }
+            });
+            ui.end_row();
+            ui.label(RichText::new("Test the deck").strong()).on_hover_text("Plays your deck and changed versions of it, and suggests changes");
+            ui.horizontal_wrapped(|ui| {
             if let Some(job) = &self.lab_job {
                 let f = job.fraction();
                 let secs = job.started.elapsed().as_secs_f32();
@@ -2658,7 +2771,10 @@ impl GuiApp {
                     acts.push(Action::RunLab(crate::lab::Effort::THOROUGH));
                 }
             }
-            ui.separator();
+            });
+            ui.end_row();
+            ui.label(RichText::new("Card power").strong()).on_hover_text("Measures each card against a vanilla creature of its cost; the builder trusts these results most");
+            ui.horizontal_wrapped(|ui| {
             if let Some(job) = &self.measure_job {
                 let f = (job.done.load(std::sync::atomic::Ordering::Relaxed) as f32
                     / job.total.max(1) as f32)
@@ -2693,8 +2809,11 @@ impl GuiApp {
                     acts.push(Action::Measure(true));
                 }
             }
-            ui.separator();
-            ui.label("When I choose a commander or auto-build, run");
+            });
+            ui.end_row();
+            ui.label(RichText::new("Automatically").strong()).on_hover_text("A lab run started for you when the commander changes or the deck is auto-built");
+            ui.horizontal_wrapped(|ui| {
+            ui.label("When I pick a commander or auto-build, run");
             let before = self.settings.lab_auto;
             egui::ComboBox::from_id_salt("lab_auto")
                 .selected_text(self.settings.lab_auto.label())
@@ -2706,29 +2825,8 @@ impl GuiApp {
             if self.settings.lab_auto != before {
                 self.save_settings();
             }
-            ui.separator();
-            ui.label("Test against:");
-            let before = self.settings.lab_target;
-            let at_table = self.table.next_decks(&self.db).len();
-            egui::ComboBox::from_id_salt("lab_target")
-                .selected_text(self.settings.lab_target.label())
-                .show_ui(ui, |ui| {
-                    for t in [LabTarget::League, LabTarget::Table, LabTarget::Both] {
-                        ui.selectable_value(&mut self.settings.lab_target, t, t.label());
-                    }
-                })
-                .response
-                .on_hover_text(format!(
-                    "My next table: the real opponents ticked on Season & Rules > My table ({} decks ready). \
-                     Their decks are the fixed opponents of every game, in shuffled seats.",
-                    at_table
-                ));
-            if self.settings.lab_target != before {
-                self.save_settings();
-            }
-            if self.settings.lab_target.table() && at_table == 0 {
-                ui.label(RichText::new("no one ticked at your next table yet").color(NOTE));
-            }
+            });
+            ui.end_row();
         });
         ui.separator();
         if self.lab.is_some() && self.lab_table.is_some() {
@@ -3479,21 +3577,32 @@ impl GuiApp {
             if need.is_some() {
                 ui.label(RichText::new("Rarity floor: claiming a rare needs a rare traded in; a mythic needs a mythic or two rares.").small());
             }
-            ScrollArea::vertical().id_salt("trade_plan").max_height(ui.available_height() - 10.0).show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for (card, copies, vp, why) in &plan {
-                        ui.vertical(|ui| {
-                                                        let resp = self.show_card(
-                                ui,
-                                CardLook { card, width: 130.0, image: None, badge: Some(format!("{} VP", vp)), dimmed: false, selected: false },
-                            );
-                            if resp.clicked() {
-                                acts.push(Action::Select(card.name.clone()));
-                            }
-                            ui.label(RichText::new(format!("{}x · {}", copies, why)).small());
-                        });
-                    }
-                });
+            // Fixed-width cells in rows that fit the column: a long note under one card used to
+            // widen the row past the column and draw the cards over the Values list.
+            let cell = 150.0;
+            let per_row = ((ui.available_width() + 8.0) / (cell + 8.0)).floor().max(1.0) as usize;
+            ScrollArea::vertical().id_salt("trade_plan").auto_shrink([false, true]).show(ui, |ui| {
+                for row in plan.chunks(per_row) {
+                    ui.horizontal_top(|ui| {
+                        for (card, copies, vp, why) in row {
+                            ui.allocate_ui_with_layout(vec2(cell, 0.0), Layout::top_down(Align::Min), |ui| {
+                                ui.set_width(cell);
+                                let resp = self.show_card(
+                                    ui,
+                                    CardLook { card, width: 130.0, image: None, badge: Some(format!("{} VP", vp)), dimmed: false, selected: false },
+                                );
+                                if resp.clicked() {
+                                    acts.push(Action::Select(card.name.clone()));
+                                }
+                                ui.add(egui::Label::new(RichText::new(format!("{}x · {}", copies, why)).small()).wrap());
+                            });
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                if plan.is_empty() {
+                    ui.label(RichText::new("No spare cards to trade in.").weak());
+                }
             });
 
             let ui = &mut cols[1];
@@ -3868,11 +3977,21 @@ impl GuiApp {
                             ));
                         });
                     }
-                    let rec = analysis::recommended_lands(st.avg_mv, &self.rules);
                     let (lo, hi) = analysis::land_range(&self.rules);
+                    // The same land count the auto-build uses: the commander's archetype target
+                    // when it has one (it was playtested), else the curve-based advice.
+                    let arch = self
+                        .deck
+                        .commander
+                        .as_ref()
+                        .and_then(|c| crate::archetypes::for_commander(c));
+                    let (rec, why) = match arch.and_then(|a| crate::archetypes::targets(a).lands) {
+                        Some(n) => (n.clamp(lo, hi), " for this archetype"),
+                        None => (analysis::recommended_lands(st.avg_mv, &self.rules), ""),
+                    };
                     ui.label(format!(
-                        "Lands: {} · recommended {} (league range {}-{})",
-                        st.lands, rec, lo, hi
+                        "Lands: {} · recommended {}{} (league range {}-{})",
+                        st.lands, rec, why, lo, hi
                     ));
                     ui.add_space(6.0);
                     ui.label(RichText::new("What the deck does").strong());
@@ -4291,14 +4410,15 @@ impl GuiApp {
                 .id_salt("coll_scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    egui::Grid::new("coll").striped(true).show(ui, |ui| {
+                    egui::Grid::new("coll").striped(true).min_col_width(0.0).show(ui, |ui| {
                         for (name, n) in rows {
                             let card = self.db.get(&name).cloned();
-                            if ui.small_button("-").clicked() {
+                            if ui.small_button(" - ").on_hover_text(format!("Remove one {}", name)).clicked() {
                                 acts.push(Action::Own(name.clone(), -1));
                             }
-                            ui.label(RichText::new(n.to_string()).monospace());
-                            if ui.small_button("+").clicked() {
+                            ui.label(RichText::new(n.to_string()).monospace())
+                                .on_hover_text(format!("You own {}", n));
+                            if ui.small_button(" + ").on_hover_text(format!("Add one {}", name)).clicked() {
                                 acts.push(Action::Own(name.clone(), 1));
                             }
                             match &card {
@@ -4315,11 +4435,11 @@ impl GuiApp {
                                         acts.push(Action::Select(name.clone()));
                                     }
                                     cost_widget(ui, &c.mana_cost, 14.0);
-                                    ui.label(RichText::new(&c.rarity).small());
-                                    ui.label(
-                                        RichText::new(format!("{} VP", league::vp_value(c)))
-                                            .small(),
-                                    );
+                                    // One letter keeps the row inside the panel; the full
+                                    // rarity and trade value are on hover.
+                                    let short: String = c.rarity.chars().take(1).collect::<String>().to_uppercase();
+                                    ui.label(RichText::new(format!("{} · {} VP", short, league::vp_value(c))).small())
+                                        .on_hover_text(format!("{} · trades in for {} VP", c.rarity, league::vp_value(c)));
                                 }
                                 None => {
                                     ui.colored_label(
@@ -4405,6 +4525,12 @@ impl eframe::App for GuiApp {
         self.images.poll(&ctx);
         self.poll_jobs(&ctx);
         self.handle_dropped_files(&ctx);
+        // Ctrl + / Ctrl - zoom: remember the size the user picked.
+        let zoom = ctx.zoom_factor();
+        if (zoom - self.settings.text_scale).abs() > 0.01 && !ctx.input(|i| i.pointer.any_down()) {
+            self.settings.text_scale = zoom;
+            self.save_settings();
+        }
         if self.memo.rev != self.rev {
             self.memo = Memo {
                 rev: self.rev,
@@ -4432,30 +4558,35 @@ impl eframe::App for GuiApp {
             ui.add_space(2.0);
         });
         Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&self.status).color(Color32::from_rgb(200, 220, 255)));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(format!("Files: {}", self.data_dir.display()))
-                            .small()
-                            .weak(),
-                    );
-                    if self.settings.real_images {
-                        let pending = self.images.pending();
-                        let text = if pending > 0 {
-                            format!(
-                                "Card images: {} saved, downloading {} more · ",
-                                self.images.loaded(),
-                                pending
-                            )
-                        } else if self.images.failures() > 0 && self.images.loaded() == 0 {
-                            "Card images unavailable (offline?) - showing drawn cards · "
-                                .to_string()
-                        } else {
-                            format!("Card images: {} saved · ", self.images.loaded())
-                        };
-                        ui.label(RichText::new(text).small().weak());
-                    }
+            // Right-hand details first, so the status message gets the rest of the row and is
+            // cut short (full text on hover) instead of running underneath them.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let files = self.data_dir.display().to_string();
+                ui.label(RichText::new("Files").small().weak())
+                    .on_hover_text(format!("Your files are kept in {}", files));
+                if self.settings.real_images {
+                    let pending = self.images.pending();
+                    let text = if pending > 0 {
+                        format!(
+                            "Card images: {} saved, {} downloading · ",
+                            self.images.loaded(),
+                            pending
+                        )
+                    } else if self.images.failures() > 0 && self.images.loaded() == 0 {
+                        "Card images offline - showing drawn cards · ".to_string()
+                    } else {
+                        format!("Card images: {} saved · ", self.images.loaded())
+                    };
+                    ui.label(RichText::new(text).small().weak());
+                }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&self.status).color(Color32::from_rgb(200, 220, 255)),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&self.status);
                 });
             });
         });

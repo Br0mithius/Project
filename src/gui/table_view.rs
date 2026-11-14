@@ -33,7 +33,7 @@ impl GuiApp {
             RichText::new(format!(
                 "The people you actually play against: paste each one's decklist, or pick their commander and auto-build \
                  a strong version (every league card available). Tick who sits at your next table - the Playtest Lab and \
-                 the card synergy test can then play against exactly those decks (\"Test against: my next table\"). \
+                 the card synergy test can then play against exactly those decks (\"Play against: my next table\"). \
                  Saved on this PC only, in {}.",
                 crate::table::FILE
             ))
@@ -47,8 +47,12 @@ impl GuiApp {
             .opponents
             .iter()
             .map(|o| {
-                o.playable(&self.db)
-                    .map(|d| (d.commander.clone().unwrap_or_default(), d.main_count()))
+                o.playable(&self.db).map(|d| {
+                    (
+                        d.commander.clone().unwrap_or_default(),
+                        d.total_count(&self.rules),
+                    )
+                })
             })
             .collect();
         if self.table.opponents.is_empty() {
