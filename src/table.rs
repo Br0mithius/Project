@@ -76,15 +76,32 @@ pub struct Table {
     pub opponents: Vec<RealOpponent>,
     /// Every player's trade-market cards, by player name (as the league shows it).
     pub picks: BTreeMap<String, Vec<TradePick>>,
+    /// Cards each player was seen playing in logged games (`games.json`, read on load).
+    #[serde(skip)]
+    pub seen: BTreeMap<String, Vec<String>>,
 }
 
 impl Table {
     /// `dir/table.json`, or an empty table.
     pub fn load(dir: &Path) -> Table {
-        std::fs::read_to_string(dir.join(FILE))
+        let mut t: Table = std::fs::read_to_string(dir.join(FILE))
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        t.load_seen(dir);
+        t
+    }
+
+    /// Reads the cards each opponent was seen playing from the game log.
+    pub fn load_seen(&mut self, dir: &Path) {
+        let log = crate::games::GameLog::load(dir);
+        self.seen.clear();
+        for o in &self.opponents {
+            let s = log.seen_by(&o.player);
+            if !s.is_empty() {
+                self.seen.insert(o.player.trim().to_lowercase(), s);
+            }
+        }
     }
 
     pub fn save(&self, dir: &Path) -> Result<(), String> {
@@ -206,8 +223,20 @@ impl Table {
         };
         let rules = Rules::default();
         let mut added = Vec::new();
-        for p in self.picks_of(&o.player) {
-            let Some(card) = db.get(&p.card) else {
+        // Trade picks, then cards seen in real games: both assumed to be in the deck.
+        let seen: Vec<String> = self
+            .seen
+            .get(&o.player.trim().to_lowercase())
+            .cloned()
+            .unwrap_or_default();
+        let names: Vec<String> = self
+            .picks_of(&o.player)
+            .iter()
+            .map(|p| p.card.clone())
+            .chain(seen.iter().cloned())
+            .collect();
+        for name in &names {
+            let Some(card) = db.get(name) else {
                 continue;
             };
             if deck.count_of(&card.name) > 0
@@ -222,8 +251,8 @@ impl Table {
                     .find(|n| db.get(n).is_some_and(|c| c.is_basic()))
                     .cloned()
             } else {
-                // Never swap out a picked card (one just added, or one they had already).
-                let picked = |n: &str| self.picks_of(&o.player).iter().any(|p| p.card == n);
+                // Never swap out a picked or seen card (one just added, or one they had).
+                let picked = |n: &str| names.iter().any(|p| p == n);
                 crate::analysis::weakest(&deck, db, &rules)
                     .iter()
                     .find(|w| !picked(&w.card.name))
@@ -371,6 +400,7 @@ mod tests {
         let table = Table {
             opponents: vec![],
             picks,
+            ..Default::default()
         };
         let o = RealOpponent {
             player: "drake".into(),

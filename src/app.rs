@@ -144,6 +144,26 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Rank a draft pack's cards for your deck (separate names with ;)",
     ),
     (
+        "optimize",
+        "[quick|thorough] [table|league] | apply | show",
+        "Search for the strongest deck by playtests: whole-deck builds raced, then swap search, checked on fresh games",
+    ),
+    (
+        "game",
+        "won|lost [vs <player>, ...] | seen <player>: <card>; <card>",
+        "Log a real game (opponents default to your ticked next table); `game seen` adds cards an opponent played",
+    ),
+    (
+        "games",
+        "",
+        "Your real record, by opponent, against what the simulator predicts for your deck",
+    ),
+    (
+        "claims",
+        "[file]",
+        "Playtest every card you could claim (Public Pool, or a list file) in your deck, ranked by gain and VP",
+    ),
+    (
         "upgrades",
         "",
         "Cards that would improve this deck: Public Pool claims and odds from upcoming packs",
@@ -236,6 +256,7 @@ pub struct App {
     ranking: std::cell::RefCell<Option<(String, crate::ranking::Rankings)>>,
     /// The last playtest lab report.
     lab: Option<crate::lab::LabReport>,
+    optimized: Option<crate::optimize::OptReport>,
 }
 
 impl App {
@@ -265,6 +286,7 @@ impl App {
             names_changed: false,
             ranking: std::cell::RefCell::new(None),
             lab: None,
+            optimized: None,
         })
     }
 
@@ -331,6 +353,10 @@ impl App {
             "cut" | "weak" => self.cut(rest),
             "auto" | "build" => self.auto(rest),
             "lab" | "playtest" => self.lab(rest),
+            "optimize" | "optimise" => self.optimize(rest),
+            "claims" => self.claims(rest),
+            "game" => self.game(rest),
+            "games" => self.games(),
             "measure" => self.measure(rest),
             "lands" => self.lands(),
             "fill" => self.fill(),
@@ -1867,6 +1893,364 @@ impl App {
                 crate::playtest::simvalues::FILE
             ),
             Err(e) => println!("Measured {} cards but couldn't save them: {}", n, e),
+        }
+    }
+
+    /// Runs `f` on a worker thread while showing its progress.
+    fn with_progress<T: Send>(
+        &self,
+        progress: &crate::lab::Progress,
+        f: impl FnOnce() -> T + Send,
+    ) -> T {
+        let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+        let out = std::thread::scope(|s| {
+            let job = s.spawn(f);
+            let mut last = String::new();
+            while !job.is_finished() {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let stage = progress.stage();
+                let pct = (progress.fraction() * 100.0) as u32;
+                if tty {
+                    use std::io::Write;
+                    print!("\r  {:>3}%  {:<70}", pct, stage);
+                    let _ = std::io::stdout().flush();
+                } else if stage != last && !stage.is_empty() {
+                    println!("  {:>3}%  {}", pct, stage);
+                }
+                last = stage;
+            }
+            job.join().expect("worker")
+        });
+        if tty {
+            print!("\r{:<80}\r", "");
+        }
+        out
+    }
+
+    /// The opponents the optimiser and the claim test play: your next table (My table, trade
+    /// picks in) and the simulated league.
+    fn opponents(&self, table_weight: f32) -> crate::optimize::Opponents {
+        let table = crate::table::Table::load(&self.data_dir);
+        crate::optimize::Opponents {
+            table: crate::table::gauntlet(&table, &self.db),
+            league: crate::ranking::TestBed::new(&self.db, &self.rules).gauntlet,
+            table_weight,
+        }
+    }
+
+    fn optimize(&mut self, arg: &str) {
+        let words: Vec<String> = arg.split_whitespace().map(|w| w.to_lowercase()).collect();
+        if words.first().map(String::as_str) == Some("show") {
+            match &self.optimized {
+                Some(r) => print!("{}", r.text()),
+                None => println!("No optimiser report yet: run `optimize`."),
+            }
+            return;
+        }
+        if words.first().map(String::as_str) == Some("apply") {
+            let Some(r) = &self.optimized else {
+                println!("No optimiser report yet: run `optimize`.");
+                return;
+            };
+            if r.start != self.deck {
+                println!("The deck has changed since the optimiser ran; run `optimize` again.");
+                return;
+            }
+            let mut d = r.best.clone();
+            d.name = self.deck.name.clone();
+            self.deck = d;
+            println!("Applied the optimised deck. `undo` to go back.");
+            return;
+        }
+        let effort = if words.iter().any(|w| w == "thorough") {
+            crate::lab::Effort::THOROUGH
+        } else {
+            crate::lab::Effort::QUICK
+        };
+        let weight = if words.iter().any(|w| w == "table") {
+            1.0
+        } else if words.iter().any(|w| w == "league") {
+            0.0
+        } else {
+            0.5
+        };
+        let Some(cmd) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|c| self.db.get(c))
+            .cloned()
+        else {
+            println!("Choose a commander first (`commander <name>` or `auto <name>`).");
+            return;
+        };
+        let opp = self.opponents(weight);
+        println!(
+            "{}",
+            self.style.dim(&format!(
+                "Optimising {} against {} ({}; a few minutes quick, longer thorough)...",
+                cmd.name,
+                if opp.table.is_empty() {
+                    "the simulated league".to_string()
+                } else {
+                    format!(
+                        "your next table ({} decks) and the simulated league",
+                        opp.table.len()
+                    )
+                },
+                effort.name
+            ))
+        );
+        let progress = crate::lab::Progress::new();
+        let rounds = if effort == crate::lab::Effort::THOROUGH {
+            4
+        } else {
+            2
+        };
+        let report = self.with_progress(&progress, || {
+            crate::optimize::optimize(
+                &cmd,
+                &self.deck,
+                &self.db,
+                &self.coll,
+                &self.rules,
+                &opp,
+                effort,
+                rounds,
+                &progress,
+            )
+        });
+        match report {
+            Some(r) => {
+                print!("{}", r.text());
+                if r.final_gain.is_some() {
+                    println!(
+                        "\n`optimize apply` switches to the optimised deck (`undo` to go back)."
+                    );
+                }
+                self.optimized = Some(r);
+            }
+            None => println!("Stopped."),
+        }
+    }
+
+    fn game(&mut self, arg: &str) {
+        let arg = arg.trim();
+        let mut log = crate::games::GameLog::load(&self.data_dir);
+        let table = crate::table::Table::load(&self.data_dir);
+        let lower = arg.to_lowercase();
+        if let Some(rest) = lower.strip_prefix("seen").map(|_| arg[4..].trim()) {
+            let Some((player, cards)) = rest.split_once(':') else {
+                println!("Usage: game seen <player>: <card>; <card>");
+                return;
+            };
+            let Some(g) = log.games.last_mut() else {
+                println!("Log a game first (`game won` or `game lost`).");
+                return;
+            };
+            let key = player.trim().to_lowercase();
+            let Some(seat) = g
+                .opponents
+                .iter_mut()
+                .find(|s| s.player.to_lowercase() == key)
+            else {
+                println!("{} wasn't in the last game logged.", player.trim());
+                return;
+            };
+            let mut added = Vec::new();
+            for c in cards.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+                match self.db.lookup(c) {
+                    crate::db::Lookup::Found(card) => {
+                        if !seat.seen.contains(&card.name) {
+                            seat.seen.push(card.name.clone());
+                            added.push(card.name.clone());
+                        }
+                    }
+                    _ => println!("Not a card: {}", c),
+                }
+            }
+            let who = seat.player.clone();
+            match log.save(&self.data_dir) {
+                Ok(()) => println!(
+                    "Noted {} played {}. Their deck now includes these for playtests.",
+                    who,
+                    added.join(", ")
+                ),
+                Err(e) => println!("Couldn't save the game log: {}", e),
+            }
+            return;
+        }
+        let won = if lower.starts_with("won") || lower.starts_with("win") {
+            true
+        } else if lower.starts_with("lost") || lower.starts_with("loss") {
+            false
+        } else {
+            println!("Usage: game won|lost [vs <player>, ...]");
+            return;
+        };
+        let names: Vec<String> = match lower.find(" vs ") {
+            Some(i) => arg[i + 4..]
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect(),
+            None => table.next_table().map(|o| o.player.clone()).collect(),
+        };
+        let opponents: Vec<crate::games::Seat> = names
+            .iter()
+            .map(|n| crate::games::Seat {
+                player: n.clone(),
+                commander: table
+                    .opponents
+                    .iter()
+                    .find(|o| o.player.eq_ignore_ascii_case(n))
+                    .map(|o| o.commander.clone())
+                    .unwrap_or_default(),
+                seen: Vec::new(),
+            })
+            .collect();
+        log.games.push(crate::games::GameRecord {
+            date: crate::ratings::today(),
+            session: self.rules.session,
+            our_commander: self.deck.commander.clone().unwrap_or_default(),
+            opponents,
+            won,
+            winner: if won { "me".into() } else { String::new() },
+            notes: String::new(),
+        });
+        match log.save(&self.data_dir) {
+            Ok(()) => {
+                let r = log.record(None);
+                println!(
+                    "Logged a {} against {}. Record: {}-{}. `game seen <player>: <card>; ...` adds what they played.",
+                    if won { "win" } else { "loss" },
+                    if names.is_empty() {
+                        "(no names)".to_string()
+                    } else {
+                        names.join(", ")
+                    },
+                    r.won,
+                    r.played - r.won
+                );
+            }
+            Err(e) => println!("Couldn't save the game log: {}", e),
+        }
+    }
+
+    fn games(&mut self) {
+        let log = crate::games::GameLog::load(&self.data_dir);
+        if log.games.is_empty() {
+            println!("No games logged yet: `game won` or `game lost` after each game.");
+            return;
+        }
+        let r = log.record(None);
+        println!(
+            "Real games: {} played, {} won ({:.0}%).",
+            r.played,
+            r.won,
+            r.rate() * 100.0
+        );
+        let mut players: Vec<String> = Vec::new();
+        for g in &log.games {
+            for s in &g.opponents {
+                if !players.iter().any(|p| p.eq_ignore_ascii_case(&s.player)) {
+                    players.push(s.player.clone());
+                }
+            }
+        }
+        for p in &players {
+            let a = log.against(p);
+            let seen = log.seen_by(p);
+            println!(
+                "  vs {:<10} {}-{}{}",
+                p,
+                a.won,
+                a.played - a.won,
+                if seen.is_empty() {
+                    String::new()
+                } else {
+                    format!("   seen: {}", seen.join(", "))
+                }
+            );
+        }
+        // What the simulator predicts for the current deck against the next table.
+        let table = crate::table::Table::load(&self.data_dir);
+        let g = crate::table::gauntlet(&table, &self.db);
+        if g.is_empty() || self.deck.commander.is_none() {
+            println!("(Tick your next table on Season & Rules to compare with the simulator.)");
+            return;
+        }
+        let p = crate::playtest::Prepared::new(&self.deck, &self.db);
+        let o = crate::playtest::lab::play_all(
+            &[&p],
+            &g,
+            &self.rules,
+            2000,
+            0x6A3E,
+            &std::sync::atomic::AtomicUsize::new(0),
+            &std::sync::atomic::AtomicBool::new(false),
+        );
+        let commander = self.deck.commander.clone();
+        println!(
+            "{}",
+            log.record(commander.as_deref()).verdict(o.win_rate(0))
+        );
+    }
+
+    fn claims(&mut self, arg: &str) {
+        let arg = arg.trim();
+        let names: Vec<String> = if arg.is_empty() {
+            crate::upgrades::load_public_pool(&self.data_dir)
+                .counts
+                .keys()
+                .cloned()
+                .collect()
+        } else {
+            match std::fs::read(arg) {
+                Ok(b) => crate::league::parse_import(&crate::league::decode_text(&b))
+                    .into_iter()
+                    .map(|l| l.name)
+                    .collect(),
+                Err(e) => {
+                    println!("Couldn't read {}: {}", arg, e);
+                    return;
+                }
+            }
+        };
+        if names.is_empty() {
+            println!(
+                "No cards to test: save the Public Pool first (`publicpool <file>`) or give a list file."
+            );
+            return;
+        }
+        if self.deck.commander.is_none() {
+            println!("Choose a commander first.");
+            return;
+        }
+        let opp = self.opponents(0.5);
+        println!(
+            "{}",
+            self.style.dim(&format!(
+                "Playtesting {} candidate cards in your deck...",
+                names.len()
+            ))
+        );
+        let progress = crate::lab::Progress::new();
+        let report = self.with_progress(&progress, || {
+            crate::optimize::test_claims(
+                &self.deck,
+                &names,
+                &self.db,
+                &self.rules,
+                &opp,
+                800,
+                8,
+                &progress,
+            )
+        });
+        match report {
+            Some(r) => print!("{}", r.text()),
+            None => println!("Stopped (or the deck has no commander)."),
         }
     }
 

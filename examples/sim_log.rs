@@ -1,5 +1,7 @@
 //! Prints the log of a simulated game, or counts what happens over many:
-//! `cargo run --release --example sim_log -- <data dir> [seed] [games]`.
+//! `cargo run --release --example sim_log -- <data dir> [seed] [games] [deck file]`
+//! (with a deck file, that exact list plays as P0; otherwise the top-ranked commander's
+//! auto-build).
 use msh_deckbuilder::analysis::Rng;
 use msh_deckbuilder::playtest::{self, Prepared};
 use msh_deckbuilder::{db::*, ranking};
@@ -23,7 +25,13 @@ fn main() {
     let (name, piper) = &opts[0];
     let cmd = db.get(name).unwrap();
     let e = ranking::evaluate(cmd, *piper, &db, &coll, &rules, &ranking::TestBed::none());
-    let me = Prepared::new(&e.deck, &db);
+    let deck = match std::env::args().nth(4) {
+        Some(f) => {
+            msh_deckbuilder::deck::Deck::load(std::path::Path::new(&f), &db).expect("deck file")
+        }
+        None => e.deck.clone(),
+    };
+    let me = Prepared::new(&deck, &db);
     let mut counts: HashMap<String, u32> = HashMap::new();
     let mut rounds = 0;
     for k in 0..games {

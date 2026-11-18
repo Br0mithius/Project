@@ -22,6 +22,7 @@ pub enum LabView {
     Deck,
     Power,
     Synergy,
+    Optimise,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]

@@ -5,7 +5,11 @@
 //! the output are skipped, so a stopped run picks up where it left off.
 //!
 //! `cargo run --release --example measure_all -- <data dir> <games> <out dir> [--league]
-//! <deck file>...`  (the table is written to `<out dir>/sim_card_values.tsv`)
+//! [--host <deck file>] <deck file>...`  (the table is written to `<out dir>/sim_card_values.tsv`)
+//!
+//! `--host <deck>`: also every nonland league card that isn't in the host deck, each played
+//! in the host deck (in place of its spell nearest 3 mana) - coverage for cards no deck
+//! plays. A five-colour host (Thanos) fits every card. Saved every 200 cards.
 
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
@@ -20,7 +24,14 @@ fn main() {
     let games: u32 = args[1].parse().expect("games");
     let out = PathBuf::from(&args[2]);
     let league = args.iter().any(|a| a == "--league");
-    let files: Vec<&String> = args[3..].iter().filter(|a| !a.starts_with("--")).collect();
+    let host = args
+        .iter()
+        .position(|a| a == "--host")
+        .map(|i| args[i + 1].clone());
+    let files: Vec<&String> = args[3..]
+        .iter()
+        .filter(|a| !a.starts_with("--") && Some(*a) != host.as_ref())
+        .collect();
     std::fs::create_dir_all(&out).unwrap();
     let mut db = CardDb::load(&data.join("cards.json")).expect("cards.json");
     db.attach_ratings(&data);
@@ -84,6 +95,59 @@ fn main() {
             );
             table.add(ms);
             table.save(&out).expect("save");
+        }
+    }
+    if let Some(h) = &host {
+        let text = std::fs::read_to_string(h).expect("host deck");
+        let deck = Deck::from_text("host", &text, &db);
+        let cmd = deck.commander.clone().expect("host commander");
+        let id = deck.identity(&db).expect("host identity");
+        let name = format!("{} (all cards)", cmd);
+        let p = Prepared::new(&deck, &db);
+        let measured: std::collections::BTreeSet<String> = table
+            .rows
+            .iter()
+            .filter(|m| m.deck == name && m.sim == simvalues::SIM_VERSION)
+            .map(|m| m.card.clone())
+            .collect();
+        let todo: Vec<&msh_deckbuilder::card::Card> = db
+            .cards
+            .iter()
+            .filter(|c| {
+                !c.is_land()
+                    && c.set != "CMR"
+                    && deck.count_of(&c.name) == 0
+                    && deck.commander.as_deref() != Some(c.name.as_str())
+                    && c.identity().is_subset_of(id)
+                    && !measured.contains(&c.name)
+            })
+            .collect();
+        println!("host {}: {} cards to measure", name, todo.len());
+        for (k, chunk) in todo.chunks(200).enumerate() {
+            let ms = simvalues::measure(
+                &name,
+                &p,
+                chunk,
+                &gauntlet,
+                &rules,
+                games,
+                0xA11C ^ (k as u64 * 7907),
+                &done,
+                &cancel,
+            );
+            // The host's own spells are measured too on every call: keep only the extras.
+            let ms: Vec<_> = ms
+                .into_iter()
+                .filter(|m| chunk.iter().any(|c| c.name == m.card))
+                .collect();
+            table.add(ms);
+            table.save(&out).expect("save");
+            println!(
+                "  {} / {} done ({:.0} min)",
+                ((k + 1) * 200).min(todo.len()),
+                todo.len(),
+                t0.elapsed().as_secs_f32() / 60.0
+            );
         }
     }
     let all = table.all();

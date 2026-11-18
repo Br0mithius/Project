@@ -15,6 +15,10 @@ pub struct TableUi {
     pub editing: Option<usize>,
     /// The trade-picks paste box.
     pub picks_text: String,
+    /// The game log's "seen cards" box.
+    pub seen_text: String,
+    /// The last real-vs-simulated verdict.
+    pub verdict: Option<String>,
 }
 
 impl GuiApp {
@@ -207,6 +211,10 @@ impl GuiApp {
                     );
                 }
             });
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new("Game log (real games)")
+            .id_salt("game_log")
+            .show(ui, |ui| self.game_log_ui(ui));
         if changed {
             self.save_table();
         }
@@ -316,5 +324,186 @@ impl GuiApp {
             }
         }
         changed
+    }
+}
+
+impl GuiApp {
+    /// Real games: log results and cards seen, and compare the record with the simulator.
+    fn game_log_ui(&mut self, ui: &mut Ui) {
+        let mut log = crate::games::GameLog::load(&self.data_dir);
+        ui.label(
+            RichText::new(
+                "After each real game, log the result. Cards an opponent was seen playing go into their deck for \
+                 playtests, and your real record is compared with what the simulator predicts - the program is only \
+                 as good as its simulator. Saved on this PC only, in games.json.",
+            )
+            .small(),
+        );
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            let names: Vec<String> = self.table.next_table().map(|o| o.player.clone()).collect();
+            for won in [true, false] {
+                if ui
+                    .button(if won { "I won" } else { "I lost" })
+                    .on_hover_text(format!(
+                        "Logs a game against your ticked next table: {}",
+                        if names.is_empty() {
+                            "nobody ticked".to_string()
+                        } else {
+                            names.join(", ")
+                        }
+                    ))
+                    .clicked()
+                {
+                    log.games.push(crate::games::GameRecord {
+                        date: crate::ratings::today(),
+                        session: self.rules.session,
+                        our_commander: self.deck.commander.clone().unwrap_or_default(),
+                        opponents: self
+                            .table
+                            .next_table()
+                            .map(|o| crate::games::Seat {
+                                player: o.player.clone(),
+                                commander: o.commander.clone(),
+                                seen: Vec::new(),
+                            })
+                            .collect(),
+                        won,
+                        winner: if won { "me".into() } else { String::new() },
+                        notes: String::new(),
+                    });
+                    changed = true;
+                }
+            }
+            if !log.games.is_empty() && ui.button("Undo last game").clicked() {
+                log.games.pop();
+                changed = true;
+            }
+        });
+        ui.label(
+            RichText::new(
+                "Cards seen in the last game (one line per player: \"JD: Opt; Refute\"):",
+            )
+            .small(),
+        );
+        ui.add(
+            egui::TextEdit::multiline(&mut self.table_ui.seen_text)
+                .desired_rows(2)
+                .desired_width(f32::INFINITY),
+        );
+        if ui
+            .add_enabled(
+                !self.table_ui.seen_text.trim().is_empty() && !log.games.is_empty(),
+                egui::Button::new("Add seen cards to the last game"),
+            )
+            .clicked()
+        {
+            let mut notes = Vec::new();
+            let text = self.table_ui.seen_text.clone();
+            if let Some(g) = log.games.last_mut() {
+                for line in text.lines() {
+                    let Some((player, cards)) = line.split_once(':') else {
+                        continue;
+                    };
+                    let key = player.trim().to_lowercase();
+                    let Some(seat) = g
+                        .opponents
+                        .iter_mut()
+                        .find(|s| s.player.to_lowercase() == key)
+                    else {
+                        notes.push(format!("{} wasn't in the last game", player.trim()));
+                        continue;
+                    };
+                    for c in cards.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+                        match self.db.get(c) {
+                            Some(card) if !seat.seen.contains(&card.name) => {
+                                seat.seen.push(card.name.clone())
+                            }
+                            Some(_) => {}
+                            None => notes.push(format!("not a card: {}", c)),
+                        }
+                    }
+                }
+            }
+            self.status = if notes.is_empty() {
+                "Seen cards added: their decks include them for playtests.".into()
+            } else {
+                notes.join("; ")
+            };
+            self.table_ui.seen_text.clear();
+            changed = true;
+        }
+        if changed {
+            if let Err(e) = log.save(&self.data_dir) {
+                self.status = format!("Couldn't save games.json: {}", e);
+            }
+            self.table.load_seen(&self.data_dir);
+            self.table_ui.verdict = None;
+        }
+        let r = log.record(None);
+        if r.played > 0 {
+            ui.label(
+                RichText::new(format!(
+                    "Record: {}-{} ({:.0}%)",
+                    r.won,
+                    r.played - r.won,
+                    r.rate() * 100.0
+                ))
+                .strong(),
+            );
+            let mut players: Vec<String> = Vec::new();
+            for g in &log.games {
+                for s in &g.opponents {
+                    if !players.iter().any(|p| p.eq_ignore_ascii_case(&s.player)) {
+                        players.push(s.player.clone());
+                    }
+                }
+            }
+            for p in players {
+                let a = log.against(&p);
+                let seen = log.seen_by(&p);
+                ui.label(
+                    RichText::new(format!(
+                        "vs {}: {}-{}{}",
+                        p,
+                        a.won,
+                        a.played - a.won,
+                        if seen.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · seen: {}", seen.join(", "))
+                        }
+                    ))
+                    .small(),
+                );
+            }
+            if ui
+                .add_enabled(self.deck.commander.is_some(), egui::Button::new("Compare with the simulator"))
+                .on_hover_text("Plays your current deck against your next table (2000 games, a few seconds) and compares with your real record")
+                .clicked()
+            {
+                let g = crate::table::gauntlet(&self.table, &self.db);
+                self.table_ui.verdict = Some(if g.is_empty() {
+                    "Tick your next table first.".to_string()
+                } else {
+                    let p = crate::playtest::Prepared::new(&self.deck, &self.db);
+                    let o = crate::playtest::lab::play_all(
+                        &[&p],
+                        &g,
+                        &self.rules,
+                        2000,
+                        0x6A3E,
+                        &std::sync::atomic::AtomicUsize::new(0),
+                        &std::sync::atomic::AtomicBool::new(false),
+                    );
+                    log.record(self.deck.commander.as_deref()).verdict(o.win_rate(0))
+                });
+            }
+            if let Some(v) = &self.table_ui.verdict {
+                ui.label(v.as_str());
+            }
+        } else {
+            ui.label(RichText::new("No games logged yet.").weak());
+        }
     }
 }

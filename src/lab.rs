@@ -138,7 +138,7 @@ impl Progress {
         self.stage.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
-    fn set_stage(&self, s: &str) {
+    pub(crate) fn set_stage(&self, s: &str) {
         if let Ok(mut st) = self.stage.lock() {
             *st = s.to_string();
         }

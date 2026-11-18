@@ -7,6 +7,7 @@ mod cards;
 mod images;
 mod lab_extra;
 mod opponents;
+mod optimize_view;
 mod play;
 mod table_view;
 
@@ -366,6 +367,7 @@ pub struct GuiApp {
     lab_view: lab_extra::LabView,
     /// Measured card power list, the card synergy test.
     extra: lab_extra::ExtraState,
+    opt: optimize_view::OptState,
     /// Archetypes tab.
     arch: arch_tab::ArchState,
     /// My table: the real opponents (data/table.json) and their editor.
@@ -550,6 +552,7 @@ impl GuiApp {
             lab_show_table: false,
             lab_view: Default::default(),
             extra: Default::default(),
+            opt: Default::default(),
             arch: Default::default(),
             table: crate::table::Table::default(),
             table_ui: Default::default(),
@@ -2545,6 +2548,7 @@ impl GuiApp {
         self.poll_lab(ctx);
         self.poll_measure(ctx);
         self.poll_synergy(ctx);
+        self.poll_opt(ctx);
         if let Some(job) = &self.rank_job {
             match job.rx.try_recv() {
                 Ok(ranks) => {
@@ -2682,6 +2686,7 @@ impl GuiApp {
                 (lab_extra::LabView::Deck, "Deck lab"),
                 (lab_extra::LabView::Power, "Measured card power"),
                 (lab_extra::LabView::Synergy, "Card synergy test"),
+                (lab_extra::LabView::Optimise, "Optimise"),
             ] {
                 let sel = self.lab_view == v;
                 let text = RichText::new(label).size(15.0);
@@ -2698,6 +2703,7 @@ impl GuiApp {
         match self.lab_view {
             lab_extra::LabView::Power => return self.power_view(ui, acts),
             lab_extra::LabView::Synergy => return self.synergy_view(ui, acts),
+            lab_extra::LabView::Optimise => return self.optimize_view(ui, acts),
             lab_extra::LabView::Deck => {}
         }
         ui.label(
