@@ -1,0 +1,1381 @@
+# Card power measured by playtests (see src/playtest/simvalues.rs): win-rate points
+# over a vanilla 3-drop, one row per card and deck. Shipped defaults: your own measurements (sim_card_values.tsv) are added on top.
+card	deck	value	se	games	sim	date
+Arbiter of Woe	Thanos, the Mad Titan (pod deck)	-0.333	0.943	1200	2	2026-11-18
+Arcane Signet	Thanos, the Mad Titan (pod deck)	0.583	1.139	1200	2	2026-11-18
+Avengers: Under Siege	Thanos, the Mad Titan (pod deck)	0.833	0.999	1200	2	2026-11-18
+Borough Backup	Thanos, the Mad Titan (pod deck)	0.167	1.041	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Thanos, the Mad Titan (pod deck)	1.583	1.009	1200	2	2026-11-18
+Celebrate the Mountain-king	Thanos, the Mad Titan (pod deck)	1.250	1.132	1200	2	2026-11-18
+Cloudblazer	Thanos, the Mad Titan (pod deck)	0.833	0.978	1200	2	2026-11-18
+Crossbones, Malicious Mercenary	Thanos, the Mad Titan (pod deck)	-0.667	1.061	1200	2	2026-11-18
+Doc Samson, Super Psychiatrist	Thanos, the Mad Titan (pod deck)	1.000	1.020	1200	2	2026-11-18
+Doctor Doom	Thanos, the Mad Titan (pod deck)	2.833	1.030	1200	2	2026-11-18
+Fumigate	Thanos, the Mad Titan (pod deck)	1.833	1.123	1200	2	2026-11-18
+Hero's Downfall	Thanos, the Mad Titan (pod deck)	-0.917	0.786	1200	2	2026-11-18
+Hydraulic Helper	Thanos, the Mad Titan (pod deck)	0.750	1.089	1200	2	2026-11-18
+Iron Man, Master of Machines	Thanos, the Mad Titan (pod deck)	0.083	0.909	1200	2	2026-11-18
+Kang, Temporal Tyrant	Thanos, the Mad Titan (pod deck)	-0.333	0.979	1200	2	2026-11-18
+Kree Sentinel	Thanos, the Mad Titan (pod deck)	-0.083	0.968	1200	2	2026-11-18
+Massacre Wurm	Thanos, the Mad Titan (pod deck)	0.833	1.006	1200	2	2026-11-18
+Mortify	Thanos, the Mad Titan (pod deck)	-0.500	0.782	1200	2	2026-11-18
+Ninja of the Hand	Thanos, the Mad Titan (pod deck)	0.667	0.745	1200	2	2026-11-18
+Pet Avengers	Thanos, the Mad Titan (pod deck)	0.667	0.935	1200	2	2026-11-18
+Political Triumph	Thanos, the Mad Titan (pod deck)	1.167	1.067	1200	2	2026-11-18
+Ravening Warg	Thanos, the Mad Titan (pod deck)	0.250	1.064	1200	2	2026-11-18
+Red Hulk	Thanos, the Mad Titan (pod deck)	-1.083	1.031	1200	2	2026-11-18
+Sol Ring	Thanos, the Mad Titan (pod deck)	3.333	1.176	1200	2	2026-11-18
+Stasis Snare	Thanos, the Mad Titan (pod deck)	-1.000	0.841	1200	2	2026-11-18
+Storm, Windrider	Thanos, the Mad Titan (pod deck)	-0.417	0.990	1200	2	2026-11-18
+The Mind Stone	Thanos, the Mad Titan (pod deck)	2.083	1.155	1200	2	2026-11-18
+Thor, God of Thunder	Thanos, the Mad Titan (pod deck)	0.250	1.038	1200	2	2026-11-18
+Thought Vessel	Thanos, the Mad Titan (pod deck)	1.833	1.165	1200	2	2026-11-18
+Undercover Skrull	Thanos, the Mad Titan (pod deck)	0.250	1.133	1200	2	2026-11-18
+Vampire Nighthawk	Thanos, the Mad Titan (pod deck)	0.500	0.697	1200	2	2026-11-18
+Visions of Villainy	Thanos, the Mad Titan (pod deck)	0.667	0.782	1200	2	2026-11-18
+Web Up	Thanos, the Mad Titan (pod deck)	-0.083	0.854	1200	2	2026-11-18
+Aggressive Mammoth	Tatyova, Benthic Druid (pod deck)	0.000	0.858	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Tatyova, Benthic Druid (pod deck)	0.583	0.939	1200	2	2026-11-18
+Beast Within	Tatyova, Benthic Druid (pod deck)	-0.417	0.672	1200	2	2026-11-18
+Beorn the Fierce	Tatyova, Benthic Druid (pod deck)	1.250	1.037	1200	2	2026-11-18
+Dwynen, Gilt-Leaf Daen	Tatyova, Benthic Druid (pod deck)	1.583	0.931	1200	2	2026-11-18
+Elrond, Moon-Reader	Tatyova, Benthic Druid (pod deck)	1.250	0.558	1200	2	2026-11-18
+Galion, Elvenking's Butler	Tatyova, Benthic Druid (pod deck)	0.167	0.764	1200	2	2026-11-18
+Gandalf, Wandering Wizard	Tatyova, Benthic Druid (pod deck)	0.417	0.813	1200	2	2026-11-18
+Ghalta the Unstoppable	Tatyova, Benthic Druid (pod deck)	2.500	0.925	1200	2	2026-11-18
+Ghalta, Primal Hunger	Tatyova, Benthic Druid (pod deck)	2.417	0.929	1200	2	2026-11-18
+Giant's Boulder	Tatyova, Benthic Druid (pod deck)	0.250	1.004	1200	2	2026-11-18
+Gigantic Big Bear	Tatyova, Benthic Druid (pod deck)	-0.083	0.786	1200	2	2026-11-18
+Gigantosaurus	Tatyova, Benthic Druid (pod deck)	0.417	0.854	1200	2	2026-11-18
+Hexhaven Invigorator	Tatyova, Benthic Druid (pod deck)	0.417	0.917	1200	2	2026-11-18
+Hungering Puppetbeast	Tatyova, Benthic Druid (pod deck)	0.417	0.925	1200	2	2026-11-18
+Koma, World-Eater	Tatyova, Benthic Druid (pod deck)	3.750	0.940	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Tatyova, Benthic Druid (pod deck)	1.083	0.712	1200	2	2026-11-18
+Mind Stone	Tatyova, Benthic Druid (pod deck)	1.750	1.010	1200	2	2026-11-18
+Mirkwood Pathmaker	Tatyova, Benthic Druid (pod deck)	1.333	0.611	1200	2	2026-11-18
+Namor the Sub-Mariner	Tatyova, Benthic Druid (pod deck)	1.167	0.772	1200	2	2026-11-18
+Pongify	Tatyova, Benthic Druid (pod deck)	1.083	1.084	1200	2	2026-11-18
+Quakestrider Ceratops	Tatyova, Benthic Druid (pod deck)	0.333	0.841	1200	2	2026-11-18
+Quilled Greatwurm	Tatyova, Benthic Druid (pod deck)	1.000	0.889	1200	2	2026-11-18
+Rampaging Baloths	Tatyova, Benthic Druid (pod deck)	0.500	0.808	1200	2	2026-11-18
+She-Hulk, Jade Defender	Tatyova, Benthic Druid (pod deck)	1.000	0.920	1200	2	2026-11-18
+Silvan Reveler	Tatyova, Benthic Druid (pod deck)	-0.667	0.936	1200	2	2026-11-18
+Sol Ring	Tatyova, Benthic Druid (pod deck)	4.333	1.094	1200	2	2026-11-18
+Steel Hellkite	Tatyova, Benthic Druid (pod deck)	0.917	0.749	1200	2	2026-11-18
+The Lord of the Eagles	Tatyova, Benthic Druid (pod deck)	1.000	0.799	1200	2	2026-11-18
+The Thing, Ben Grimm	Tatyova, Benthic Druid (pod deck)	0.000	0.791	1200	2	2026-11-18
+Thranduil, Sindarin Liege	Tatyova, Benthic Druid (pod deck)	2.833	1.011	1200	2	2026-11-18
+Wildborn Preserver	Tatyova, Benthic Druid (pod deck)	0.167	1.014	1200	2	2026-11-18
+Woodland Weavemaster	Tatyova, Benthic Druid (pod deck)	1.250	1.003	1200	2	2026-11-18
+Ajani Unrelenting	Smaug, Wicked Worm (pod deck)	2.417	0.972	1200	2	2026-11-18
+Bake into a Pie	Smaug, Wicked Worm (pod deck)	0.333	0.874	1200	2	2026-11-18
+Basilisk Collar	Smaug, Wicked Worm (pod deck)	0.917	1.002	1200	2	2026-11-18
+Bilbo's Deadly Slice	Smaug, Wicked Worm (pod deck)	-0.750	0.692	1200	2	2026-11-18
+Bolt Bend	Smaug, Wicked Worm (pod deck)	0.583	0.812	1200	2	2026-11-18
+Chandra, Torch of Defiance	Smaug, Wicked Worm (pod deck)	-1.000	0.890	1200	2	2026-11-18
+Chaos Warp	Smaug, Wicked Worm (pod deck)	-1.083	0.702	1200	2	2026-11-18
+Deadly Plot	Smaug, Wicked Worm (pod deck)	0.000	0.866	1200	2	2026-11-18
+Desecration Demon	Smaug, Wicked Worm (pod deck)	-0.500	0.993	1200	2	2026-11-18
+Desert Were-Worm	Smaug, Wicked Worm (pod deck)	-0.917	0.812	1200	2	2026-11-18
+Desolation of Smaug	Smaug, Wicked Worm (pod deck)	0.500	1.034	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Smaug, Wicked Worm (pod deck)	1.417	0.923	1200	2	2026-11-18
+Eaten Alive	Smaug, Wicked Worm (pod deck)	-0.750	0.939	1200	2	2026-11-18
+Extended Absence	Smaug, Wicked Worm (pod deck)	-0.250	0.878	1200	2	2026-11-18
+Feed the Swarm	Smaug, Wicked Worm (pod deck)	-2.750	1.036	1200	2	2026-11-18
+Fireshrieker	Smaug, Wicked Worm (pod deck)	-0.500	0.687	1200	2	2026-11-18
+Garruk, Veiled Butcher	Smaug, Wicked Worm (pod deck)	1.250	0.853	1200	2	2026-11-18
+Giant's Boulder	Smaug, Wicked Worm (pod deck)	-0.667	0.943	1200	2	2026-11-18
+Hero's Downfall	Smaug, Wicked Worm (pod deck)	0.000	0.717	1200	2	2026-11-18
+High-Society Hunter	Smaug, Wicked Worm (pod deck)	0.000	0.858	1200	2	2026-11-18
+Hour of Defeat	Smaug, Wicked Worm (pod deck)	-0.083	0.894	1200	2	2026-11-18
+Jiang Yanggu, Alone	Smaug, Wicked Worm (pod deck)	-0.500	0.800	1200	2	2026-11-18
+Lathliss, Dragon Queen	Smaug, Wicked Worm (pod deck)	1.583	0.959	1200	2	2026-11-18
+Leyline Axe	Smaug, Wicked Worm (pod deck)	-0.167	0.866	1200	2	2026-11-18
+Lich's Relic	Smaug, Wicked Worm (pod deck)	-1.083	1.058	1200	2	2026-11-18
+Massacre Wurm	Smaug, Wicked Worm (pod deck)	3.083	0.998	1200	2	2026-11-18
+My Precious	Smaug, Wicked Worm (pod deck)	-1.333	0.655	1200	2	2026-11-18
+Red Hulk	Smaug, Wicked Worm (pod deck)	0.000	0.825	1200	2	2026-11-18
+Silence the Echo	Smaug, Wicked Worm (pod deck)	-3.000	0.963	1200	2	2026-11-18
+Smaug the Magnificent	Smaug, Wicked Worm (pod deck)	0.667	0.965	1200	2	2026-11-18
+Smaug's Fury	Smaug, Wicked Worm (pod deck)	-0.833	0.992	1200	2	2026-11-18
+Sol Ring	Smaug, Wicked Worm (pod deck)	0.583	1.133	1200	2	2026-11-18
+Swiftfoot Boots	Smaug, Wicked Worm (pod deck)	-2.250	0.923	1200	2	2026-11-18
+Ancestor Dragon	The Mighty Thor, Jane Foster (pod deck)	2.417	0.720	1200	2	2026-11-18
+Angelic Edict	The Mighty Thor, Jane Foster (pod deck)	-1.250	0.845	1200	2	2026-11-18
+Basilisk Collar	The Mighty Thor, Jane Foster (pod deck)	1.500	0.890	1200	2	2026-11-18
+Captain America's Shield	The Mighty Thor, Jane Foster (pod deck)	3.417	0.964	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	The Mighty Thor, Jane Foster (pod deck)	4.083	0.911	1200	2	2026-11-18
+Celestial Armor	The Mighty Thor, Jane Foster (pod deck)	0.667	0.565	1200	2	2026-11-18
+Empyrean Eagle	The Mighty Thor, Jane Foster (pod deck)	1.333	0.676	1200	2	2026-11-18
+Exemplar of Light	The Mighty Thor, Jane Foster (pod deck)	-0.167	0.736	1200	2	2026-11-18
+Fireshrieker	The Mighty Thor, Jane Foster (pod deck)	0.250	0.521	1200	2	2026-11-18
+Giant's Boulder	The Mighty Thor, Jane Foster (pod deck)	0.000	0.920	1200	2	2026-11-18
+Gideon's Memorial	The Mighty Thor, Jane Foster (pod deck)	-0.250	0.878	1200	2	2026-11-18
+Goldvein Pick	The Mighty Thor, Jane Foster (pod deck)	-0.417	0.838	1200	2	2026-11-18
+Jazal Goldmane	The Mighty Thor, Jane Foster (pod deck)	-0.750	0.838	1200	2	2026-11-18
+Leyline Axe	The Mighty Thor, Jane Foster (pod deck)	0.333	0.764	1200	2	2026-11-18
+Luminous Rebuke	The Mighty Thor, Jane Foster (pod deck)	0.583	0.870	1200	2	2026-11-18
+Lyra Dawnbringer	The Mighty Thor, Jane Foster (pod deck)	3.417	0.957	1200	2	2026-11-18
+Lyra, Tolarian Archangel	The Mighty Thor, Jane Foster (pod deck)	-0.583	0.651	1200	2	2026-11-18
+Mind Stone	The Mighty Thor, Jane Foster (pod deck)	0.667	0.913	1200	2	2026-11-18
+Namor the Sub-Mariner	The Mighty Thor, Jane Foster (pod deck)	-0.917	0.583	1200	2	2026-11-18
+Orcrist, Goblin-cleaver	The Mighty Thor, Jane Foster (pod deck)	-1.583	0.617	1200	2	2026-11-18
+Pongify	The Mighty Thor, Jane Foster (pod deck)	-0.333	0.905	1200	2	2026-11-18
+Prophesied End	The Mighty Thor, Jane Foster (pod deck)	-1.500	0.942	1200	2	2026-11-18
+Quick-Draw Katana	The Mighty Thor, Jane Foster (pod deck)	0.167	0.800	1200	2	2026-11-18
+Sol Ring	The Mighty Thor, Jane Foster (pod deck)	2.417	0.967	1200	2	2026-11-18
+Spectral Sailor	The Mighty Thor, Jane Foster (pod deck)	1.750	0.909	1200	2	2026-11-18
+Steel Hellkite	The Mighty Thor, Jane Foster (pod deck)	1.333	0.772	1200	2	2026-11-18
+Stroke of Midnight	The Mighty Thor, Jane Foster (pod deck)	-1.917	0.593	1200	2	2026-11-18
+Swiftfoot Boots	The Mighty Thor, Jane Foster (pod deck)	-0.250	0.909	1200	2	2026-11-18
+Swords to Plowshares	The Mighty Thor, Jane Foster (pod deck)	-0.417	0.946	1200	2	2026-11-18
+The Eagles Are Coming!	The Mighty Thor, Jane Foster (pod deck)	0.083	0.886	1200	2	2026-11-18
+The Lord of the Eagles	The Mighty Thor, Jane Foster (pod deck)	3.667	0.886	1200	2	2026-11-18
+The Mind Stone	The Mighty Thor, Jane Foster (pod deck)	0.167	0.913	1200	2	2026-11-18
+Vibranium Energy Daggers	The Mighty Thor, Jane Foster (pod deck)	0.250	0.932	1200	2	2026-11-18
+Ajani Unrelenting	Smaug, Wicked Worm (pod deck)	2.000	1.005	1200	2	2026-11-18
+Bake into a Pie	Smaug, Wicked Worm (pod deck)	-0.667	0.898	1200	2	2026-11-18
+Bilbo's Deadly Slice	Smaug, Wicked Worm (pod deck)	1.667	0.696	1200	2	2026-11-18
+Bolt Bend	Smaug, Wicked Worm (pod deck)	1.167	0.897	1200	2	2026-11-18
+Chandra, Torch of Defiance	Smaug, Wicked Worm (pod deck)	1.083	0.954	1200	2	2026-11-18
+Chaos Warp	Smaug, Wicked Worm (pod deck)	-0.667	0.687	1200	2	2026-11-18
+Deadly Plot	Smaug, Wicked Worm (pod deck)	1.167	0.920	1200	2	2026-11-18
+Desecration Demon	Smaug, Wicked Worm (pod deck)	0.500	1.014	1200	2	2026-11-18
+Desolation of Smaug	Smaug, Wicked Worm (pod deck)	0.500	1.034	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Smaug, Wicked Worm (pod deck)	1.583	0.981	1200	2	2026-11-18
+Eaten Alive	Smaug, Wicked Worm (pod deck)	0.500	1.066	1200	2	2026-11-18
+Extended Absence	Smaug, Wicked Worm (pod deck)	0.500	0.913	1200	2	2026-11-18
+Feed the Swarm	Smaug, Wicked Worm (pod deck)	-1.750	1.002	1200	2	2026-11-18
+Garruk, Veiled Butcher	Smaug, Wicked Worm (pod deck)	2.750	0.952	1200	2	2026-11-18
+Giant's Boulder	Smaug, Wicked Worm (pod deck)	1.167	1.013	1200	2	2026-11-18
+Hero's Downfall	Smaug, Wicked Worm (pod deck)	-0.417	0.786	1200	2	2026-11-18
+High-Society Hunter	Smaug, Wicked Worm (pod deck)	1.750	0.961	1200	2	2026-11-18
+Hoarding Dragon	Smaug, Wicked Worm (pod deck)	1.583	0.794	1200	2	2026-11-18
+Hour of Defeat	Smaug, Wicked Worm (pod deck)	0.417	0.939	1200	2	2026-11-18
+Immersturm Predator	Smaug, Wicked Worm (pod deck)	-0.417	0.947	1200	2	2026-11-18
+Jiang Yanggu, Alone	Smaug, Wicked Worm (pod deck)	0.417	0.854	1200	2	2026-11-18
+Lathliss, Dragon Queen	Smaug, Wicked Worm (pod deck)	0.167	0.993	1200	2	2026-11-18
+Lich's Relic	Smaug, Wicked Worm (pod deck)	1.917	1.127	1200	2	2026-11-18
+Massacre Wurm	Smaug, Wicked Worm (pod deck)	3.000	1.016	1200	2	2026-11-18
+Red Hulk	Smaug, Wicked Worm (pod deck)	0.250	0.947	1200	2	2026-11-18
+Silence the Echo	Smaug, Wicked Worm (pod deck)	0.083	0.925	1200	2	2026-11-18
+Smaug the Magnificent	Smaug, Wicked Worm (pod deck)	-0.667	0.979	1200	2	2026-11-18
+Smaug's Fury	Smaug, Wicked Worm (pod deck)	1.083	0.947	1200	2	2026-11-18
+Sol Ring	Smaug, Wicked Worm (pod deck)	4.000	1.090	1200	2	2026-11-18
+Stir Up Trouble	Smaug, Wicked Worm (pod deck)	2.167	1.013	1200	2	2026-11-18
+Stone-Giant of High Pass	Smaug, Wicked Worm (pod deck)	2.667	0.989	1200	2	2026-11-18
+Thor, God of Thunder	Smaug, Wicked Worm (pod deck)	2.750	0.944	1200	2	2026-11-18
+Vraska's Final Mercy	Smaug, Wicked Worm (pod deck)	-1.333	0.985	1200	2	2026-11-18
+Aggressive Mammoth	Ant-Man, Colony Commander (1_1_counters)	-0.750	0.837	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Ant-Man, Colony Commander (1_1_counters)	0.167	0.985	1200	2	2026-11-18
+Beast Within	Ant-Man, Colony Commander (1_1_counters)	-1.333	0.763	1200	2	2026-11-18
+Beorn the Fierce	Ant-Man, Colony Commander (1_1_counters)	0.417	1.011	1200	2	2026-11-18
+Darksteel Colossus	Ant-Man, Colony Commander (1_1_counters)	-0.500	0.764	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Ant-Man, Colony Commander (1_1_counters)	-0.917	0.786	1200	2	2026-11-18
+Ghalta the Unstoppable	Ant-Man, Colony Commander (1_1_counters)	0.250	0.916	1200	2	2026-11-18
+Ghalta, Primal Hunger	Ant-Man, Colony Commander (1_1_counters)	-0.250	0.932	1200	2	2026-11-18
+Giant's Boulder	Ant-Man, Colony Commander (1_1_counters)	-1.500	1.027	1200	2	2026-11-18
+Gigantic Big Bear	Ant-Man, Colony Commander (1_1_counters)	-1.250	0.821	1200	2	2026-11-18
+Gigantosaurus	Ant-Man, Colony Commander (1_1_counters)	-0.250	0.969	1200	2	2026-11-18
+Goblin Firebomb	Ant-Man, Colony Commander (1_1_counters)	-2.500	0.978	1200	2	2026-11-18
+Hexhaven Invigorator	Ant-Man, Colony Commander (1_1_counters)	0.000	0.949	1200	2	2026-11-18
+Hungering Puppetbeast	Ant-Man, Colony Commander (1_1_counters)	1.000	0.882	1200	2	2026-11-18
+Kang the Conqueror	Ant-Man, Colony Commander (1_1_counters)	-1.500	0.986	1200	2	2026-11-18
+Karn, Gilded Guardian	Ant-Man, Colony Commander (1_1_counters)	2.833	1.004	1200	2	2026-11-18
+Koma, World-Eater	Ant-Man, Colony Commander (1_1_counters)	1.750	0.906	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Ant-Man, Colony Commander (1_1_counters)	-0.250	0.692	1200	2	2026-11-18
+Mind Stone	Ant-Man, Colony Commander (1_1_counters)	-1.750	1.089	1200	2	2026-11-18
+Namor the Sub-Mariner	Ant-Man, Colony Commander (1_1_counters)	0.000	0.727	1200	2	2026-11-18
+Pongify	Ant-Man, Colony Commander (1_1_counters)	-2.083	1.057	1200	2	2026-11-18
+Quakestrider Ceratops	Ant-Man, Colony Commander (1_1_counters)	-0.750	0.829	1200	2	2026-11-18
+Quilled Greatwurm	Ant-Man, Colony Commander (1_1_counters)	0.750	0.876	1200	2	2026-11-18
+Rampaging Baloths	Ant-Man, Colony Commander (1_1_counters)	0.083	0.869	1200	2	2026-11-18
+Ruric Thar, Biomagus	Ant-Man, Colony Commander (1_1_counters)	-0.750	0.750	1200	2	2026-11-18
+She-Hulk, Jade Defender	Ant-Man, Colony Commander (1_1_counters)	-1.833	1.054	1200	2	2026-11-18
+Sire of Seven Deaths	Ant-Man, Colony Commander (1_1_counters)	3.000	0.914	1200	2	2026-11-18
+Sol Ring	Ant-Man, Colony Commander (1_1_counters)	2.333	1.174	1200	2	2026-11-18
+Steel Hellkite	Ant-Man, Colony Commander (1_1_counters)	-0.833	0.754	1200	2	2026-11-18
+The Lord of the Eagles	Ant-Man, Colony Commander (1_1_counters)	-0.333	0.825	1200	2	2026-11-18
+The Theorist, Jace Beleren	Ant-Man, Colony Commander (1_1_counters)	0.417	1.101	1200	2	2026-11-18
+The Thing, Ben Grimm	Ant-Man, Colony Commander (1_1_counters)	-0.833	0.950	1200	2	2026-11-18
+The Unbeatable Squirrel Girl	Ant-Man, Colony Commander (1_1_counters)	-1.750	1.109	1200	2	2026-11-18
+Ajani Unrelenting	Aurelia, the Warleader (aggro_go_wide)	1.250	1.063	1200	2	2026-11-18
+Angelic Edict	Aurelia, the Warleader (aggro_go_wide)	-0.833	1.054	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Aurelia, the Warleader (aggro_go_wide)	1.917	0.995	1200	2	2026-11-18
+Chandra, Flameshaper	Aurelia, the Warleader (aggro_go_wide)	-0.750	0.829	1200	2	2026-11-18
+Chandra, Torch of Defiance	Aurelia, the Warleader (aggro_go_wide)	-0.583	1.003	1200	2	2026-11-18
+Chaos Warp	Aurelia, the Warleader (aggro_go_wide)	-2.083	0.748	1200	2	2026-11-18
+Darksteel Colossus	Aurelia, the Warleader (aggro_go_wide)	-0.833	0.850	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Aurelia, the Warleader (aggro_go_wide)	-0.083	0.939	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Aurelia, the Warleader (aggro_go_wide)	-1.167	0.825	1200	2	2026-11-18
+Fin Fang Foom	Aurelia, the Warleader (aggro_go_wide)	0.083	0.997	1200	2	2026-11-18
+Giant's Boulder	Aurelia, the Warleader (aggro_go_wide)	-2.750	1.107	1200	2	2026-11-18
+Goblin Firebomb	Aurelia, the Warleader (aggro_go_wide)	-1.250	1.044	1200	2	2026-11-18
+Jazal Goldmane	Aurelia, the Warleader (aggro_go_wide)	-0.167	0.972	1200	2	2026-11-18
+Karn, Gilded Guardian	Aurelia, the Warleader (aggro_go_wide)	2.417	1.042	1200	2	2026-11-18
+Lathliss, Dragon Queen	Aurelia, the Warleader (aggro_go_wide)	-1.500	1.014	1200	2	2026-11-18
+Luminous Rebuke	Aurelia, the Warleader (aggro_go_wide)	-0.167	1.118	1200	2	2026-11-18
+Lyra Dawnbringer	Aurelia, the Warleader (aggro_go_wide)	0.917	1.057	1200	2	2026-11-18
+Mind Stone	Aurelia, the Warleader (aggro_go_wide)	0.667	1.054	1200	2	2026-11-18
+Prophesied End	Aurelia, the Warleader (aggro_go_wide)	0.000	1.106	1200	2	2026-11-18
+Red Hulk	Aurelia, the Warleader (aggro_go_wide)	-1.250	0.954	1200	2	2026-11-18
+Sire of Seven Deaths	Aurelia, the Warleader (aggro_go_wide)	2.500	0.988	1200	2	2026-11-18
+Smaug the Magnificent	Aurelia, the Warleader (aggro_go_wide)	-0.750	1.024	1200	2	2026-11-18
+Sol Ring	Aurelia, the Warleader (aggro_go_wide)	2.417	1.168	1200	2	2026-11-18
+Steel Hellkite	Aurelia, the Warleader (aggro_go_wide)	-1.167	0.950	1200	2	2026-11-18
+Stone-Giant of High Pass	Aurelia, the Warleader (aggro_go_wide)	-0.583	0.975	1200	2	2026-11-18
+Stroke of Midnight	Aurelia, the Warleader (aggro_go_wide)	-1.917	0.776	1200	2	2026-11-18
+Swords to Plowshares	Aurelia, the Warleader (aggro_go_wide)	0.500	1.143	1200	2	2026-11-18
+The Eagles Are Coming!	Aurelia, the Warleader (aggro_go_wide)	-0.750	1.051	1200	2	2026-11-18
+The Mind Stone	Aurelia, the Warleader (aggro_go_wide)	1.250	1.103	1200	2	2026-11-18
+The Sentry, Golden Guardian	Aurelia, the Warleader (aggro_go_wide)	6.833	1.059	1200	2	2026-11-18
+The Super Hero Civil War	Aurelia, the Warleader (aggro_go_wide)	-0.500	1.167	1200	2	2026-11-18
+Thor, God of Thunder	Aurelia, the Warleader (aggro_go_wide)	0.667	1.054	1200	2	2026-11-18
+Traxos, Scourge Eternal	Aurelia, the Warleader (aggro_go_wide)	0.000	0.825	1200	2	2026-11-18
+Ajani Unrelenting	Garna, Bloodfist of Keld (aristocrats)	3.250	1.072	1200	2	2026-11-18
+Apex Witchstalker	Garna, Bloodfist of Keld (aristocrats)	1.750	0.945	1200	2	2026-11-18
+Avengers: Under Siege	Garna, Bloodfist of Keld (aristocrats)	1.750	0.945	1200	2	2026-11-18
+Bolg of the North	Garna, Bloodfist of Keld (aristocrats)	-0.917	0.961	1200	2	2026-11-18
+Bullseye, Death Dealer	Garna, Bloodfist of Keld (aristocrats)	0.083	0.795	1200	2	2026-11-18
+Chandra, Torch of Defiance	Garna, Bloodfist of Keld (aristocrats)	-0.333	0.993	1200	2	2026-11-18
+Crossway Troublemakers	Garna, Bloodfist of Keld (aristocrats)	1.167	0.964	1200	2	2026-11-18
+Darksteel Colossus	Garna, Bloodfist of Keld (aristocrats)	-0.833	0.791	1200	2	2026-11-18
+Desecration Demon	Garna, Bloodfist of Keld (aristocrats)	-1.000	1.080	1200	2	2026-11-18
+Doctor Doom	Garna, Bloodfist of Keld (aristocrats)	-0.250	0.990	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Garna, Bloodfist of Keld (aristocrats)	1.667	0.963	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Garna, Bloodfist of Keld (aristocrats)	-0.583	0.878	1200	2	2026-11-18
+Garruk, Veiled Butcher	Garna, Bloodfist of Keld (aristocrats)	1.917	1.080	1200	2	2026-11-18
+Great Ugly-Looking Goblin	Garna, Bloodfist of Keld (aristocrats)	-0.083	0.976	1200	2	2026-11-18
+High-Society Hunter	Garna, Bloodfist of Keld (aristocrats)	-1.083	0.909	1200	2	2026-11-18
+Hoarding Dragon	Garna, Bloodfist of Keld (aristocrats)	-0.083	0.939	1200	2	2026-11-18
+Immersturm Predator	Garna, Bloodfist of Keld (aristocrats)	-2.500	0.970	1200	2	2026-11-18
+Ingris Stingerquill	Garna, Bloodfist of Keld (aristocrats)	2.083	0.748	1200	2	2026-11-18
+Kingpin's Enforcers	Garna, Bloodfist of Keld (aristocrats)	1.667	0.716	1200	2	2026-11-18
+Kiora of Fire and Ashes	Garna, Bloodfist of Keld (aristocrats)	0.833	0.858	1200	2	2026-11-18
+Lathliss, Dragon Queen	Garna, Bloodfist of Keld (aristocrats)	0.250	1.051	1200	2	2026-11-18
+Liliana, Dreadhorde General	Garna, Bloodfist of Keld (aristocrats)	1.667	0.956	1200	2	2026-11-18
+Maalfeld Twins	Garna, Bloodfist of Keld (aristocrats)	-0.250	0.804	1200	2	2026-11-18
+Massacre Wurm	Garna, Bloodfist of Keld (aristocrats)	3.500	1.015	1200	2	2026-11-18
+Misty Mountains Raider	Garna, Bloodfist of Keld (aristocrats)	0.000	0.889	1200	2	2026-11-18
+Redcap Gutter-Dweller	Garna, Bloodfist of Keld (aristocrats)	-0.417	1.018	1200	2	2026-11-18
+Smaug the Magnificent	Garna, Bloodfist of Keld (aristocrats)	-0.167	1.068	1200	2	2026-11-18
+Smaug, Wicked Worm	Garna, Bloodfist of Keld (aristocrats)	1.167	1.045	1200	2	2026-11-18
+Snowslope Hunter	Garna, Bloodfist of Keld (aristocrats)	0.417	0.651	1200	2	2026-11-18
+Sol Ring	Garna, Bloodfist of Keld (aristocrats)	4.583	1.239	1200	2	2026-11-18
+Stone-Giant of High Pass	Garna, Bloodfist of Keld (aristocrats)	1.417	0.981	1200	2	2026-11-18
+The Master of Lake-town	Garna, Bloodfist of Keld (aristocrats)	1.167	0.736	1200	2	2026-11-18
+Ajani Unrelenting	Iron Man, Master of Machines (artifacts)	-0.500	1.118	1200	2	2026-11-18
+Archive Arbiter	Iron Man, Master of Machines (artifacts)	-0.167	0.889	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Iron Man, Master of Machines (artifacts)	-0.750	1.058	1200	2	2026-11-18
+Chandra, Flameshaper	Iron Man, Master of Machines (artifacts)	-1.500	0.832	1200	2	2026-11-18
+Chandra, Torch of Defiance	Iron Man, Master of Machines (artifacts)	-1.833	0.986	1200	2	2026-11-18
+Chaos Warp	Iron Man, Master of Machines (artifacts)	-1.583	0.820	1200	2	2026-11-18
+Curse-Marred Demon	Iron Man, Master of Machines (artifacts)	-0.583	1.051	1200	2	2026-11-18
+Darksteel Colossus	Iron Man, Master of Machines (artifacts)	-1.917	0.820	1200	2	2026-11-18
+Draconic Visitor	Iron Man, Master of Machines (artifacts)	1.333	1.032	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Iron Man, Master of Machines (artifacts)	-0.083	0.967	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Iron Man, Master of Machines (artifacts)	-1.500	0.824	1200	2	2026-11-18
+Frostbite Pyromental	Iron Man, Master of Machines (artifacts)	-1.750	0.802	1200	2	2026-11-18
+Gandalf, Wandering Wizard	Iron Man, Master of Machines (artifacts)	-1.333	0.890	1200	2	2026-11-18
+Goblin Firebomb	Iron Man, Master of Machines (artifacts)	-1.167	1.034	1200	2	2026-11-18
+Kang the Conqueror	Iron Man, Master of Machines (artifacts)	1.000	0.949	1200	2	2026-11-18
+Karn, Gilded Guardian	Iron Man, Master of Machines (artifacts)	-0.417	1.096	1200	2	2026-11-18
+Lathliss, Dragon Queen	Iron Man, Master of Machines (artifacts)	0.500	1.053	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Iron Man, Master of Machines (artifacts)	-0.583	0.722	1200	2	2026-11-18
+Mind Stone	Iron Man, Master of Machines (artifacts)	0.333	1.137	1200	2	2026-11-18
+Namor the Sub-Mariner	Iron Man, Master of Machines (artifacts)	-0.750	0.640	1200	2	2026-11-18
+Niv-Mizzet, Visionary	Iron Man, Master of Machines (artifacts)	-1.583	1.003	1200	2	2026-11-18
+Pongify	Iron Man, Master of Machines (artifacts)	-0.667	1.106	1200	2	2026-11-18
+Red Hulk	Iron Man, Master of Machines (artifacts)	-0.750	0.989	1200	2	2026-11-18
+Ruric Thar, Biomagus	Iron Man, Master of Machines (artifacts)	-0.667	0.866	1200	2	2026-11-18
+Sire of Seven Deaths	Iron Man, Master of Machines (artifacts)	1.500	0.953	1200	2	2026-11-18
+Smaug the Magnificent	Iron Man, Master of Machines (artifacts)	-0.667	1.161	1200	2	2026-11-18
+Sol Ring	Iron Man, Master of Machines (artifacts)	4.083	1.159	1200	2	2026-11-18
+Steel Hellkite	Iron Man, Master of Machines (artifacts)	-0.500	0.935	1200	2	2026-11-18
+Stone-Giant of High Pass	Iron Man, Master of Machines (artifacts)	-0.917	1.003	1200	2	2026-11-18
+The Lord of the Eagles	Iron Man, Master of Machines (artifacts)	0.750	1.001	1200	2	2026-11-18
+Thor, God of Thunder	Iron Man, Master of Machines (artifacts)	-1.333	1.034	1200	2	2026-11-18
+Traxos, Scourge Eternal	Iron Man, Master of Machines (artifacts)	-0.083	0.870	1200	2	2026-11-18
+Arbiter of Woe	Kang, Temporal Tyrant (card_draw_second_card)	0.583	1.016	1200	2	2026-11-18
+Arcanis the Omnipotent	Kang, Temporal Tyrant (card_draw_second_card)	-1.667	1.027	1200	2	2026-11-18
+Archmage of Runes	Kang, Temporal Tyrant (card_draw_second_card)	-1.083	0.983	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Kang, Temporal Tyrant (card_draw_second_card)	-1.083	1.211	1200	2	2026-11-18
+Azog, Moria's Ruin	Kang, Temporal Tyrant (card_draw_second_card)	0.417	1.096	1200	2	2026-11-18
+Commander's Sphere	Kang, Temporal Tyrant (card_draw_second_card)	-0.917	0.837	1200	2	2026-11-18
+Crossway Troublemakers	Kang, Temporal Tyrant (card_draw_second_card)	-2.500	1.207	1200	2	2026-11-18
+Curator of Destinies	Kang, Temporal Tyrant (card_draw_second_card)	-0.250	1.023	1200	2	2026-11-18
+Doctor Doom	Kang, Temporal Tyrant (card_draw_second_card)	1.000	1.311	1200	2	2026-11-18
+Elrond, Moon-Reader	Kang, Temporal Tyrant (card_draw_second_card)	-1.333	0.833	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Kang, Temporal Tyrant (card_draw_second_card)	-0.417	1.064	1200	2	2026-11-18
+Gandalf, Wandering Wizard	Kang, Temporal Tyrant (card_draw_second_card)	-0.833	1.048	1200	2	2026-11-18
+Garruk, Veiled Butcher	Kang, Temporal Tyrant (card_draw_second_card)	4.083	1.253	1200	2	2026-11-18
+Giant's Boulder	Kang, Temporal Tyrant (card_draw_second_card)	-2.750	1.291	1200	2	2026-11-18
+Hedron Archive	Kang, Temporal Tyrant (card_draw_second_card)	-0.583	1.158	1200	2	2026-11-18
+High-Society Hunter	Kang, Temporal Tyrant (card_draw_second_card)	-2.083	1.261	1200	2	2026-11-18
+Karn, Gilded Guardian	Kang, Temporal Tyrant (card_draw_second_card)	-0.167	1.219	1200	2	2026-11-18
+Liliana, Dreadhorde General	Kang, Temporal Tyrant (card_draw_second_card)	0.750	1.254	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Kang, Temporal Tyrant (card_draw_second_card)	-1.667	0.999	1200	2	2026-11-18
+M.O.D.O.K.	Kang, Temporal Tyrant (card_draw_second_card)	-2.083	1.037	1200	2	2026-11-18
+Mind Stone	Kang, Temporal Tyrant (card_draw_second_card)	1.583	1.267	1200	2	2026-11-18
+Murmuring Volume	Kang, Temporal Tyrant (card_draw_second_card)	-0.667	0.950	1200	2	2026-11-18
+Overwrite the Multiverse	Kang, Temporal Tyrant (card_draw_second_card)	1.500	1.250	1200	2	2026-11-18
+Ruric Thar, Biomagus	Kang, Temporal Tyrant (card_draw_second_card)	-0.667	1.041	1200	2	2026-11-18
+Skyship Buccaneer	Kang, Temporal Tyrant (card_draw_second_card)	-0.750	1.031	1200	2	2026-11-18
+Sol Ring	Kang, Temporal Tyrant (card_draw_second_card)	4.583	1.325	1200	2	2026-11-18
+Solemn Simulacrum	Kang, Temporal Tyrant (card_draw_second_card)	0.083	0.990	1200	2	2026-11-18
+The Echoverse Fulcrum	Kang, Temporal Tyrant (card_draw_second_card)	0.417	1.331	1200	2	2026-11-18
+The Sackville-Bagginses	Kang, Temporal Tyrant (card_draw_second_card)	0.667	1.191	1200	2	2026-11-18
+The Theorist, Jace Beleren	Kang, Temporal Tyrant (card_draw_second_card)	3.000	1.315	1200	2	2026-11-18
+The Vision	Kang, Temporal Tyrant (card_draw_second_card)	0.583	1.084	1200	2	2026-11-18
+Variable Chaser	Kang, Temporal Tyrant (card_draw_second_card)	-0.333	0.874	1200	2	2026-11-18
+Ancestor Dragon	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	1.000	0.962	1200	2	2026-11-18
+Archive Arbiter	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.583	0.931	1200	2	2026-11-18
+Captain Mar-Vell, Space-Born	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.667	0.897	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.750	1.056	1200	2	2026-11-18
+Curator of Destinies	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	1.083	0.929	1200	2	2026-11-18
+Darksteel Colossus	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.917	0.853	1200	2	2026-11-18
+Drogskol Reaver	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.083	0.922	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.417	0.916	1200	2	2026-11-18
+Exemplar of Light	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.917	0.983	1200	2	2026-11-18
+Herald of Eternal Dawn	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.500	0.940	1200	2	2026-11-18
+Jazal Goldmane	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.750	1.044	1200	2	2026-11-18
+Kang the Conqueror	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.083	1.058	1200	2	2026-11-18
+Lyra Dawnbringer	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.667	1.118	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-3.333	0.836	1200	2	2026-11-18
+Mind Stone	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.500	1.100	1200	2	2026-11-18
+Namor the Sub-Mariner	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.917	0.759	1200	2	2026-11-18
+Ruric Thar, Biomagus	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.833	0.935	1200	2	2026-11-18
+Serra Angel	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.500	0.889	1200	2	2026-11-18
+Sire of Seven Deaths	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.917	1.041	1200	2	2026-11-18
+Skyship Buccaneer	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.917	0.989	1200	2	2026-11-18
+Sol Ring	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	4.000	1.267	1200	2	2026-11-18
+Sphinx of the Final Word	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.417	0.869	1200	2	2026-11-18
+Steel Hellkite	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-2.500	1.020	1200	2	2026-11-18
+The Eagles Are Coming!	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-0.667	1.100	1200	2	2026-11-18
+The Echoverse Fulcrum	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-1.417	1.140	1200	2	2026-11-18
+The Lord of the Eagles	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.417	1.156	1200	2	2026-11-18
+The Mighty Thor, Jane Foster	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	-2.833	0.954	1200	2	2026-11-18
+The Mind Stone	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.667	1.111	1200	2	2026-11-18
+The Sentry, Golden Guardian	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	1.750	1.049	1200	2	2026-11-18
+The Theorist, Jace Beleren	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	3.583	1.205	1200	2	2026-11-18
+The Vision	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.167	0.936	1200	2	2026-11-18
+Variable Chaser	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.833	0.833	1200	2	2026-11-18
+Zetalpa, Primal Dawn	Kykar, Zephyr Awakener (fdn_birds_and_fliers)	0.500	0.969	1200	2	2026-11-18
+Aggressive Mammoth	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.250	0.877	1200	2	2026-11-18
+Beast Within	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.000	0.687	1200	2	2026-11-18
+Beorn the Fierce	Ghalta, Primal Hunger (fdn_dinosaurs)	-2.333	1.006	1200	2	2026-11-18
+Budding Insurgent	Ghalta, Primal Hunger (fdn_dinosaurs)	0.167	0.755	1200	2	2026-11-18
+Darksteel Colossus	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.583	0.776	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.833	0.798	1200	2	2026-11-18
+Garruk, Curse Breaker	Ghalta, Primal Hunger (fdn_dinosaurs)	-0.833	0.889	1200	2	2026-11-18
+Ghalta the Unstoppable	Ghalta, Primal Hunger (fdn_dinosaurs)	0.333	1.085	1200	2	2026-11-18
+Gigantic Big Bear	Ghalta, Primal Hunger (fdn_dinosaurs)	-2.583	0.836	1200	2	2026-11-18
+Gigantosaurus	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.500	0.999	1200	2	2026-11-18
+Gnarlback Rhino	Ghalta, Primal Hunger (fdn_dinosaurs)	-0.833	0.858	1200	2	2026-11-18
+Goblin Firebomb	Ghalta, Primal Hunger (fdn_dinosaurs)	-2.500	1.052	1200	2	2026-11-18
+Hexhaven Invigorator	Ghalta, Primal Hunger (fdn_dinosaurs)	0.000	0.935	1200	2	2026-11-18
+Hungering Puppetbeast	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.917	0.908	1200	2	2026-11-18
+Karn, Gilded Guardian	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.667	0.999	1200	2	2026-11-18
+Mind Stone	Ghalta, Primal Hunger (fdn_dinosaurs)	0.417	0.996	1200	2	2026-11-18
+Old Fat Spider	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.333	0.789	1200	2	2026-11-18
+Pelakka Wurm	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.250	0.758	1200	2	2026-11-18
+Quakestrider Ceratops	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.833	0.992	1200	2	2026-11-18
+Quilled Greatwurm	Ghalta, Primal Hunger (fdn_dinosaurs)	0.000	0.955	1200	2	2026-11-18
+Rampaging Baloths	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.583	0.877	1200	2	2026-11-18
+She-Hulk, Jade Defender	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.167	0.913	1200	2	2026-11-18
+Sire of Seven Deaths	Ghalta, Primal Hunger (fdn_dinosaurs)	2.083	0.947	1200	2	2026-11-18
+Sol Ring	Ghalta, Primal Hunger (fdn_dinosaurs)	5.583	1.159	1200	2	2026-11-18
+Spinner of Souls	Ghalta, Primal Hunger (fdn_dinosaurs)	0.083	0.693	1200	2	2026-11-18
+Steel Hellkite	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.917	0.811	1200	2	2026-11-18
+The Echoverse Fulcrum	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.250	1.077	1200	2	2026-11-18
+The Thing, Ben Grimm	Ghalta, Primal Hunger (fdn_dinosaurs)	-1.750	0.820	1200	2	2026-11-18
+The Unbeatable Squirrel Girl	Ghalta, Primal Hunger (fdn_dinosaurs)	0.917	1.023	1200	2	2026-11-18
+Traxos, Scourge Eternal	Ghalta, Primal Hunger (fdn_dinosaurs)	-0.250	0.812	1200	2	2026-11-18
+Vivien Reid	Ghalta, Primal Hunger (fdn_dinosaurs)	-2.000	0.897	1200	2	2026-11-18
+Vizier of the Menagerie	Ghalta, Primal Hunger (fdn_dinosaurs)	-0.250	0.862	1200	2	2026-11-18
+Ajani Unrelenting	Codie, Ravenous Codex (hob_adventure)	-0.750	1.017	1200	2	2026-11-18
+Beorn the Fierce	Codie, Ravenous Codex (hob_adventure)	-0.750	1.064	1200	2	2026-11-18
+Beorn, Reluctant Host	Codie, Ravenous Codex (hob_adventure)	-1.167	0.816	1200	2	2026-11-18
+Bloodline Recollector	Codie, Ravenous Codex (hob_adventure)	-1.583	1.002	1200	2	2026-11-18
+Blossom-Blessed Angel	Codie, Ravenous Codex (hob_adventure)	1.500	0.975	1200	2	2026-11-18
+Carnivorous Cultivator	Codie, Ravenous Codex (hob_adventure)	-2.750	1.043	1200	2	2026-11-18
+Chandra, Torch of Defiance	Codie, Ravenous Codex (hob_adventure)	-1.583	1.030	1200	2	2026-11-18
+Darksteel Colossus	Codie, Ravenous Codex (hob_adventure)	-2.583	0.892	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Codie, Ravenous Codex (hob_adventure)	-0.667	0.912	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Codie, Ravenous Codex (hob_adventure)	-1.417	0.901	1200	2	2026-11-18
+Gandalf, Goblins' Bane	Codie, Ravenous Codex (hob_adventure)	0.417	0.795	1200	2	2026-11-18
+Garruk, Veiled Butcher	Codie, Ravenous Codex (hob_adventure)	-0.333	1.007	1200	2	2026-11-18
+Ghalta, Primal Hunger	Codie, Ravenous Codex (hob_adventure)	-1.500	0.978	1200	2	2026-11-18
+Gigantosaurus	Codie, Ravenous Codex (hob_adventure)	-1.667	0.979	1200	2	2026-11-18
+Gollum, Silent Slinker	Codie, Ravenous Codex (hob_adventure)	-1.917	0.953	1200	2	2026-11-18
+Great Ugly-Looking Goblin	Codie, Ravenous Codex (hob_adventure)	-0.667	0.950	1200	2	2026-11-18
+Hexhaven Invigorator	Codie, Ravenous Codex (hob_adventure)	-2.250	0.953	1200	2	2026-11-18
+Koma, World-Eater	Codie, Ravenous Codex (hob_adventure)	-0.750	0.893	1200	2	2026-11-18
+Kwia Vigorbloom	Codie, Ravenous Codex (hob_adventure)	1.917	0.949	1200	2	2026-11-18
+Lake-town Mariners	Codie, Ravenous Codex (hob_adventure)	-1.083	0.853	1200	2	2026-11-18
+Liliana, Dreadhorde General	Codie, Ravenous Codex (hob_adventure)	0.667	0.918	1200	2	2026-11-18
+Prudent Fateseer	Codie, Ravenous Codex (hob_adventure)	0.000	0.698	1200	2	2026-11-18
+Pyre Rhymer	Codie, Ravenous Codex (hob_adventure)	-1.500	0.676	1200	2	2026-11-18
+Semester Foreseer	Codie, Ravenous Codex (hob_adventure)	-1.833	0.950	1200	2	2026-11-18
+Smaug, the Great Calamity	Codie, Ravenous Codex (hob_adventure)	-0.500	1.053	1200	2	2026-11-18
+Sol Ring	Codie, Ravenous Codex (hob_adventure)	1.500	1.180	1200	2	2026-11-18
+Super-Skrull	Codie, Ravenous Codex (hob_adventure)	-2.167	1.067	1200	2	2026-11-18
+Thanos, the Mad Titan	Codie, Ravenous Codex (hob_adventure)	0.833	0.850	1200	2	2026-11-18
+Thor, God of Thunder	Codie, Ravenous Codex (hob_adventure)	-0.250	1.017	1200	2	2026-11-18
+Thranduil, Sindarin Liege	Codie, Ravenous Codex (hob_adventure)	-2.583	1.002	1200	2	2026-11-18
+Variable Chaser	Codie, Ravenous Codex (hob_adventure)	-1.417	0.711	1200	2	2026-11-18
+Vigorbloom Vanguard	Codie, Ravenous Codex (hob_adventure)	-1.083	1.063	1200	2	2026-11-18
+Woodwork Prodigy	Codie, Ravenous Codex (hob_adventure)	0.250	0.584	1200	2	2026-11-18
+Ajani Unrelenting	Thorin Oakenshield (hob_dwarves)	-0.417	1.031	1200	2	2026-11-18
+Balin, Loremaster	Thorin Oakenshield (hob_dwarves)	-1.250	1.127	1200	2	2026-11-18
+Bifur, Melodic Rider	Thorin Oakenshield (hob_dwarves)	0.833	0.842	1200	2	2026-11-18
+Bombur, Gentle Dreamer	Thorin Oakenshield (hob_dwarves)	0.417	0.750	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Thorin Oakenshield (hob_dwarves)	3.417	1.025	1200	2	2026-11-18
+Chandra, Flameshaper	Thorin Oakenshield (hob_dwarves)	0.000	0.858	1200	2	2026-11-18
+Chandra, Torch of Defiance	Thorin Oakenshield (hob_dwarves)	-0.167	1.041	1200	2	2026-11-18
+Danitha, Sword of Hope	Thorin Oakenshield (hob_dwarves)	-1.083	0.640	1200	2	2026-11-18
+Daredevil, Man Without Fear	Thorin Oakenshield (hob_dwarves)	0.417	1.010	1200	2	2026-11-18
+Darksteel Colossus	Thorin Oakenshield (hob_dwarves)	-0.167	0.833	1200	2	2026-11-18
+Dori, Bearer of Friends	Thorin Oakenshield (hob_dwarves)	0.583	0.640	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Thorin Oakenshield (hob_dwarves)	1.167	0.941	1200	2	2026-11-18
+Dáin Ironfoot	Thorin Oakenshield (hob_dwarves)	0.833	0.623	1200	2	2026-11-18
+Dáin's Company	Thorin Oakenshield (hob_dwarves)	0.667	1.092	1200	2	2026-11-18
+Dáin, Lord of the Iron Hills	Thorin Oakenshield (hob_dwarves)	2.500	1.114	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Thorin Oakenshield (hob_dwarves)	-0.333	0.882	1200	2	2026-11-18
+Fíli the Pathfinder	Thorin Oakenshield (hob_dwarves)	1.000	1.085	1200	2	2026-11-18
+Iron Hills Stalwart	Thorin Oakenshield (hob_dwarves)	0.583	0.862	1200	2	2026-11-18
+Karn, Gilded Guardian	Thorin Oakenshield (hob_dwarves)	0.333	1.014	1200	2	2026-11-18
+Kíli the Resourceful	Thorin Oakenshield (hob_dwarves)	0.083	1.057	1200	2	2026-11-18
+Lyra Dawnbringer	Thorin Oakenshield (hob_dwarves)	2.417	1.054	1200	2	2026-11-18
+Mind Stone	Thorin Oakenshield (hob_dwarves)	1.333	1.153	1200	2	2026-11-18
+Mjölnir, Hammer of Thor	Thorin Oakenshield (hob_dwarves)	0.000	1.142	1200	2	2026-11-18
+Orcrist, Goblin-cleaver	Thorin Oakenshield (hob_dwarves)	-0.167	0.943	1200	2	2026-11-18
+Ori, Keeper of Songs	Thorin Oakenshield (hob_dwarves)	0.583	0.640	1200	2	2026-11-18
+Red Hulk	Thorin Oakenshield (hob_dwarves)	1.083	0.924	1200	2	2026-11-18
+Smaug the Magnificent	Thorin Oakenshield (hob_dwarves)	-1.250	1.083	1200	2	2026-11-18
+Sol Ring	Thorin Oakenshield (hob_dwarves)	5.333	1.238	1200	2	2026-11-18
+The Sentry, Golden Guardian	Thorin Oakenshield (hob_dwarves)	8.000	1.186	1200	2	2026-11-18
+Thor, God of Thunder	Thorin Oakenshield (hob_dwarves)	0.167	1.021	1200	2	2026-11-18
+Thorin, Mountain-king	Thorin Oakenshield (hob_dwarves)	0.083	0.924	1200	2	2026-11-18
+Óin the Brave	Thorin Oakenshield (hob_dwarves)	-0.667	1.155	1200	2	2026-11-18
+Aggressive Mammoth	Thranduil, Sindarin Liege (hob_elves)	-1.000	0.881	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Thranduil, Sindarin Liege (hob_elves)	-0.167	0.834	1200	2	2026-11-18
+Beast Within	Thranduil, Sindarin Liege (hob_elves)	-0.083	0.672	1200	2	2026-11-18
+Beorn the Fierce	Thranduil, Sindarin Liege (hob_elves)	-0.667	0.972	1200	2	2026-11-18
+Carnivorous Cultivator	Thranduil, Sindarin Liege (hob_elves)	0.250	0.997	1200	2	2026-11-18
+Darksteel Colossus	Thranduil, Sindarin Liege (hob_elves)	-1.250	0.682	1200	2	2026-11-18
+Dwynen, Gilt-Leaf Daen	Thranduil, Sindarin Liege (hob_elves)	1.667	0.896	1200	2	2026-11-18
+Elrond, Moon-Reader	Thranduil, Sindarin Liege (hob_elves)	-0.333	0.601	1200	2	2026-11-18
+Elvish Archdruid	Thranduil, Sindarin Liege (hob_elves)	0.500	0.834	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Thranduil, Sindarin Liege (hob_elves)	-0.917	0.721	1200	2	2026-11-18
+Ghalta, Primal Hunger	Thranduil, Sindarin Liege (hob_elves)	-0.083	0.931	1200	2	2026-11-18
+Giant's Boulder	Thranduil, Sindarin Liege (hob_elves)	-1.417	1.017	1200	2	2026-11-18
+Gigantosaurus	Thranduil, Sindarin Liege (hob_elves)	-0.750	0.862	1200	2	2026-11-18
+Goblin Firebomb	Thranduil, Sindarin Liege (hob_elves)	0.000	1.014	1200	2	2026-11-18
+Hexhaven Invigorator	Thranduil, Sindarin Liege (hob_elves)	1.583	0.893	1200	2	2026-11-18
+Imperious Perfect	Thranduil, Sindarin Liege (hob_elves)	2.000	0.806	1200	2	2026-11-18
+Karn, Gilded Guardian	Thranduil, Sindarin Liege (hob_elves)	0.167	0.898	1200	2	2026-11-18
+Koma, World-Eater	Thranduil, Sindarin Liege (hob_elves)	0.500	0.807	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Thranduil, Sindarin Liege (hob_elves)	-0.167	0.687	1200	2	2026-11-18
+Marwyn, the Preserver	Thranduil, Sindarin Liege (hob_elves)	-0.583	0.954	1200	2	2026-11-18
+Namor the Sub-Mariner	Thranduil, Sindarin Liege (hob_elves)	0.500	0.677	1200	2	2026-11-18
+Pongify	Thranduil, Sindarin Liege (hob_elves)	-0.250	1.024	1200	2	2026-11-18
+Quakestrider Ceratops	Thranduil, Sindarin Liege (hob_elves)	-1.250	0.786	1200	2	2026-11-18
+Quilled Greatwurm	Thranduil, Sindarin Liege (hob_elves)	-0.500	0.881	1200	2	2026-11-18
+Rampaging Baloths	Thranduil, Sindarin Liege (hob_elves)	-1.167	0.857	1200	2	2026-11-18
+Silvan Reveler	Thranduil, Sindarin Liege (hob_elves)	0.250	0.812	1200	2	2026-11-18
+Simulacrum Shaper	Thranduil, Sindarin Liege (hob_elves)	1.667	0.676	1200	2	2026-11-18
+Sire of Seven Deaths	Thranduil, Sindarin Liege (hob_elves)	2.083	0.849	1200	2	2026-11-18
+Sol Ring	Thranduil, Sindarin Liege (hob_elves)	2.500	1.115	1200	2	2026-11-18
+Tajuru Pathwarden	Thranduil, Sindarin Liege (hob_elves)	0.083	0.722	1200	2	2026-11-18
+The Unbeatable Squirrel Girl	Thranduil, Sindarin Liege (hob_elves)	0.500	0.965	1200	2	2026-11-18
+Thranduil's Company	Thranduil, Sindarin Liege (hob_elves)	-0.250	0.712	1200	2	2026-11-18
+Wildheart Invoker	Thranduil, Sindarin Liege (hob_elves)	-0.583	0.692	1200	2	2026-11-18
+Ajani Unrelenting	The Great Goblin (hob_goblins)	0.417	1.063	1200	2	2026-11-18
+Avengers: Under Siege	The Great Goblin (hob_goblins)	-0.583	0.901	1200	2	2026-11-18
+Azog, Moria's Ruin	The Great Goblin (hob_goblins)	0.083	0.894	1200	2	2026-11-18
+Bolg of the North	The Great Goblin (hob_goblins)	-0.917	1.017	1200	2	2026-11-18
+Bolg's Company	The Great Goblin (hob_goblins)	2.500	1.147	1200	2	2026-11-18
+Bothersome Noisemaker	The Great Goblin (hob_goblins)	0.750	1.018	1200	2	2026-11-18
+Chandra, Torch of Defiance	The Great Goblin (hob_goblins)	-0.833	0.957	1200	2	2026-11-18
+Darksteel Colossus	The Great Goblin (hob_goblins)	-1.583	0.820	1200	2	2026-11-18
+Desecration Demon	The Great Goblin (hob_goblins)	-1.750	1.037	1200	2	2026-11-18
+Drakuseth, Maw of Flames	The Great Goblin (hob_goblins)	1.250	0.973	1200	2	2026-11-18
+Emrakul, the Exigent Doom	The Great Goblin (hob_goblins)	-0.583	0.829	1200	2	2026-11-18
+Fearsome Goblin Pair	The Great Goblin (hob_goblins)	0.333	0.677	1200	2	2026-11-18
+Garruk, Veiled Butcher	The Great Goblin (hob_goblins)	2.583	0.997	1200	2	2026-11-18
+Goblin Boarders	The Great Goblin (hob_goblins)	-0.667	0.540	1200	2	2026-11-18
+Goblin-town Flunkies	The Great Goblin (hob_goblins)	0.750	1.064	1200	2	2026-11-18
+Great Ugly-Looking Goblin	The Great Goblin (hob_goblins)	0.000	0.897	1200	2	2026-11-18
+Gundabad Opportunist	The Great Goblin (hob_goblins)	0.000	0.841	1200	2	2026-11-18
+Krenko, Mob Boss	The Great Goblin (hob_goblins)	2.333	0.981	1200	2	2026-11-18
+Lathliss, Dragon Queen	The Great Goblin (hob_goblins)	0.000	0.993	1200	2	2026-11-18
+Liliana, Dreadhorde General	The Great Goblin (hob_goblins)	0.750	0.923	1200	2	2026-11-18
+Massacre Wurm	The Great Goblin (hob_goblins)	1.333	1.019	1200	2	2026-11-18
+Misty Mountains Raider	The Great Goblin (hob_goblins)	0.417	0.907	1200	2	2026-11-18
+Rage into the Valley	The Great Goblin (hob_goblins)	1.750	0.616	1200	2	2026-11-18
+Red Hulk	The Great Goblin (hob_goblins)	1.417	0.995	1200	2	2026-11-18
+Redcap Gutter-Dweller	The Great Goblin (hob_goblins)	-2.917	1.009	1200	2	2026-11-18
+Rhovanion Rampager	The Great Goblin (hob_goblins)	-0.750	0.750	1200	2	2026-11-18
+Searslicer Goblin	The Great Goblin (hob_goblins)	2.417	1.056	1200	2	2026-11-18
+Smaug the Magnificent	The Great Goblin (hob_goblins)	-2.417	1.070	1200	2	2026-11-18
+Smaug, Wicked Worm	The Great Goblin (hob_goblins)	0.500	1.085	1200	2	2026-11-18
+Snowslope Hunter	The Great Goblin (hob_goblins)	-0.833	0.513	1200	2	2026-11-18
+Sol Ring	The Great Goblin (hob_goblins)	4.500	1.236	1200	2	2026-11-18
+Stone-Giant of High Pass	The Great Goblin (hob_goblins)	1.083	0.966	1200	2	2026-11-18
+Thor, God of Thunder	The Great Goblin (hob_goblins)	-0.500	1.020	1200	2	2026-11-18
+Ajani Unrelenting	Bifur, Melodic Rider (hob_storied)	3.167	1.025	1200	2	2026-11-18
+Archive Arbiter	Bifur, Melodic Rider (hob_storied)	1.167	0.858	1200	2	2026-11-18
+Balin, Loremaster	Bifur, Melodic Rider (hob_storied)	1.167	1.118	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Bifur, Melodic Rider (hob_storied)	2.917	1.015	1200	2	2026-11-18
+Chandra, Flameshaper	Bifur, Melodic Rider (hob_storied)	2.000	0.897	1200	2	2026-11-18
+Chandra, Torch of Defiance	Bifur, Melodic Rider (hob_storied)	0.417	1.024	1200	2	2026-11-18
+Commander's Sphere	Bifur, Melodic Rider (hob_storied)	0.750	0.759	1200	2	2026-11-18
+Daredevil, Man Without Fear	Bifur, Melodic Rider (hob_storied)	1.333	1.006	1200	2	2026-11-18
+Darksteel Colossus	Bifur, Melodic Rider (hob_storied)	1.750	0.885	1200	2	2026-11-18
+Dori, Bearer of Friends	Bifur, Melodic Rider (hob_storied)	2.000	0.806	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Bifur, Melodic Rider (hob_storied)	2.833	0.984	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Bifur, Melodic Rider (hob_storied)	1.333	0.882	1200	2	2026-11-18
+Etali, Primal Storm	Bifur, Melodic Rider (hob_storied)	3.750	0.942	1200	2	2026-11-18
+Gate Colossus	Bifur, Melodic Rider (hob_storied)	0.917	0.870	1200	2	2026-11-18
+Giant's Boulder	Bifur, Melodic Rider (hob_storied)	-1.917	1.044	1200	2	2026-11-18
+Jazal Goldmane	Bifur, Melodic Rider (hob_storied)	-0.667	0.986	1200	2	2026-11-18
+Jiang Yanggu, Alone	Bifur, Melodic Rider (hob_storied)	0.667	0.921	1200	2	2026-11-18
+Karn, Gilded Guardian	Bifur, Melodic Rider (hob_storied)	1.500	1.007	1200	2	2026-11-18
+Lathliss, Dragon Queen	Bifur, Melodic Rider (hob_storied)	2.417	1.002	1200	2	2026-11-18
+Lyra Dawnbringer	Bifur, Melodic Rider (hob_storied)	1.917	1.044	1200	2	2026-11-18
+Mind Stone	Bifur, Melodic Rider (hob_storied)	1.667	1.086	1200	2	2026-11-18
+Red Hulk	Bifur, Melodic Rider (hob_storied)	1.750	0.939	1200	2	2026-11-18
+Smaug the Magnificent	Bifur, Melodic Rider (hob_storied)	-1.333	1.080	1200	2	2026-11-18
+Sol Ring	Bifur, Melodic Rider (hob_storied)	4.500	1.174	1200	2	2026-11-18
+Steel Hellkite	Bifur, Melodic Rider (hob_storied)	0.500	0.928	1200	2	2026-11-18
+The Mind Stone	Bifur, Melodic Rider (hob_storied)	2.667	1.084	1200	2	2026-11-18
+The Sentry, Golden Guardian	Bifur, Melodic Rider (hob_storied)	6.917	1.095	1200	2	2026-11-18
+The Vision	Bifur, Melodic Rider (hob_storied)	1.000	0.950	1200	2	2026-11-18
+Thor, God of Thunder	Bifur, Melodic Rider (hob_storied)	1.250	1.017	1200	2	2026-11-18
+Thorin, Mountain-king	Bifur, Melodic Rider (hob_storied)	0.167	0.936	1200	2	2026-11-18
+Viv Vision, Teen Synthezoid	Bifur, Melodic Rider (hob_storied)	-0.500	0.717	1200	2	2026-11-18
+Zetalpa, Primal Dawn	Bifur, Melodic Rider (hob_storied)	2.333	0.912	1200	2	2026-11-18
+Ajani Unrelenting	Smaug, Wicked Worm (hob_treasure)	5.667	1.014	1200	2	2026-11-18
+Archive Arbiter	Smaug, Wicked Worm (hob_treasure)	2.500	0.880	1200	2	2026-11-18
+Avengers: Under Siege	Smaug, Wicked Worm (hob_treasure)	4.000	1.004	1200	2	2026-11-18
+Chandra, Flameshaper	Smaug, Wicked Worm (hob_treasure)	1.833	0.789	1200	2	2026-11-18
+Chandra, Torch of Defiance	Smaug, Wicked Worm (hob_treasure)	2.167	1.005	1200	2	2026-11-18
+Commander's Sphere	Smaug, Wicked Worm (hob_treasure)	1.667	0.772	1200	2	2026-11-18
+Craterclaw Colossus	Smaug, Wicked Worm (hob_treasure)	2.000	0.840	1200	2	2026-11-18
+Darksteel Colossus	Smaug, Wicked Worm (hob_treasure)	1.417	0.828	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Smaug, Wicked Worm (hob_treasure)	4.583	1.060	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Smaug, Wicked Worm (hob_treasure)	2.583	0.915	1200	2	2026-11-18
+Gate Colossus	Smaug, Wicked Worm (hob_treasure)	1.583	0.802	1200	2	2026-11-18
+Giant's Boulder	Smaug, Wicked Worm (hob_treasure)	1.667	1.053	1200	2	2026-11-18
+Goblin Firebomb	Smaug, Wicked Worm (hob_treasure)	0.500	1.026	1200	2	2026-11-18
+Hedron Archive	Smaug, Wicked Worm (hob_treasure)	2.500	1.012	1200	2	2026-11-18
+Karn, Gilded Guardian	Smaug, Wicked Worm (hob_treasure)	4.667	1.089	1200	2	2026-11-18
+Kree Sentinel	Smaug, Wicked Worm (hob_treasure)	2.917	0.827	1200	2	2026-11-18
+Lathliss, Dragon Queen	Smaug, Wicked Worm (hob_treasure)	4.417	1.014	1200	2	2026-11-18
+Lich's Relic	Smaug, Wicked Worm (hob_treasure)	2.000	1.098	1200	2	2026-11-18
+M.O.D.O.K.	Smaug, Wicked Worm (hob_treasure)	1.417	0.802	1200	2	2026-11-18
+Massacre Wurm	Smaug, Wicked Worm (hob_treasure)	6.250	1.056	1200	2	2026-11-18
+Mind Stone	Smaug, Wicked Worm (hob_treasure)	3.167	1.046	1200	2	2026-11-18
+Rapacious Dragon	Smaug, Wicked Worm (hob_treasure)	2.917	0.844	1200	2	2026-11-18
+Seize the Spoils	Smaug, Wicked Worm (hob_treasure)	1.250	0.749	1200	2	2026-11-18
+Smaug the Magnificent	Smaug, Wicked Worm (hob_treasure)	2.333	1.129	1200	2	2026-11-18
+Sol Ring	Smaug, Wicked Worm (hob_treasure)	4.583	1.148	1200	2	2026-11-18
+Steel Hellkite	Smaug, Wicked Worm (hob_treasure)	2.500	0.880	1200	2	2026-11-18
+Stone-Giant of High Pass	Smaug, Wicked Worm (hob_treasure)	3.917	1.008	1200	2	2026-11-18
+The Echoverse Fulcrum	Smaug, Wicked Worm (hob_treasure)	2.500	1.092	1200	2	2026-11-18
+The Sackville-Bagginses	Smaug, Wicked Worm (hob_treasure)	2.167	1.020	1200	2	2026-11-18
+The Vision	Smaug, Wicked Worm (hob_treasure)	4.333	0.982	1200	2	2026-11-18
+Thor, God of Thunder	Smaug, Wicked Worm (hob_treasure)	1.833	0.963	1200	2	2026-11-18
+Traxos, Scourge Eternal	Smaug, Wicked Worm (hob_treasure)	2.000	0.926	1200	2	2026-11-18
+Aggressive Mammoth	The Chief Warg (hob_wolves)	-1.083	0.917	1200	2	2026-11-18
+Arbiter of Woe	The Chief Warg (hob_wolves)	0.333	0.764	1200	2	2026-11-18
+Archive Arbiter	The Chief Warg (hob_wolves)	-0.333	0.755	1200	2	2026-11-18
+Beorn the Fierce	The Chief Warg (hob_wolves)	-0.583	0.961	1200	2	2026-11-18
+Darksteel Colossus	The Chief Warg (hob_wolves)	0.083	0.731	1200	2	2026-11-18
+Desecration Demon	The Chief Warg (hob_wolves)	-0.167	1.034	1200	2	2026-11-18
+Emrakul, the Exigent Doom	The Chief Warg (hob_wolves)	0.500	0.746	1200	2	2026-11-18
+Garruk, Veiled Butcher	The Chief Warg (hob_wolves)	0.917	0.917	1200	2	2026-11-18
+Ghalta the Unstoppable	The Chief Warg (hob_wolves)	1.833	1.013	1200	2	2026-11-18
+Ghalta, Primal Hunger	The Chief Warg (hob_wolves)	0.833	0.986	1200	2	2026-11-18
+Giant's Boulder	The Chief Warg (hob_wolves)	-0.333	0.993	1200	2	2026-11-18
+Gigantic Big Bear	The Chief Warg (hob_wolves)	-0.500	0.833	1200	2	2026-11-18
+Gigantosaurus	The Chief Warg (hob_wolves)	0.333	0.898	1200	2	2026-11-18
+Gnarlback Rhino	The Chief Warg (hob_wolves)	-0.750	0.953	1200	2	2026-11-18
+Hexhaven Invigorator	The Chief Warg (hob_wolves)	0.167	0.965	1200	2	2026-11-18
+High-Society Hunter	The Chief Warg (hob_wolves)	-0.167	0.890	1200	2	2026-11-18
+Hungering Puppetbeast	The Chief Warg (hob_wolves)	0.333	0.866	1200	2	2026-11-18
+Karn, Gilded Guardian	The Chief Warg (hob_wolves)	0.917	0.901	1200	2	2026-11-18
+Liliana, Dreadhorde General	The Chief Warg (hob_wolves)	0.500	0.799	1200	2	2026-11-18
+Massacre Wurm	The Chief Warg (hob_wolves)	1.667	0.964	1200	2	2026-11-18
+Old Fat Spider	The Chief Warg (hob_wolves)	0.333	0.800	1200	2	2026-11-18
+Pelakka Wurm	The Chief Warg (hob_wolves)	0.833	0.745	1200	2	2026-11-18
+Quakestrider Ceratops	The Chief Warg (hob_wolves)	-0.167	0.986	1200	2	2026-11-18
+Quilled Greatwurm	The Chief Warg (hob_wolves)	-0.500	0.943	1200	2	2026-11-18
+Rampaging Baloths	The Chief Warg (hob_wolves)	0.083	0.886	1200	2	2026-11-18
+Sire of Seven Deaths	The Chief Warg (hob_wolves)	3.167	0.910	1200	2	2026-11-18
+Sol Ring	The Chief Warg (hob_wolves)	4.000	1.095	1200	2	2026-11-18
+Steel Hellkite	The Chief Warg (hob_wolves)	0.000	0.817	1200	2	2026-11-18
+The Thing, Ben Grimm	The Chief Warg (hob_wolves)	0.917	0.894	1200	2	2026-11-18
+Tom, Bert, and William	The Chief Warg (hob_wolves)	0.083	0.821	1200	2	2026-11-18
+Vraska's Final Mercy	The Chief Warg (hob_wolves)	-0.667	1.087	1200	2	2026-11-18
+Vraska, the Cutting Glare	The Chief Warg (hob_wolves)	1.500	0.781	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Tatyova, Benthic Druid (landfall)	-1.167	1.007	1200	2	2026-11-18
+Avatar of Burgeoning Echoes	Tatyova, Benthic Druid (landfall)	0.833	1.080	1200	2	2026-11-18
+Beorn the Fierce	Tatyova, Benthic Druid (landfall)	0.500	1.178	1200	2	2026-11-18
+Beorn, Reluctant Host	Tatyova, Benthic Druid (landfall)	-1.083	0.947	1200	2	2026-11-18
+Boughside Wanderers	Tatyova, Benthic Druid (landfall)	-0.417	0.886	1200	2	2026-11-18
+Burnished Hart	Tatyova, Benthic Druid (landfall)	0.500	0.612	1200	2	2026-11-18
+Carnivorous Cultivator	Tatyova, Benthic Druid (landfall)	1.417	1.083	1200	2	2026-11-18
+Darksteel Colossus	Tatyova, Benthic Druid (landfall)	-0.833	0.921	1200	2	2026-11-18
+Elfsworn Giant	Tatyova, Benthic Druid (landfall)	-0.667	1.000	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Tatyova, Benthic Druid (landfall)	0.667	0.935	1200	2	2026-11-18
+Fblthp, Knows the Way	Tatyova, Benthic Druid (landfall)	1.000	1.028	1200	2	2026-11-18
+Ghalta, Primal Hunger	Tatyova, Benthic Druid (landfall)	0.667	1.112	1200	2	2026-11-18
+Giant's Boulder	Tatyova, Benthic Druid (landfall)	-0.833	1.185	1200	2	2026-11-18
+Gigantosaurus	Tatyova, Benthic Druid (landfall)	-0.417	1.058	1200	2	2026-11-18
+Grappling Kraken	Tatyova, Benthic Druid (landfall)	0.000	0.920	1200	2	2026-11-18
+Hexhaven Invigorator	Tatyova, Benthic Druid (landfall)	0.667	1.066	1200	2	2026-11-18
+Hungering Puppetbeast	Tatyova, Benthic Druid (landfall)	0.000	1.034	1200	2	2026-11-18
+Karn, Gilded Guardian	Tatyova, Benthic Druid (landfall)	-1.167	1.137	1200	2	2026-11-18
+Koma, World-Eater	Tatyova, Benthic Druid (landfall)	3.417	1.084	1200	2	2026-11-18
+Loot, Exuberant Explorer	Tatyova, Benthic Druid (landfall)	2.250	0.766	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Tatyova, Benthic Druid (landfall)	-0.667	0.808	1200	2	2026-11-18
+Mind Stone	Tatyova, Benthic Druid (landfall)	2.333	1.111	1200	2	2026-11-18
+Old Fat Spider	Tatyova, Benthic Druid (landfall)	1.583	0.994	1200	2	2026-11-18
+Rampaging Baloths	Tatyova, Benthic Druid (landfall)	0.250	1.017	1200	2	2026-11-18
+Silvan Reveler	Tatyova, Benthic Druid (landfall)	-4.000	1.050	1200	2	2026-11-18
+Simulacrum Shaper	Tatyova, Benthic Druid (landfall)	1.417	0.845	1200	2	2026-11-18
+Sol Ring	Tatyova, Benthic Druid (landfall)	3.833	1.162	1200	2	2026-11-18
+Solemn Simulacrum	Tatyova, Benthic Druid (landfall)	1.167	0.933	1200	2	2026-11-18
+Thranduil's Company	Tatyova, Benthic Druid (landfall)	2.750	1.012	1200	2	2026-11-18
+Thranduil, Sindarin Liege	Tatyova, Benthic Druid (landfall)	-0.500	1.061	1200	2	2026-11-18
+Vivien Reid	Tatyova, Benthic Druid (landfall)	-0.833	0.913	1200	2	2026-11-18
+Ancestor Dragon	Kwia Vigorbloom (lifegain)	0.417	0.878	1200	2	2026-11-18
+Apothecary Stomper	Kwia Vigorbloom (lifegain)	0.250	0.821	1200	2	2026-11-18
+Archive Arbiter	Kwia Vigorbloom (lifegain)	1.583	0.893	1200	2	2026-11-18
+Archway Angel	Kwia Vigorbloom (lifegain)	1.167	0.799	1200	2	2026-11-18
+Belladonna Took	Kwia Vigorbloom (lifegain)	-0.250	0.954	1200	2	2026-11-18
+Beorn the Fierce	Kwia Vigorbloom (lifegain)	0.250	0.947	1200	2	2026-11-18
+Bloombrute	Kwia Vigorbloom (lifegain)	0.167	0.905	1200	2	2026-11-18
+Blossom-Blessed Angel	Kwia Vigorbloom (lifegain)	1.583	0.932	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Kwia Vigorbloom (lifegain)	3.083	0.937	1200	2	2026-11-18
+Commander's Sphere	Kwia Vigorbloom (lifegain)	0.167	0.667	1200	2	2026-11-18
+Darksteel Colossus	Kwia Vigorbloom (lifegain)	0.833	0.858	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Kwia Vigorbloom (lifegain)	1.750	0.893	1200	2	2026-11-18
+Exemplar of Light	Kwia Vigorbloom (lifegain)	2.167	0.957	1200	2	2026-11-18
+Fumigate	Kwia Vigorbloom (lifegain)	1.583	1.064	1200	2	2026-11-18
+Giant's Boulder	Kwia Vigorbloom (lifegain)	0.583	1.031	1200	2	2026-11-18
+Gleaming Splendor	Kwia Vigorbloom (lifegain)	2.583	1.002	1200	2	2026-11-18
+Gnarlback Rhino	Kwia Vigorbloom (lifegain)	1.250	0.917	1200	2	2026-11-18
+Greenhouse Propagator	Kwia Vigorbloom (lifegain)	3.750	0.752	1200	2	2026-11-18
+Herald of Faith	Kwia Vigorbloom (lifegain)	0.750	0.838	1200	2	2026-11-18
+Hexhaven Invigorator	Kwia Vigorbloom (lifegain)	0.917	0.954	1200	2	2026-11-18
+Hungering Puppetbeast	Kwia Vigorbloom (lifegain)	1.500	0.897	1200	2	2026-11-18
+Karn, Gilded Guardian	Kwia Vigorbloom (lifegain)	0.667	0.950	1200	2	2026-11-18
+Lyra Dawnbringer	Kwia Vigorbloom (lifegain)	0.583	1.017	1200	2	2026-11-18
+Mind Stone	Kwia Vigorbloom (lifegain)	1.417	0.990	1200	2	2026-11-18
+Old Fat Spider	Kwia Vigorbloom (lifegain)	0.750	0.854	1200	2	2026-11-18
+Pelakka Wurm	Kwia Vigorbloom (lifegain)	1.167	0.842	1200	2	2026-11-18
+Sire of Seven Deaths	Kwia Vigorbloom (lifegain)	2.167	0.934	1200	2	2026-11-18
+Sol Ring	Kwia Vigorbloom (lifegain)	4.833	1.055	1200	2	2026-11-18
+Thalia, the Survivor	Kwia Vigorbloom (lifegain)	2.167	0.873	1200	2	2026-11-18
+The Mind Stone	Kwia Vigorbloom (lifegain)	4.000	0.996	1200	2	2026-11-18
+Titanbones, Towering Heart	Kwia Vigorbloom (lifegain)	1.750	0.961	1200	2	2026-11-18
+Vivien Reid	Kwia Vigorbloom (lifegain)	0.250	0.878	1200	2	2026-11-18
+Arbiter of Woe	Killmonger, Scourge of Wakanda (midrange_value)	0.167	0.834	1200	2	2026-11-18
+Archive Arbiter	Killmonger, Scourge of Wakanda (midrange_value)	0.000	0.882	1200	2	2026-11-18
+Bejeweled Warg	Killmonger, Scourge of Wakanda (midrange_value)	0.333	1.066	1200	2	2026-11-18
+Beorn the Fierce	Killmonger, Scourge of Wakanda (midrange_value)	0.417	1.084	1200	2	2026-11-18
+Commander's Sphere	Killmonger, Scourge of Wakanda (midrange_value)	-1.083	0.740	1200	2	2026-11-18
+Darksteel Colossus	Killmonger, Scourge of Wakanda (midrange_value)	-0.750	0.794	1200	2	2026-11-18
+Desecration Demon	Killmonger, Scourge of Wakanda (midrange_value)	0.833	1.067	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Killmonger, Scourge of Wakanda (midrange_value)	-0.083	0.877	1200	2	2026-11-18
+Garruk, Veiled Butcher	Killmonger, Scourge of Wakanda (midrange_value)	2.167	0.963	1200	2	2026-11-18
+Ghalta, Primal Hunger	Killmonger, Scourge of Wakanda (midrange_value)	0.500	0.998	1200	2	2026-11-18
+Giant's Boulder	Killmonger, Scourge of Wakanda (midrange_value)	0.333	1.067	1200	2	2026-11-18
+Gigantosaurus	Killmonger, Scourge of Wakanda (midrange_value)	0.750	0.990	1200	2	2026-11-18
+Hedron Archive	Killmonger, Scourge of Wakanda (midrange_value)	0.917	0.997	1200	2	2026-11-18
+Hexhaven Invigorator	Killmonger, Scourge of Wakanda (midrange_value)	0.500	1.048	1200	2	2026-11-18
+High-Society Hunter	Killmonger, Scourge of Wakanda (midrange_value)	0.167	0.986	1200	2	2026-11-18
+Hungering Puppetbeast	Killmonger, Scourge of Wakanda (midrange_value)	-0.500	0.890	1200	2	2026-11-18
+Karn, Gilded Guardian	Killmonger, Scourge of Wakanda (midrange_value)	1.583	0.982	1200	2	2026-11-18
+Liliana, Dreadhorde General	Killmonger, Scourge of Wakanda (midrange_value)	1.083	0.975	1200	2	2026-11-18
+Massacre Wurm	Killmonger, Scourge of Wakanda (midrange_value)	3.333	1.075	1200	2	2026-11-18
+Mind Stone	Killmonger, Scourge of Wakanda (midrange_value)	-1.000	1.086	1200	2	2026-11-18
+Old Fat Spider	Killmonger, Scourge of Wakanda (midrange_value)	1.083	0.961	1200	2	2026-11-18
+Overwrite the Multiverse	Killmonger, Scourge of Wakanda (midrange_value)	4.250	1.107	1200	2	2026-11-18
+Pelakka Wurm	Killmonger, Scourge of Wakanda (midrange_value)	-0.167	0.964	1200	2	2026-11-18
+Quakestrider Ceratops	Killmonger, Scourge of Wakanda (midrange_value)	0.500	1.000	1200	2	2026-11-18
+Quilled Greatwurm	Killmonger, Scourge of Wakanda (midrange_value)	0.667	1.118	1200	2	2026-11-18
+Rampaging Baloths	Killmonger, Scourge of Wakanda (midrange_value)	0.667	0.986	1200	2	2026-11-18
+Sol Ring	Killmonger, Scourge of Wakanda (midrange_value)	2.417	1.130	1200	2	2026-11-18
+Steel Hellkite	Killmonger, Scourge of Wakanda (midrange_value)	0.083	0.976	1200	2	2026-11-18
+The Serpent Society	Killmonger, Scourge of Wakanda (midrange_value)	0.583	0.812	1200	2	2026-11-18
+Tom, Bert, and William	Killmonger, Scourge of Wakanda (midrange_value)	1.000	0.850	1200	2	2026-11-18
+Vivien Reid	Killmonger, Scourge of Wakanda (midrange_value)	0.583	0.878	1200	2	2026-11-18
+Vraska, the Cutting Glare	Killmonger, Scourge of Wakanda (midrange_value)	1.917	0.869	1200	2	2026-11-18
+Agent 13, Sharon Carter	Black Panther, Vanguard (msh_heroes)	0.417	0.651	1200	2	2026-11-18
+Agent Maria Hill	Black Panther, Vanguard (msh_heroes)	-0.750	1.115	1200	2	2026-11-18
+Beorn the Fierce	Black Panther, Vanguard (msh_heroes)	1.333	1.054	1200	2	2026-11-18
+Captain Mar-Vell, Space-Born	Black Panther, Vanguard (msh_heroes)	1.500	0.808	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Black Panther, Vanguard (msh_heroes)	3.417	1.021	1200	2	2026-11-18
+Doc Samson, Super Psychiatrist	Black Panther, Vanguard (msh_heroes)	2.417	1.016	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Black Panther, Vanguard (msh_heroes)	1.083	0.812	1200	2	2026-11-18
+Esgaroth Garrison	Black Panther, Vanguard (msh_heroes)	0.750	0.759	1200	2	2026-11-18
+Hero in Training	Black Panther, Vanguard (msh_heroes)	3.250	0.706	1200	2	2026-11-18
+Jazal Goldmane	Black Panther, Vanguard (msh_heroes)	-0.167	0.949	1200	2	2026-11-18
+Ka-Zar of the Savage Land	Black Panther, Vanguard (msh_heroes)	1.917	0.794	1200	2	2026-11-18
+Karn, Gilded Guardian	Black Panther, Vanguard (msh_heroes)	0.833	1.028	1200	2	2026-11-18
+Kwia Vigorbloom	Black Panther, Vanguard (msh_heroes)	6.000	1.036	1200	2	2026-11-18
+Lyra Dawnbringer	Black Panther, Vanguard (msh_heroes)	1.750	1.077	1200	2	2026-11-18
+Mind Stone	Black Panther, Vanguard (msh_heroes)	3.167	1.064	1200	2	2026-11-18
+Okoye, Dora Milaje Leader	Black Panther, Vanguard (msh_heroes)	1.167	0.890	1200	2	2026-11-18
+Old Fat Spider	Black Panther, Vanguard (msh_heroes)	2.000	0.920	1200	2	2026-11-18
+Pelakka Wurm	Black Panther, Vanguard (msh_heroes)	2.417	0.819	1200	2	2026-11-18
+Pet Avengers	Black Panther, Vanguard (msh_heroes)	1.500	0.866	1200	2	2026-11-18
+Rampaging Baloths	Black Panther, Vanguard (msh_heroes)	0.500	1.000	1200	2	2026-11-18
+She-Hulk, Jade Defender	Black Panther, Vanguard (msh_heroes)	1.250	1.031	1200	2	2026-11-18
+Sol Ring	Black Panther, Vanguard (msh_heroes)	4.250	1.199	1200	2	2026-11-18
+Storm, Windrider	Black Panther, Vanguard (msh_heroes)	4.500	0.945	1200	2	2026-11-18
+The Eagles Are Coming!	Black Panther, Vanguard (msh_heroes)	0.333	1.041	1200	2	2026-11-18
+The Sentry, Golden Guardian	Black Panther, Vanguard (msh_heroes)	4.833	0.929	1200	2	2026-11-18
+The Thing, Ben Grimm	Black Panther, Vanguard (msh_heroes)	0.667	0.965	1200	2	2026-11-18
+The Unbeatable Squirrel Girl	Black Panther, Vanguard (msh_heroes)	2.750	1.002	1200	2	2026-11-18
+The Vision	Black Panther, Vanguard (msh_heroes)	1.583	0.946	1200	2	2026-11-18
+Verdant Kraken	Black Panther, Vanguard (msh_heroes)	3.333	0.947	1200	2	2026-11-18
+Viv Vision, Teen Synthezoid	Black Panther, Vanguard (msh_heroes)	-0.833	0.764	1200	2	2026-11-18
+Wakandan Royal Guard	Black Panther, Vanguard (msh_heroes)	0.917	0.768	1200	2	2026-11-18
+Wilt-Leaf Liege	Black Panther, Vanguard (msh_heroes)	0.833	1.027	1200	2	2026-11-18
+Arbiter of Woe	Doctor Doom (msh_plans)	-2.167	0.830	1200	2	2026-11-18
+Bake into a Pie	Doctor Doom (msh_plans)	-1.083	1.044	1200	2	2026-11-18
+Baron Helmut Zemo	Doctor Doom (msh_plans)	0.167	0.808	1200	2	2026-11-18
+Crossbones, Malicious Mercenary	Doctor Doom (msh_plans)	0.000	1.067	1200	2	2026-11-18
+Crossway Troublemakers	Doctor Doom (msh_plans)	-3.583	0.890	1200	2	2026-11-18
+Darksteel Colossus	Doctor Doom (msh_plans)	-3.250	0.791	1200	2	2026-11-18
+Desecration Demon	Doctor Doom (msh_plans)	-1.667	1.074	1200	2	2026-11-18
+Doom Reigns Supreme	Doctor Doom (msh_plans)	1.917	1.114	1200	2	2026-11-18
+Elektra, Daughter of the Hand	Doctor Doom (msh_plans)	-0.333	1.178	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Doctor Doom (msh_plans)	-2.500	0.855	1200	2	2026-11-18
+Garruk, Veiled Butcher	Doctor Doom (msh_plans)	-0.333	1.053	1200	2	2026-11-18
+Grim Reaper, Lethal Legionnaire	Doctor Doom (msh_plans)	-2.917	1.049	1200	2	2026-11-18
+High-Society Hunter	Doctor Doom (msh_plans)	-1.417	1.044	1200	2	2026-11-18
+Karn, Gilded Guardian	Doctor Doom (msh_plans)	-0.750	1.023	1200	2	2026-11-18
+Kingpin's Enforcers	Doctor Doom (msh_plans)	0.500	0.746	1200	2	2026-11-18
+Liliana, Dreadhorde General	Doctor Doom (msh_plans)	-1.917	0.882	1200	2	2026-11-18
+M.O.D.O.K.	Doctor Doom (msh_plans)	-2.917	0.836	1200	2	2026-11-18
+Madame Masque	Doctor Doom (msh_plans)	-1.417	0.853	1200	2	2026-11-18
+Massacre Wurm	Doctor Doom (msh_plans)	-1.417	1.041	1200	2	2026-11-18
+Mind Stone	Doctor Doom (msh_plans)	0.000	1.143	1200	2	2026-11-18
+Moonstone, Harsh Mistress	Doctor Doom (msh_plans)	-1.417	0.924	1200	2	2026-11-18
+Ninja of the Hand	Doctor Doom (msh_plans)	0.167	0.687	1200	2	2026-11-18
+Overwrite the Multiverse	Doctor Doom (msh_plans)	0.250	1.115	1200	2	2026-11-18
+Proft, Sinister Mastermind	Doctor Doom (msh_plans)	-1.083	0.862	1200	2	2026-11-18
+Robot Domination	Doctor Doom (msh_plans)	-2.417	1.037	1200	2	2026-11-18
+Roxxon Brutes	Doctor Doom (msh_plans)	-2.417	0.953	1200	2	2026-11-18
+Sire of Seven Deaths	Doctor Doom (msh_plans)	2.750	1.076	1200	2	2026-11-18
+Sol Ring	Doctor Doom (msh_plans)	5.500	1.255	1200	2	2026-11-18
+Super-Adaptoid	Doctor Doom (msh_plans)	2.250	1.056	1200	2	2026-11-18
+The Masters of Evil	Doctor Doom (msh_plans)	-1.333	0.982	1200	2	2026-11-18
+Ultron Drone	Doctor Doom (msh_plans)	-0.167	0.677	1200	2	2026-11-18
+Ultron, Artificial Malevolence	Doctor Doom (msh_plans)	0.333	0.565	1200	2	2026-11-18
+Aerid Konstrari	Hulk, Gamma Goliath (msh_power_up)	1.083	1.017	1200	2	2026-11-18
+Aggressive Mammoth	Hulk, Gamma Goliath (msh_power_up)	-1.833	0.971	1200	2	2026-11-18
+Ajani Unrelenting	Hulk, Gamma Goliath (msh_power_up)	0.500	1.038	1200	2	2026-11-18
+Beast Within	Hulk, Gamma Goliath (msh_power_up)	-1.417	0.711	1200	2	2026-11-18
+Beorn the Fierce	Hulk, Gamma Goliath (msh_power_up)	-1.750	1.064	1200	2	2026-11-18
+Chandra, Flameshaper	Hulk, Gamma Goliath (msh_power_up)	-1.333	0.798	1200	2	2026-11-18
+Chandra, Torch of Defiance	Hulk, Gamma Goliath (msh_power_up)	-1.167	0.928	1200	2	2026-11-18
+Darksteel Colossus	Hulk, Gamma Goliath (msh_power_up)	-1.667	0.790	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Hulk, Gamma Goliath (msh_power_up)	-1.000	0.935	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Hulk, Gamma Goliath (msh_power_up)	-1.333	0.824	1200	2	2026-11-18
+Ghalta, Primal Hunger	Hulk, Gamma Goliath (msh_power_up)	-0.500	1.066	1200	2	2026-11-18
+Gigantic Big Bear	Hulk, Gamma Goliath (msh_power_up)	-2.000	0.889	1200	2	2026-11-18
+Gigantosaurus	Hulk, Gamma Goliath (msh_power_up)	-1.083	0.946	1200	2	2026-11-18
+Gnarlback Rhino	Hulk, Gamma Goliath (msh_power_up)	-0.083	0.854	1200	2	2026-11-18
+Hexhaven Invigorator	Hulk, Gamma Goliath (msh_power_up)	-1.167	0.935	1200	2	2026-11-18
+Karn, Gilded Guardian	Hulk, Gamma Goliath (msh_power_up)	-0.917	1.017	1200	2	2026-11-18
+Mind Stone	Hulk, Gamma Goliath (msh_power_up)	-1.250	1.121	1200	2	2026-11-18
+Old Fat Spider	Hulk, Gamma Goliath (msh_power_up)	-2.083	0.802	1200	2	2026-11-18
+Quakestrider Ceratops	Hulk, Gamma Goliath (msh_power_up)	-1.667	0.992	1200	2	2026-11-18
+Quilled Greatwurm	Hulk, Gamma Goliath (msh_power_up)	-1.583	1.037	1200	2	2026-11-18
+Rampaging Baloths	Hulk, Gamma Goliath (msh_power_up)	-1.917	0.938	1200	2	2026-11-18
+Red Hulk	Hulk, Gamma Goliath (msh_power_up)	-1.083	0.892	1200	2	2026-11-18
+She-Hulk, Jade Defender	Hulk, Gamma Goliath (msh_power_up)	-0.833	0.928	1200	2	2026-11-18
+Sire of Seven Deaths	Hulk, Gamma Goliath (msh_power_up)	2.000	0.958	1200	2	2026-11-18
+Smaug the Magnificent	Hulk, Gamma Goliath (msh_power_up)	-0.333	1.028	1200	2	2026-11-18
+Sol Ring	Hulk, Gamma Goliath (msh_power_up)	2.833	1.147	1200	2	2026-11-18
+Stone-Giant of High Pass	Hulk, Gamma Goliath (msh_power_up)	-1.083	0.975	1200	2	2026-11-18
+The Unbeatable Squirrel Girl	Hulk, Gamma Goliath (msh_power_up)	-2.333	1.006	1200	2	2026-11-18
+Thor, God of Thunder	Hulk, Gamma Goliath (msh_power_up)	-1.167	0.928	1200	2	2026-11-18
+Viv Vision, Teen Synthezoid	Hulk, Gamma Goliath (msh_power_up)	0.000	0.677	1200	2	2026-11-18
+Vivien Reid	Hulk, Gamma Goliath (msh_power_up)	-1.417	0.845	1200	2	2026-11-18
+Agent Maria Hill	Captain America, Living Legend (msh_teamwork)	-2.583	1.106	1200	2	2026-11-18
+Attuma, Atlantean Warlord	Captain America, Living Legend (msh_teamwork)	-0.833	1.014	1200	2	2026-11-18
+Captain America, Super-Soldier	Captain America, Living Legend (msh_teamwork)	-0.333	0.697	1200	2	2026-11-18
+Captain America, Wings of Freedom	Captain America, Living Legend (msh_teamwork)	-1.083	0.870	1200	2	2026-11-18
+Captain Mar-Vell, Space-Born	Captain America, Living Legend (msh_teamwork)	-0.833	0.928	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Captain America, Living Legend (msh_teamwork)	1.833	1.065	1200	2	2026-11-18
+Curator of Destinies	Captain America, Living Legend (msh_teamwork)	2.000	0.968	1200	2	2026-11-18
+Darksteel Colossus	Captain America, Living Legend (msh_teamwork)	-1.000	0.913	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Captain America, Living Legend (msh_teamwork)	-0.417	0.939	1200	2	2026-11-18
+Falcon, Winged Wonder	Captain America, Living Legend (msh_teamwork)	1.583	0.951	1200	2	2026-11-18
+Iron Lad, Diverging Destiny	Captain America, Living Legend (msh_teamwork)	0.000	0.687	1200	2	2026-11-18
+Ironheart, Clever Champion	Captain America, Living Legend (msh_teamwork)	0.167	0.920	1200	2	2026-11-18
+Jazal Goldmane	Captain America, Living Legend (msh_teamwork)	-2.167	1.099	1200	2	2026-11-18
+Karn, Gilded Guardian	Captain America, Living Legend (msh_teamwork)	0.417	1.030	1200	2	2026-11-18
+King T'Challa	Captain America, Living Legend (msh_teamwork)	1.750	0.720	1200	2	2026-11-18
+Lyra Dawnbringer	Captain America, Living Legend (msh_teamwork)	1.333	1.091	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Captain America, Living Legend (msh_teamwork)	-2.750	0.951	1200	2	2026-11-18
+Mind Stone	Captain America, Living Legend (msh_teamwork)	0.167	1.148	1200	2	2026-11-18
+Mister Fantastic, Reed Richards	Captain America, Living Legend (msh_teamwork)	0.250	0.829	1200	2	2026-11-18
+Ms. Marvel, Kamala Khan	Captain America, Living Legend (msh_teamwork)	1.083	0.640	1200	2	2026-11-18
+Okoye, Dora Milaje Leader	Captain America, Living Legend (msh_teamwork)	-1.167	1.041	1200	2	2026-11-18
+Ruric Thar, Biomagus	Captain America, Living Legend (msh_teamwork)	-0.083	0.953	1200	2	2026-11-18
+Sire of Seven Deaths	Captain America, Living Legend (msh_teamwork)	2.667	1.028	1200	2	2026-11-18
+Sol Ring	Captain America, Living Legend (msh_teamwork)	0.167	1.162	1200	2	2026-11-18
+The Eagles Are Coming!	Captain America, Living Legend (msh_teamwork)	0.250	1.151	1200	2	2026-11-18
+The Lord of the Eagles	Captain America, Living Legend (msh_teamwork)	1.500	1.134	1200	2	2026-11-18
+The Mighty Thor, Jane Foster	Captain America, Living Legend (msh_teamwork)	-1.667	0.873	1200	2	2026-11-18
+The Sentry, Golden Guardian	Captain America, Living Legend (msh_teamwork)	5.000	1.130	1200	2	2026-11-18
+The Vision	Captain America, Living Legend (msh_teamwork)	0.167	1.060	1200	2	2026-11-18
+Viv Vision, Teen Synthezoid	Captain America, Living Legend (msh_teamwork)	-1.083	0.682	1200	2	2026-11-18
+Wiccan, Rising Magician	Captain America, Living Legend (msh_teamwork)	-0.667	0.993	1200	2	2026-11-18
+Ajani Unrelenting	Madame Hydra (msh_villains)	3.000	1.110	1200	2	2026-11-18
+Ares, God of War	Madame Hydra (msh_villains)	-0.833	0.773	1200	2	2026-11-18
+Avengers: Under Siege	Madame Hydra (msh_villains)	1.500	1.005	1200	2	2026-11-18
+Bake into a Pie	Madame Hydra (msh_villains)	-1.417	0.886	1200	2	2026-11-18
+Baron Helmut Zemo	Madame Hydra (msh_villains)	-0.417	0.712	1200	2	2026-11-18
+Bullseye, Death Dealer	Madame Hydra (msh_villains)	0.500	0.736	1200	2	2026-11-18
+Chandra, Torch of Defiance	Madame Hydra (msh_villains)	0.250	1.044	1200	2	2026-11-18
+Crimson Operative	Madame Hydra (msh_villains)	-0.167	0.874	1200	2	2026-11-18
+Crossbones, Malicious Mercenary	Madame Hydra (msh_villains)	-0.167	1.041	1200	2	2026-11-18
+Darksteel Colossus	Madame Hydra (msh_villains)	0.500	0.808	1200	2	2026-11-18
+Doctor Doom	Madame Hydra (msh_villains)	2.250	0.996	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Madame Hydra (msh_villains)	1.833	1.000	1200	2	2026-11-18
+Elektra, Daughter of the Hand	Madame Hydra (msh_villains)	1.167	1.111	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Madame Hydra (msh_villains)	-0.167	0.858	1200	2	2026-11-18
+Garruk, Veiled Butcher	Madame Hydra (msh_villains)	3.333	1.095	1200	2	2026-11-18
+Grim Reaper, Lethal Legionnaire	Madame Hydra (msh_villains)	-2.083	1.017	1200	2	2026-11-18
+Kingpin's Enforcers	Madame Hydra (msh_villains)	0.750	0.682	1200	2	2026-11-18
+Kree Sentinel	Madame Hydra (msh_villains)	-0.083	0.947	1200	2	2026-11-18
+Liliana, Dreadhorde General	Madame Hydra (msh_villains)	2.917	0.967	1200	2	2026-11-18
+M.O.D.O.K.	Madame Hydra (msh_villains)	-0.417	0.909	1200	2	2026-11-18
+Massacre Wurm	Madame Hydra (msh_villains)	3.000	1.066	1200	2	2026-11-18
+Moonstone, Harsh Mistress	Madame Hydra (msh_villains)	-0.500	0.842	1200	2	2026-11-18
+Red Hulk	Madame Hydra (msh_villains)	0.500	0.979	1200	2	2026-11-18
+Roxxon Brutes	Madame Hydra (msh_villains)	-0.083	1.011	1200	2	2026-11-18
+Smaug the Magnificent	Madame Hydra (msh_villains)	-2.167	1.073	1200	2	2026-11-18
+Smaug, Wicked Worm	Madame Hydra (msh_villains)	-1.167	1.093	1200	2	2026-11-18
+Sol Ring	Madame Hydra (msh_villains)	4.250	1.222	1200	2	2026-11-18
+Stone-Giant of High Pass	Madame Hydra (msh_villains)	0.833	0.928	1200	2	2026-11-18
+The Masters of Evil	Madame Hydra (msh_villains)	1.000	1.074	1200	2	2026-11-18
+The Ruinous Wrecking Crew	Madame Hydra (msh_villains)	-2.333	1.130	1200	2	2026-11-18
+Thor, God of Thunder	Madame Hydra (msh_villains)	0.750	1.071	1200	2	2026-11-18
+Vraska's Final Mercy	Madame Hydra (msh_villains)	-2.167	1.067	1200	2	2026-11-18
+Aerid Konstrari	Ruby, Daring Tracker (ramp_into_big_threats)	1.417	0.961	1200	2	2026-11-18
+Aggressive Mammoth	Ruby, Daring Tracker (ramp_into_big_threats)	0.000	0.890	1200	2	2026-11-18
+Ajani Unrelenting	Ruby, Daring Tracker (ramp_into_big_threats)	2.333	0.941	1200	2	2026-11-18
+Beast Within	Ruby, Daring Tracker (ramp_into_big_threats)	-0.583	0.712	1200	2	2026-11-18
+Beorn the Fierce	Ruby, Daring Tracker (ramp_into_big_threats)	1.000	1.013	1200	2	2026-11-18
+Chandra, Flameshaper	Ruby, Daring Tracker (ramp_into_big_threats)	0.167	0.745	1200	2	2026-11-18
+Chandra, Torch of Defiance	Ruby, Daring Tracker (ramp_into_big_threats)	0.583	0.932	1200	2	2026-11-18
+Chaos Warp	Ruby, Daring Tracker (ramp_into_big_threats)	-0.417	0.722	1200	2	2026-11-18
+Craftwork Crusher	Ruby, Daring Tracker (ramp_into_big_threats)	0.583	0.954	1200	2	2026-11-18
+Darksteel Colossus	Ruby, Daring Tracker (ramp_into_big_threats)	-0.833	0.773	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Ruby, Daring Tracker (ramp_into_big_threats)	1.583	0.952	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Ruby, Daring Tracker (ramp_into_big_threats)	0.083	0.786	1200	2	2026-11-18
+Ghalta, Primal Hunger	Ruby, Daring Tracker (ramp_into_big_threats)	-0.250	1.051	1200	2	2026-11-18
+Gigantic Big Bear	Ruby, Daring Tracker (ramp_into_big_threats)	-1.417	0.870	1200	2	2026-11-18
+Gigantosaurus	Ruby, Daring Tracker (ramp_into_big_threats)	-0.833	0.913	1200	2	2026-11-18
+Gnarlback Rhino	Ruby, Daring Tracker (ramp_into_big_threats)	-0.250	0.902	1200	2	2026-11-18
+Goblin Firebomb	Ruby, Daring Tracker (ramp_into_big_threats)	-2.167	0.999	1200	2	2026-11-18
+Hexhaven Invigorator	Ruby, Daring Tracker (ramp_into_big_threats)	1.000	0.905	1200	2	2026-11-18
+Karn, Gilded Guardian	Ruby, Daring Tracker (ramp_into_big_threats)	0.250	0.968	1200	2	2026-11-18
+Lathliss, Dragon Queen	Ruby, Daring Tracker (ramp_into_big_threats)	-0.167	0.993	1200	2	2026-11-18
+Mind Stone	Ruby, Daring Tracker (ramp_into_big_threats)	0.500	1.014	1200	2	2026-11-18
+Old Fat Spider	Ruby, Daring Tracker (ramp_into_big_threats)	0.750	0.804	1200	2	2026-11-18
+Pelakka Wurm	Ruby, Daring Tracker (ramp_into_big_threats)	0.167	0.755	1200	2	2026-11-18
+Quakestrider Ceratops	Ruby, Daring Tracker (ramp_into_big_threats)	0.417	1.038	1200	2	2026-11-18
+Quilled Greatwurm	Ruby, Daring Tracker (ramp_into_big_threats)	1.583	0.931	1200	2	2026-11-18
+Rampaging Baloths	Ruby, Daring Tracker (ramp_into_big_threats)	1.250	0.837	1200	2	2026-11-18
+Red Hulk	Ruby, Daring Tracker (ramp_into_big_threats)	-0.333	0.842	1200	2	2026-11-18
+Sire of Seven Deaths	Ruby, Daring Tracker (ramp_into_big_threats)	4.583	0.972	1200	2	2026-11-18
+Smaug the Magnificent	Ruby, Daring Tracker (ramp_into_big_threats)	0.917	0.947	1200	2	2026-11-18
+Sol Ring	Ruby, Daring Tracker (ramp_into_big_threats)	2.083	1.100	1200	2	2026-11-18
+Stone-Giant of High Pass	Ruby, Daring Tracker (ramp_into_big_threats)	0.583	0.901	1200	2	2026-11-18
+Thor, God of Thunder	Ruby, Daring Tracker (ramp_into_big_threats)	0.833	1.007	1200	2	2026-11-18
+Archive Arbiter	King T'Challa (reactive_control)	0.000	0.920	1200	2	2026-11-18
+Archmage of Runes	King T'Challa (reactive_control)	0.500	0.841	1200	2	2026-11-18
+Attuma, Atlantean Warlord	King T'Challa (reactive_control)	-2.583	1.063	1200	2	2026-11-18
+Bard, King of Dale	King T'Challa (reactive_control)	-2.083	1.010	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	King T'Challa (reactive_control)	1.500	1.039	1200	2	2026-11-18
+Celebrate the Mountain-king	King T'Challa (reactive_control)	0.667	1.104	1200	2	2026-11-18
+Darksteel Colossus	King T'Challa (reactive_control)	-0.833	0.817	1200	2	2026-11-18
+Emrakul, the Exigent Doom	King T'Challa (reactive_control)	-0.583	0.829	1200	2	2026-11-18
+Exemplar of Light	King T'Challa (reactive_control)	-0.833	0.972	1200	2	2026-11-18
+Gandalf, Wandering Wizard	King T'Challa (reactive_control)	-1.500	0.957	1200	2	2026-11-18
+Gleaming Splendor	King T'Challa (reactive_control)	-1.417	1.102	1200	2	2026-11-18
+Goblin Firebomb	King T'Challa (reactive_control)	-2.167	1.136	1200	2	2026-11-18
+Jazal Goldmane	King T'Challa (reactive_control)	-4.250	1.060	1200	2	2026-11-18
+Karn, Gilded Guardian	King T'Challa (reactive_control)	0.583	1.076	1200	2	2026-11-18
+Kiora, the Rising Tide	King T'Challa (reactive_control)	-1.333	0.912	1200	2	2026-11-18
+Lyra Dawnbringer	King T'Challa (reactive_control)	1.083	1.089	1200	2	2026-11-18
+Lyra, Tolarian Archangel	King T'Challa (reactive_control)	0.417	0.925	1200	2	2026-11-18
+Mind Stone	King T'Challa (reactive_control)	-0.833	1.111	1200	2	2026-11-18
+Namor the Sub-Mariner	King T'Challa (reactive_control)	-0.083	0.778	1200	2	2026-11-18
+Pongify	King T'Challa (reactive_control)	-0.167	1.231	1200	2	2026-11-18
+Prophesied End	King T'Challa (reactive_control)	-2.167	1.136	1200	2	2026-11-18
+Ruric Thar, Biomagus	King T'Challa (reactive_control)	-0.583	0.878	1200	2	2026-11-18
+Sire of Seven Deaths	King T'Challa (reactive_control)	2.583	0.999	1200	2	2026-11-18
+Steel Hellkite	King T'Challa (reactive_control)	-1.500	0.943	1200	2	2026-11-18
+Stroke of Midnight	King T'Challa (reactive_control)	-0.667	0.764	1200	2	2026-11-18
+Swords to Plowshares	King T'Challa (reactive_control)	-1.667	1.253	1200	2	2026-11-18
+The Echoverse Fulcrum	King T'Challa (reactive_control)	-0.500	1.190	1200	2	2026-11-18
+The Lord of the Eagles	King T'Challa (reactive_control)	0.083	1.017	1200	2	2026-11-18
+The Mighty Thor, Jane Foster	King T'Challa (reactive_control)	-1.417	0.946	1200	2	2026-11-18
+The Sentry, Golden Guardian	King T'Challa (reactive_control)	3.583	1.081	1200	2	2026-11-18
+The Vision	King T'Challa (reactive_control)	-0.750	1.010	1200	2	2026-11-18
+Variable Chaser	King T'Challa (reactive_control)	0.250	0.702	1200	2	2026-11-18
+Ajani Unrelenting	Balmor, Battlemage Captain (spellslinger)	2.000	1.026	1200	2	2026-11-18
+Archmage of Runes	Balmor, Battlemage Captain (spellslinger)	1.333	0.882	1200	2	2026-11-18
+Chandra, Flameshaper	Balmor, Battlemage Captain (spellslinger)	0.833	0.816	1200	2	2026-11-18
+Chandra, Torch of Defiance	Balmor, Battlemage Captain (spellslinger)	-0.417	0.953	1200	2	2026-11-18
+Chaos Warp	Balmor, Battlemage Captain (spellslinger)	-0.167	0.697	1200	2	2026-11-18
+Darksteel Colossus	Balmor, Battlemage Captain (spellslinger)	0.000	0.817	1200	2	2026-11-18
+Draconic Visitor	Balmor, Battlemage Captain (spellslinger)	3.333	0.990	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Balmor, Battlemage Captain (spellslinger)	0.917	0.939	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Balmor, Battlemage Captain (spellslinger)	0.250	0.813	1200	2	2026-11-18
+Frostbite Pyromental	Balmor, Battlemage Captain (spellslinger)	-1.667	0.841	1200	2	2026-11-18
+Kang the Conqueror	Balmor, Battlemage Captain (spellslinger)	2.083	0.923	1200	2	2026-11-18
+Karn, Gilded Guardian	Balmor, Battlemage Captain (spellslinger)	3.250	1.042	1200	2	2026-11-18
+Kiora, the Rising Tide	Balmor, Battlemage Captain (spellslinger)	-1.083	0.786	1200	2	2026-11-18
+Lathliss, Dragon Queen	Balmor, Battlemage Captain (spellslinger)	0.333	1.000	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Balmor, Battlemage Captain (spellslinger)	-1.583	0.996	1200	2	2026-11-18
+Mind Stone	Balmor, Battlemage Captain (spellslinger)	2.250	1.017	1200	2	2026-11-18
+Namor the Sub-Mariner	Balmor, Battlemage Captain (spellslinger)	0.667	0.755	1200	2	2026-11-18
+Niv-Mizzet, Visionary	Balmor, Battlemage Captain (spellslinger)	0.833	0.972	1200	2	2026-11-18
+Ovika, Enigma Goliath	Balmor, Battlemage Captain (spellslinger)	0.667	0.890	1200	2	2026-11-18
+Pongify	Balmor, Battlemage Captain (spellslinger)	2.000	1.104	1200	2	2026-11-18
+Red Hulk	Balmor, Battlemage Captain (spellslinger)	1.417	0.946	1200	2	2026-11-18
+Ruric Thar, Biomagus	Balmor, Battlemage Captain (spellslinger)	1.167	1.054	1200	2	2026-11-18
+Sire of Seven Deaths	Balmor, Battlemage Captain (spellslinger)	4.667	0.998	1200	2	2026-11-18
+Smaug the Magnificent	Balmor, Battlemage Captain (spellslinger)	1.000	1.014	1200	2	2026-11-18
+Sol Ring	Balmor, Battlemage Captain (spellslinger)	4.667	1.158	1200	2	2026-11-18
+Stone-Giant of High Pass	Balmor, Battlemage Captain (spellslinger)	1.000	0.957	1200	2	2026-11-18
+The Echoverse Fulcrum	Balmor, Battlemage Captain (spellslinger)	2.333	1.117	1200	2	2026-11-18
+The Lord of the Eagles	Balmor, Battlemage Captain (spellslinger)	1.583	0.967	1200	2	2026-11-18
+The Theorist, Jace Beleren	Balmor, Battlemage Captain (spellslinger)	2.750	1.107	1200	2	2026-11-18
+Thor, God of Thunder	Balmor, Battlemage Captain (spellslinger)	1.417	0.990	1200	2	2026-11-18
+Variable Chaser	Balmor, Battlemage Captain (spellslinger)	0.667	0.882	1200	2	2026-11-18
+Violent Echoes	Balmor, Battlemage Captain (spellslinger)	1.833	0.935	1200	2	2026-11-18
+Ajani Unrelenting	Thanos, the Mad Titan (stax_lite_control)	0.917	0.976	1200	2	2026-11-18
+Archive Arbiter	Thanos, the Mad Titan (stax_lite_control)	0.500	0.850	1200	2	2026-11-18
+Avengers: Under Siege	Thanos, the Mad Titan (stax_lite_control)	1.083	0.893	1200	2	2026-11-18
+Ayli, Eternal Pilgrim	Thanos, the Mad Titan (stax_lite_control)	-0.333	1.007	1200	2	2026-11-18
+Beorn the Fierce	Thanos, the Mad Titan (stax_lite_control)	0.833	1.087	1200	2	2026-11-18
+Bolg of the North	Thanos, the Mad Titan (stax_lite_control)	0.250	0.878	1200	2	2026-11-18
+Chandra, Flameshaper	Thanos, the Mad Titan (stax_lite_control)	-0.083	0.821	1200	2	2026-11-18
+Chandra, Torch of Defiance	Thanos, the Mad Titan (stax_lite_control)	-1.083	0.909	1200	2	2026-11-18
+Craftwork Crusher	Thanos, the Mad Titan (stax_lite_control)	-0.083	0.902	1200	2	2026-11-18
+Darksteel Colossus	Thanos, the Mad Titan (stax_lite_control)	-0.333	0.842	1200	2	2026-11-18
+Drakuseth, Maw of Flames	Thanos, the Mad Titan (stax_lite_control)	0.167	0.913	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Thanos, the Mad Titan (stax_lite_control)	-0.083	0.862	1200	2	2026-11-18
+Garruk, Veiled Butcher	Thanos, the Mad Titan (stax_lite_control)	1.167	0.950	1200	2	2026-11-18
+Giant's Boulder	Thanos, the Mad Titan (stax_lite_control)	-2.417	1.094	1200	2	2026-11-18
+Gideon's Memorial	Thanos, the Mad Titan (stax_lite_control)	-2.333	1.025	1200	2	2026-11-18
+Hexhaven Invigorator	Thanos, the Mad Titan (stax_lite_control)	-2.917	0.950	1200	2	2026-11-18
+Koma, World-Eater	Thanos, the Mad Titan (stax_lite_control)	1.333	0.935	1200	2	2026-11-18
+Liliana, Dreadhorde General	Thanos, the Mad Titan (stax_lite_control)	-0.083	0.886	1200	2	2026-11-18
+M.O.D.O.K.	Thanos, the Mad Titan (stax_lite_control)	0.000	0.897	1200	2	2026-11-18
+Massacre Wurm	Thanos, the Mad Titan (stax_lite_control)	1.083	0.932	1200	2	2026-11-18
+Overwrite the Multiverse	Thanos, the Mad Titan (stax_lite_control)	2.000	0.999	1200	2	2026-11-18
+Red Hulk	Thanos, the Mad Titan (stax_lite_control)	0.833	0.898	1200	2	2026-11-18
+Smaug the Magnificent	Thanos, the Mad Titan (stax_lite_control)	-0.250	1.018	1200	2	2026-11-18
+Smaug, Wicked Worm	Thanos, the Mad Titan (stax_lite_control)	1.417	1.051	1200	2	2026-11-18
+Sol Ring	Thanos, the Mad Titan (stax_lite_control)	3.083	1.112	1200	2	2026-11-18
+Steel Hellkite	Thanos, the Mad Titan (stax_lite_control)	-0.250	0.821	1200	2	2026-11-18
+Stone-Giant of High Pass	Thanos, the Mad Titan (stax_lite_control)	0.417	0.902	1200	2	2026-11-18
+Super-Skrull	Thanos, the Mad Titan (stax_lite_control)	-3.250	0.978	1200	2	2026-11-18
+The Serpent Society	Thanos, the Mad Titan (stax_lite_control)	1.917	0.811	1200	2	2026-11-18
+Thor, God of Thunder	Thanos, the Mad Titan (stax_lite_control)	0.417	1.044	1200	2	2026-11-18
+Vivien Reid	Thanos, the Mad Titan (stax_lite_control)	0.583	0.901	1200	2	2026-11-18
+Vraska, the Cutting Glare	Thanos, the Mad Titan (stax_lite_control)	0.333	0.890	1200	2	2026-11-18
+Ancestor Dragon	Bard, King of Dale (tokens)	-0.667	0.888	1200	2	2026-11-18
+Angelic Edict	Bard, King of Dale (tokens)	-2.333	1.067	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Bard, King of Dale (tokens)	2.500	1.137	1200	2	2026-11-18
+Celebrate the Mountain-king	Bard, King of Dale (tokens)	2.000	1.182	1200	2	2026-11-18
+Darksteel Colossus	Bard, King of Dale (tokens)	-2.667	0.919	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Bard, King of Dale (tokens)	-1.333	0.949	1200	2	2026-11-18
+Exemplar of Light	Bard, King of Dale (tokens)	-0.833	0.972	1200	2	2026-11-18
+Gandalf, Wandering Wizard	Bard, King of Dale (tokens)	-1.167	0.928	1200	2	2026-11-18
+Giant's Boulder	Bard, King of Dale (tokens)	-2.000	1.092	1200	2	2026-11-18
+Gleaming Splendor	Bard, King of Dale (tokens)	0.083	1.010	1200	2	2026-11-18
+Goblin Firebomb	Bard, King of Dale (tokens)	-2.167	1.046	1200	2	2026-11-18
+Jazal Goldmane	Bard, King of Dale (tokens)	-2.000	1.054	1200	2	2026-11-18
+Kang the Conqueror	Bard, King of Dale (tokens)	0.583	1.010	1200	2	2026-11-18
+Karn, Gilded Guardian	Bard, King of Dale (tokens)	1.333	1.071	1200	2	2026-11-18
+Kiora, the Rising Tide	Bard, King of Dale (tokens)	-0.667	0.833	1200	2	2026-11-18
+Luminous Rebuke	Bard, King of Dale (tokens)	-2.167	1.111	1200	2	2026-11-18
+Lyra Dawnbringer	Bard, King of Dale (tokens)	1.083	1.156	1200	2	2026-11-18
+Lyra, Tolarian Archangel	Bard, King of Dale (tokens)	-0.500	0.834	1200	2	2026-11-18
+Mind Stone	Bard, King of Dale (tokens)	0.667	1.066	1200	2	2026-11-18
+Namor the Sub-Mariner	Bard, King of Dale (tokens)	-0.250	0.804	1200	2	2026-11-18
+Pongify	Bard, King of Dale (tokens)	0.750	1.115	1200	2	2026-11-18
+Prophesied End	Bard, King of Dale (tokens)	-0.917	1.064	1200	2	2026-11-18
+Ruric Thar, Biomagus	Bard, King of Dale (tokens)	-1.167	0.927	1200	2	2026-11-18
+Sire of Seven Deaths	Bard, King of Dale (tokens)	3.917	1.115	1200	2	2026-11-18
+Sol Ring	Bard, King of Dale (tokens)	2.750	1.196	1200	2	2026-11-18
+Stroke of Midnight	Bard, King of Dale (tokens)	-0.917	0.722	1200	2	2026-11-18
+Swords to Plowshares	Bard, King of Dale (tokens)	0.667	1.106	1200	2	2026-11-18
+The Eagles Are Coming!	Bard, King of Dale (tokens)	-0.083	1.083	1200	2	2026-11-18
+The Echoverse Fulcrum	Bard, King of Dale (tokens)	-0.417	1.157	1200	2	2026-11-18
+The Lord of the Eagles	Bard, King of Dale (tokens)	0.167	1.045	1200	2	2026-11-18
+The Mind Stone	Bard, King of Dale (tokens)	0.750	1.101	1200	2	2026-11-18
+The Sentry, Golden Guardian	Bard, King of Dale (tokens)	5.917	1.124	1200	2	2026-11-18
+The Theorist, Jace Beleren	Bard, King of Dale (tokens)	4.750	1.154	1200	2	2026-11-18
+Arbiter of Woe	Winter Soldier, Icy Assassin (voltron)	-0.917	0.629	1200	2	2026-11-18
+Bloodthirsty Conqueror	Winter Soldier, Icy Assassin (voltron)	0.500	0.764	1200	2	2026-11-18
+Captain America, Wings of Freedom	Winter Soldier, Icy Assassin (voltron)	-1.083	0.661	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	Winter Soldier, Icy Assassin (voltron)	1.500	0.848	1200	2	2026-11-18
+Crude Bent Blade	Winter Soldier, Icy Assassin (voltron)	-1.583	0.691	1200	2	2026-11-18
+Darksteel Colossus	Winter Soldier, Icy Assassin (voltron)	-0.833	0.656	1200	2	2026-11-18
+Desecration Demon	Winter Soldier, Icy Assassin (voltron)	-1.167	0.890	1200	2	2026-11-18
+Doctor Doom	Winter Soldier, Icy Assassin (voltron)	-0.917	0.909	1200	2	2026-11-18
+Dwarven Shortsword	Winter Soldier, Icy Assassin (voltron)	-0.583	0.741	1200	2	2026-11-18
+Elenda, Saint of Dusk	Winter Soldier, Icy Assassin (voltron)	-0.417	0.759	1200	2	2026-11-18
+Emrakul, the Exigent Doom	Winter Soldier, Icy Assassin (voltron)	-0.500	0.677	1200	2	2026-11-18
+Exemplar of Light	Winter Soldier, Icy Assassin (voltron)	-0.500	0.834	1200	2	2026-11-18
+Garruk, Veiled Butcher	Winter Soldier, Icy Assassin (voltron)	-0.917	0.812	1200	2	2026-11-18
+Gleaming Splendor	Winter Soldier, Icy Assassin (voltron)	-0.583	0.909	1200	2	2026-11-18
+Goldvein Pick	Winter Soldier, Icy Assassin (voltron)	-1.000	0.921	1200	2	2026-11-18
+High-Society Hunter	Winter Soldier, Icy Assassin (voltron)	-0.167	0.755	1200	2	2026-11-18
+Jazal Goldmane	Winter Soldier, Icy Assassin (voltron)	0.750	0.837	1200	2	2026-11-18
+Karn, Gilded Guardian	Winter Soldier, Icy Assassin (voltron)	0.750	0.901	1200	2	2026-11-18
+Lich's Relic	Winter Soldier, Icy Assassin (voltron)	-1.917	0.968	1200	2	2026-11-18
+Liliana, Dreadhorde General	Winter Soldier, Icy Assassin (voltron)	-0.167	0.677	1200	2	2026-11-18
+Lyra Dawnbringer	Winter Soldier, Icy Assassin (voltron)	0.333	0.866	1200	2	2026-11-18
+Massacre Wurm	Winter Soldier, Icy Assassin (voltron)	1.333	0.856	1200	2	2026-11-18
+Mind Stone	Winter Soldier, Icy Assassin (voltron)	-0.583	0.939	1200	2	2026-11-18
+My Precious	Winter Soldier, Icy Assassin (voltron)	-1.583	0.605	1200	2	2026-11-18
+Orcrist, Goblin-cleaver	Winter Soldier, Icy Assassin (voltron)	-2.250	0.637	1200	2	2026-11-18
+Ronin, Shadow Stalker	Winter Soldier, Icy Assassin (voltron)	-0.667	0.577	1200	2	2026-11-18
+Sire of Seven Deaths	Winter Soldier, Icy Assassin (voltron)	3.000	0.860	1200	2	2026-11-18
+Steel Hellkite	Winter Soldier, Icy Assassin (voltron)	-1.750	0.740	1200	2	2026-11-18
+The Mind Stone	Winter Soldier, Icy Assassin (voltron)	0.583	0.946	1200	2	2026-11-18
+The Sentry, Golden Guardian	Winter Soldier, Icy Assassin (voltron)	1.833	0.798	1200	2	2026-11-18
+The Vision	Winter Soldier, Icy Assassin (voltron)	-0.250	0.795	1200	2	2026-11-18
+Zetalpa, Primal Dawn	Winter Soldier, Icy Assassin (voltron)	0.833	0.716	1200	2	2026-11-18
+A.I.M. Scientists	league: Moon Girl and Devil Dinosaur	-1.917	0.853	1200	2	2026-11-18
+Arcanis the Omnipotent	league: Moon Girl and Devil Dinosaur	-2.667	0.956	1200	2	2026-11-18
+Beast, Erudite Aerialist	league: Moon Girl and Devil Dinosaur	-2.083	0.893	1200	2	2026-11-18
+Bilbo, Luckwearer	league: Moon Girl and Devil Dinosaur	-2.583	1.002	1200	2	2026-11-18
+Gigantosaurus	league: Moon Girl and Devil Dinosaur	-1.500	0.970	1200	2	2026-11-18
+H.E.R.B.I.E. Scout Unit	league: Moon Girl and Devil Dinosaur	-1.917	0.812	1200	2	2026-11-18
+Icewind Elemental	league: Moon Girl and Devil Dinosaur	-1.417	0.892	1200	2	2026-11-18
+Justice, Vance Astrovik	league: Moon Girl and Devil Dinosaur	-0.167	0.882	1200	2	2026-11-18
+Ka-Zar of the Savage Land	league: Moon Girl and Devil Dinosaur	-0.500	0.910	1200	2	2026-11-18
+Ms. Marvel, Kamala Khan	league: Moon Girl and Devil Dinosaur	-0.083	0.722	1200	2	2026-11-18
+Pet Avengers	league: Moon Girl and Devil Dinosaur	0.167	0.927	1200	2	2026-11-18
+Ravenous Amulet	league: Moon Girl and Devil Dinosaur	-4.583	1.080	1200	2	2026-11-18
+Skyship Buccaneer	league: Moon Girl and Devil Dinosaur	-1.750	0.960	1200	2	2026-11-18
+Super Intelligence	league: Moon Girl and Devil Dinosaur	-2.167	1.054	1200	2	2026-11-18
+The Lord of the Eagles	league: Moon Girl and Devil Dinosaur	-0.083	0.888	1200	2	2026-11-18
+The Thing, Ben Grimm	league: Moon Girl and Devil Dinosaur	0.083	0.972	1200	2	2026-11-18
+Trygon Predator	league: Moon Girl and Devil Dinosaur	0.833	0.833	1200	2	2026-11-18
+Ultron Drone	league: Moon Girl and Devil Dinosaur	0.833	0.677	1200	2	2026-11-18
+Viv Vision, Teen Synthezoid	league: Moon Girl and Devil Dinosaur	0.167	0.697	1200	2	2026-11-18
+Vivien Reid	league: Moon Girl and Devil Dinosaur	-1.833	0.904	1200	2	2026-11-18
+Bilbo's Deadly Slice	league: Bullseye, Death Dealer	0.417	0.520	1200	2	2026-11-18
+Bloodtithe Collector	league: Bullseye, Death Dealer	0.167	0.589	1200	2	2026-11-18
+Crossway Troublemakers	league: Bullseye, Death Dealer	0.000	0.736	1200	2	2026-11-18
+Darksteel Colossus	league: Bullseye, Death Dealer	-0.500	0.601	1200	2	2026-11-18
+Desecration Demon	league: Bullseye, Death Dealer	-0.333	0.745	1200	2	2026-11-18
+Dori, Bearer of Friends	league: Bullseye, Death Dealer	-0.500	0.391	1200	2	2026-11-18
+Eaten Alive	league: Bullseye, Death Dealer	-0.500	0.755	1200	2	2026-11-18
+Gandalf, Goblins' Bane	league: Bullseye, Death Dealer	-0.333	0.589	1200	2	2026-11-18
+Garna, Bloodfist of Keld	league: Bullseye, Death Dealer	1.250	0.629	1200	2	2026-11-18
+Gollum, Riddle Master	league: Bullseye, Death Dealer	0.250	0.786	1200	2	2026-11-18
+Great Ugly-Looking Goblin	league: Bullseye, Death Dealer	1.500	0.789	1200	2	2026-11-18
+Grim Reaper, Lethal Legionnaire	league: Bullseye, Death Dealer	0.250	0.692	1200	2	2026-11-18
+HYDRA Assault Robot	league: Bullseye, Death Dealer	0.333	0.697	1200	2	2026-11-18
+High-Society Hunter	league: Bullseye, Death Dealer	0.417	0.812	1200	2	2026-11-18
+Hoarding Dragon	league: Bullseye, Death Dealer	0.167	0.736	1200	2	2026-11-18
+Hour of Defeat	league: Bullseye, Death Dealer	-0.500	0.717	1200	2	2026-11-18
+Iron Hills Stalwart	league: Bullseye, Death Dealer	0.583	0.583	1200	2	2026-11-18
+Kingpin's Enforcers	league: Bullseye, Death Dealer	0.417	0.493	1200	2	2026-11-18
+Liliana, Dreadhorde General	league: Bullseye, Death Dealer	1.583	0.749	1200	2	2026-11-18
+Madame Hydra	league: Bullseye, Death Dealer	0.583	0.629	1200	2	2026-11-18
+Rapacious Dragon	league: Bullseye, Death Dealer	0.833	0.634	1200	2	2026-11-18
+Rhovanion Rampager	league: Bullseye, Death Dealer	-0.250	0.618	1200	2	2026-11-18
+Roxxon Brutes	league: Bullseye, Death Dealer	0.583	0.651	1200	2	2026-11-18
+Stir Up Trouble	league: Bullseye, Death Dealer	-0.417	0.672	1200	2	2026-11-18
+Terror of Mount Velus	league: Bullseye, Death Dealer	0.250	0.682	1200	2	2026-11-18
+Ultron Drone	league: Bullseye, Death Dealer	0.750	0.546	1200	2	2026-11-18
+Arbiter of Woe	league: Bolg of the North	1.833	0.919	1200	2	2026-11-18
+Ball Lightning	league: Bolg of the North	-0.667	0.745	1200	2	2026-11-18
+Bilbo's Deadly Slice	league: Bolg of the North	0.250	0.813	1200	2	2026-11-18
+Bloodthirsty Conqueror	league: Bolg of the North	3.083	1.032	1200	2	2026-11-18
+Dori, Bearer of Friends	league: Bolg of the North	0.167	0.697	1200	2	2026-11-18
+Drakuseth, Maw of Flames	league: Bolg of the North	1.250	0.886	1200	2	2026-11-18
+Dreaded Bat-Cloud	league: Bolg of the North	0.833	0.935	1200	2	2026-11-18
+Gate Colossus	league: Bolg of the North	0.250	0.769	1200	2	2026-11-18
+Giant's Boulder	league: Bolg of the North	-1.417	1.109	1200	2	2026-11-18
+Goblin-town Flunkies	league: Bolg of the North	0.417	1.024	1200	2	2026-11-18
+Gollum the Abandoned	league: Bolg of the North	-0.750	1.057	1200	2	2026-11-18
+Great Ugly-Looking Goblin	league: Bolg of the North	0.167	0.950	1200	2	2026-11-18
+Gundabad Opportunist	league: Bolg of the North	1.583	0.931	1200	2	2026-11-18
+Head of the Hunt	league: Bolg of the North	6.083	1.122	1200	2	2026-11-18
+Misty Mountains Raider	league: Bolg of the North	0.250	0.862	1200	2	2026-11-18
+Perforating Artist	league: Bolg of the North	7.333	0.999	1200	2	2026-11-18
+Rage into the Valley	league: Bolg of the North	0.167	0.727	1200	2	2026-11-18
+Ravening Warg	league: Bolg of the North	3.250	1.035	1200	2	2026-11-18
+Ravenous Giant	league: Bolg of the North	-0.167	0.921	1200	2	2026-11-18
+Shivan Dragon	league: Bolg of the North	0.167	0.850	1200	2	2026-11-18
+Sire of Seven Deaths	league: Bolg of the North	4.750	0.952	1200	2	2026-11-18
+Smaug, Wicked Worm	league: Bolg of the North	0.667	0.986	1200	2	2026-11-18
+Smaug, the Great Calamity	league: Bolg of the North	0.083	0.961	1200	2	2026-11-18
+Strongbox Raider	league: Bolg of the North	0.750	0.947	1200	2	2026-11-18
+Suspicious Shambler	league: Bolg of the North	-1.500	0.971	1200	2	2026-11-18
+The Master of Lake-town	league: Bolg of the North	1.167	0.697	1200	2	2026-11-18
+The Sackville-Bagginses	league: Bolg of the North	0.750	0.924	1200	2	2026-11-18
+Thorin, Mountain-king	league: Bolg of the North	-0.500	0.920	1200	2	2026-11-18
+Azog, Moria's Ruin	league: The Great Goblin	0.333	0.707	1200	2	2026-11-18
+Bake into a Pie	league: The Great Goblin	0.000	0.782	1200	2	2026-11-18
+Baron Helmut Zemo	league: The Great Goblin	-1.500	0.633	1200	2	2026-11-18
+Bolg of the North	league: The Great Goblin	0.250	0.829	1200	2	2026-11-18
+Bothersome Noisemaker	league: The Great Goblin	0.833	0.842	1200	2	2026-11-18
+Courageous Goblin	league: The Great Goblin	0.500	0.773	1200	2	2026-11-18
+Deadly Plot	league: The Great Goblin	-1.083	0.786	1200	2	2026-11-18
+Dropkick Bomber	league: The Great Goblin	1.167	0.687	1200	2	2026-11-18
+Fearsome Goblin Pair	league: The Great Goblin	0.000	0.565	1200	2	2026-11-18
+Goblin-town Flunkies	league: The Great Goblin	0.750	0.878	1200	2	2026-11-18
+Gollum the Abandoned	league: The Great Goblin	-2.083	0.972	1200	2	2026-11-18
+Great Ugly-Looking Goblin	league: The Great Goblin	0.667	0.825	1200	2	2026-11-18
+Gundabad Opportunist	league: The Great Goblin	0.750	0.662	1200	2	2026-11-18
+Hero's Downfall	league: The Great Goblin	-0.583	0.682	1200	2	2026-11-18
+Immersturm Predator	league: The Great Goblin	-2.750	0.808	1200	2	2026-11-18
+Krenko, Mob Boss	league: The Great Goblin	6.167	1.020	1200	2	2026-11-18
+Massacre Wurm	league: The Great Goblin	3.500	0.900	1200	2	2026-11-18
+Misty Mountains Raider	league: The Great Goblin	1.750	0.785	1200	2	2026-11-18
+Rage into the Valley	league: The Great Goblin	0.667	0.514	1200	2	2026-11-18
+Redcap Gutter-Dweller	league: The Great Goblin	-0.167	0.858	1200	2	2026-11-18
+Smaug, Wicked Worm	league: The Great Goblin	0.917	0.878	1200	2	2026-11-18
+Snowslope Hunter	league: The Great Goblin	-0.250	0.571	1200	2	2026-11-18
+Stir Up Trouble	league: The Great Goblin	-1.500	0.964	1200	2	2026-11-18
+Angelic Edict	league: Bifur, Melodic Rider	0.250	0.960	1200	2	2026-11-18
+Aurelia, the Warleader	league: Bifur, Melodic Rider	2.417	0.952	1200	2	2026-11-18
+Belladonna Took	league: Bifur, Melodic Rider	0.083	1.018	1200	2	2026-11-18
+Bombur, Gentle Dreamer	league: Bifur, Melodic Rider	0.417	0.662	1200	2	2026-11-18
+Captain Marvel, Earth's Protector	league: Bifur, Melodic Rider	3.500	0.991	1200	2	2026-11-18
+Chandra, Flameshaper	league: Bifur, Melodic Rider	1.083	0.795	1200	2	2026-11-18
+Dwarven Provisioner	league: Bifur, Melodic Rider	1.000	0.943	1200	2	2026-11-18
+Exemplar of Light	league: Bifur, Melodic Rider	0.250	0.961	1200	2	2026-11-18
+Goblin Firebomb	league: Bifur, Melodic Rider	-0.167	1.014	1200	2	2026-11-18
+Juggernaut	league: Bifur, Melodic Rider	-0.250	0.854	1200	2	2026-11-18
+Kree Sentinel	league: Bifur, Melodic Rider	1.667	0.790	1200	2	2026-11-18
+Kíli the Resourceful	league: Bifur, Melodic Rider	0.000	1.035	1200	2	2026-11-18
+Lyra Dawnbringer	league: Bifur, Melodic Rider	2.583	1.023	1200	2	2026-11-18
+Misty Mountains Raider	league: Bifur, Melodic Rider	2.250	0.869	1200	2	2026-11-18
+Solemn Simulacrum	league: Bifur, Melodic Rider	0.500	0.950	1200	2	2026-11-18
+Steel Hellkite	league: Bifur, Melodic Rider	1.167	0.920	1200	2	2026-11-18
+The Eagles Are Coming!	league: Bifur, Melodic Rider	0.000	1.028	1200	2	2026-11-18
+Thorin Oakenshield	league: Bifur, Melodic Rider	-0.667	1.048	1200	2	2026-11-18
+Zetalpa, Primal Dawn	league: Bifur, Melodic Rider	2.500	0.871	1200	2	2026-11-18
+Adaptive Automaton	league: Bifur, Melodic Rider	-0.667	0.635	1200	2	2026-11-18
+Ancestor Dragon	league: Bifur, Melodic Rider	1.667	0.832	1200	2	2026-11-18
+Angel of Finality	league: Bifur, Melodic Rider	0.667	0.850	1200	2	2026-11-18
+Bifur, Melodic Rider	league: Bifur, Melodic Rider	0.083	0.672	1200	2	2026-11-18
+Burn, Burn, Tree and Fern	league: Bifur, Melodic Rider	-1.083	0.947	1200	2	2026-11-18
+Dori, Bearer of Friends	league: Bifur, Melodic Rider	0.167	0.527	1200	2	2026-11-18
+Dwalin, Weaponmaster	league: Bifur, Melodic Rider	0.667	0.825	1200	2	2026-11-18
+Dáin, Lord of the Iron Hills	league: Bifur, Melodic Rider	3.833	0.968	1200	2	2026-11-18
+Eagle of the Great Shelf	league: Bifur, Melodic Rider	1.167	0.807	1200	2	2026-11-18
+Esgaroth Garrison	league: Bifur, Melodic Rider	-0.333	0.791	1200	2	2026-11-18
+Etali, Primal Storm	league: Bifur, Melodic Rider	3.167	0.870	1200	2	2026-11-18
+Giant's Boulder	league: Bifur, Melodic Rider	-1.333	1.007	1200	2	2026-11-18
+Goblin Negotiation	league: Bifur, Melodic Rider	0.917	0.968	1200	2	2026-11-18
+H.E.R.B.I.E. Scout Unit	league: Bifur, Melodic Rider	0.000	0.858	1200	2	2026-11-18
+Heraldic Banner	league: Bifur, Melodic Rider	0.000	0.698	1200	2	2026-11-18
+Iron Hills Stalwart	league: Bifur, Melodic Rider	0.500	0.773	1200	2	2026-11-18
+Jazal Goldmane	league: Bifur, Melodic Rider	-0.583	0.821	1200	2	2026-11-18
+Key to the Side-Door	league: Bifur, Melodic Rider	-0.750	0.961	1200	2	2026-11-18
+Lathliss, Dragon Queen	league: Bifur, Melodic Rider	0.583	0.838	1200	2	2026-11-18
+Luminous Rebuke	league: Bifur, Melodic Rider	-0.917	0.894	1200	2	2026-11-18
+Nori, Teller of Tales	league: Bifur, Melodic Rider	0.500	0.808	1200	2	2026-11-18
+Ori, Keeper of Songs	league: Bifur, Melodic Rider	1.417	0.660	1200	2	2026-11-18
+Smaug, the Great Calamity	league: Bifur, Melodic Rider	1.583	0.968	1200	2	2026-11-18
+Stone-Giant of High Pass	league: Bifur, Melodic Rider	1.667	0.857	1200	2	2026-11-18
+Stroke of Midnight	league: Bifur, Melodic Rider	-0.583	0.618	1200	2	2026-11-18
+Syr Alin, the Lion's Claw	league: Bifur, Melodic Rider	0.833	0.816	1200	2	2026-11-18
+The Queen of Dale	league: Bifur, Melodic Rider	0.583	0.947	1200	2	2026-11-18
+Óin the Brave	league: Bifur, Melodic Rider	0.833	0.898	1200	2	2026-11-18
+Elrond, Moon-Reader	league: Thranduil, Sindarin Liege	0.833	0.717	1200	2	2026-11-18
+Gigantic Big Bear	league: Thranduil, Sindarin Liege	-0.417	0.886	1200	2	2026-11-18
+Lake-town Mariners	league: Thranduil, Sindarin Liege	0.917	0.812	1200	2	2026-11-18
+A.I.M. Scientists	league: Kang, Temporal Tyrant	1.250	1.037	1200	2	2026-11-18
+Arbiter of Woe	league: Kang, Temporal Tyrant	1.000	1.084	1200	2	2026-11-18
+Attuma, Atlantean Warlord	league: Kang, Temporal Tyrant	-0.750	1.115	1200	2	2026-11-18
+Bake into a Pie	league: Kang, Temporal Tyrant	-0.833	1.061	1200	2	2026-11-18
+Baron Helmut Zemo	league: Kang, Temporal Tyrant	-1.667	0.772	1200	2	2026-11-18
+Baron Strucker, HYDRA Overlord	league: Kang, Temporal Tyrant	0.500	0.736	1200	2	2026-11-18
+Bloodthirsty Conqueror	league: Kang, Temporal Tyrant	2.583	1.078	1200	2	2026-11-18
+Bold Biochemist	league: Kang, Temporal Tyrant	-0.167	1.130	1200	2	2026-11-18
+Confusticate and Bebother	league: Kang, Temporal Tyrant	0.000	0.817	1200	2	2026-11-18
+Crossbones, Malicious Mercenary	league: Kang, Temporal Tyrant	0.000	1.080	1200	2	2026-11-18
+Crossway Troublemakers	league: Kang, Temporal Tyrant	-2.500	1.105	1200	2	2026-11-18
+Deadly Plot	league: Kang, Temporal Tyrant	-1.167	1.028	1200	2	2026-11-18
+Desecration Demon	league: Kang, Temporal Tyrant	-0.333	1.185	1200	2	2026-11-18
+Eaten Alive	league: Kang, Temporal Tyrant	-1.750	1.157	1200	2	2026-11-18
+Hero's Downfall	league: Kang, Temporal Tyrant	0.417	0.778	1200	2	2026-11-18
+High-Society Hunter	league: Kang, Temporal Tyrant	-0.500	1.093	1200	2	2026-11-18
+Kingpin's Enforcers	league: Kang, Temporal Tyrant	0.583	0.759	1200	2	2026-11-18
+Liliana, Dreadhorde General	league: Kang, Temporal Tyrant	0.083	1.126	1200	2	2026-11-18
+Madame Masque	league: Kang, Temporal Tyrant	0.750	0.952	1200	2	2026-11-18
+Massacre Wurm	league: Kang, Temporal Tyrant	1.667	1.120	1200	2	2026-11-18
+Moonstone, Harsh Mistress	league: Kang, Temporal Tyrant	0.500	0.993	1200	2	2026-11-18
+Robot Domination	league: Kang, Temporal Tyrant	-0.917	1.017	1200	2	2026-11-18
+Roxxon Brutes	league: Kang, Temporal Tyrant	0.000	0.971	1200	2	2026-11-18
+Rune-Scarred Demon	league: Kang, Temporal Tyrant	0.167	1.033	1200	2	2026-11-18
+Sol Ring	league: Kang, Temporal Tyrant	3.667	1.265	1200	2	2026-11-18
+Stir Up Trouble	league: Kang, Temporal Tyrant	-2.000	1.218	1200	2	2026-11-18
+The Sackville-Bagginses	league: Kang, Temporal Tyrant	-0.917	1.070	1200	2	2026-11-18
+Ultron Drone	league: Kang, Temporal Tyrant	-0.667	0.745	1200	2	2026-11-18
+Yellowjacket, Heartless Marauder	league: Kang, Temporal Tyrant	-1.167	1.130	1200	2	2026-11-18
+Adaptive Automaton	league: Moon Girl and Devil Dinosaur	0.750	0.804	1200	2	2026-11-18
+Ant-Man's Army	league: Moon Girl and Devil Dinosaur	0.000	0.656	1200	2	2026-11-18
+Cantankerous Keepers	league: Moon Girl and Devil Dinosaur	-0.250	0.886	1200	2	2026-11-18
+Confusticate and Bebother	league: Moon Girl and Devil Dinosaur	-0.583	0.661	1200	2	2026-11-18
+Corsair Captain	league: Moon Girl and Devil Dinosaur	-1.750	0.820	1200	2	2026-11-18
+Fateful Discovery	league: Moon Girl and Devil Dinosaur	-0.750	0.932	1200	2	2026-11-18
+Gandalf, Wandering Wizard	league: Moon Girl and Devil Dinosaur	-1.667	0.941	1200	2	2026-11-18
+Gnarlback Rhino	league: Moon Girl and Devil Dinosaur	1.500	0.986	1200	2	2026-11-18
+Guardian of the Halls	league: Moon Girl and Devil Dinosaur	0.250	1.058	1200	2	2026-11-18
+Hedron Archive	league: Moon Girl and Devil Dinosaur	-0.250	0.997	1200	2	2026-11-18
+Koma, World-Eater	league: Moon Girl and Devil Dinosaur	3.333	0.966	1200	2	2026-11-18
+Long Lake Nuisance	league: Moon Girl and Devil Dinosaur	0.917	0.878	1200	2	2026-11-18
+Mazemind Tome	league: Moon Girl and Devil Dinosaur	-0.333	1.067	1200	2	2026-11-18
+Mirkwood Meditator	league: Moon Girl and Devil Dinosaur	-0.250	0.595	1200	2	2026-11-18
+Old Fat Spider	league: Moon Girl and Devil Dinosaur	-0.083	0.838	1200	2	2026-11-18
+Quakestrider Ceratops	league: Moon Girl and Devil Dinosaur	-2.250	0.877	1200	2	2026-11-18
+S.H.I.E.L.D. Deployment Drone	league: Moon Girl and Devil Dinosaur	0.667	0.656	1200	2	2026-11-18
+Savage Land Dinosaur	league: Moon Girl and Devil Dinosaur	-1.333	0.858	1200	2	2026-11-18
+Sol Ring	league: Moon Girl and Devil Dinosaur	3.417	1.119	1200	2	2026-11-18
+Solemn Simulacrum	league: Moon Girl and Devil Dinosaur	1.667	0.882	1200	2	2026-11-18
+Sound the Trumpets	league: Moon Girl and Devil Dinosaur	-0.750	0.682	1200	2	2026-11-18
+Spectral Sailor	league: Moon Girl and Devil Dinosaur	0.417	1.044	1200	2	2026-11-18
+Spinner of Souls	league: Moon Girl and Devil Dinosaur	0.333	0.808	1200	2	2026-11-18
+Steel Hellkite	league: Moon Girl and Devil Dinosaur	-0.417	0.925	1200	2	2026-11-18
+Super-Adaptoid	league: Moon Girl and Devil Dinosaur	1.917	0.975	1200	2	2026-11-18
+Thranduil's Company	league: Moon Girl and Devil Dinosaur	3.500	1.024	1200	2	2026-11-18
+Thranduil, Sindarin Liege	league: Moon Girl and Devil Dinosaur	1.000	0.986	1200	2	2026-11-18
+Vizier of the Menagerie	league: Moon Girl and Devil Dinosaur	0.833	0.913	1200	2	2026-11-18
+Wilderland Scrounger	league: Moon Girl and Devil Dinosaur	0.833	0.874	1200	2	2026-11-18
+Beast-Kin Ranger	league: Thranduil, Sindarin Liege	1.500	0.706	1200	2	2026-11-18
+Darksteel Colossus	league: Thranduil, Sindarin Liege	0.833	0.866	1200	2	2026-11-18
+Dwynen's Elite	league: Thranduil, Sindarin Liege	2.000	0.927	1200	2	2026-11-18
+Elvish Archdruid	league: Thranduil, Sindarin Liege	2.833	0.863	1200	2	2026-11-18
+Goblin Firebomb	league: Thranduil, Sindarin Liege	0.250	1.011	1200	2	2026-11-18
+Imperious Perfect	league: Thranduil, Sindarin Liege	2.417	0.719	1200	2	2026-11-18
+Quilled Greatwurm	league: Thranduil, Sindarin Liege	1.417	0.931	1200	2	2026-11-18
+Rampaging Baloths	league: Thranduil, Sindarin Liege	1.500	0.897	1200	2	2026-11-18
+The Lord of the Eagles	league: Thranduil, Sindarin Liege	2.417	0.869	1200	2	2026-11-18
+Balin, Loremaster	league: Thorin Oakenshield	-0.833	0.782	1200	2	2026-11-18
+Bombur, Gentle Dreamer	league: Thorin Oakenshield	-0.167	0.553	1200	2	2026-11-18
+Burn, Burn, Tree and Fern	league: Thorin Oakenshield	-0.250	0.741	1200	2	2026-11-18
+Chandra, Flameshaper	league: Thorin Oakenshield	-0.583	0.618	1200	2	2026-11-18
+Dori, Bearer of Friends	league: Thorin Oakenshield	0.667	0.372	1200	2	2026-11-18
+Drakuseth, Maw of Flames	league: Thorin Oakenshield	1.333	0.695	1200	2	2026-11-18
+Gandalf, Goblins' Bane	league: Thorin Oakenshield	0.833	0.456	1200	2	2026-11-18
+Gate Colossus	league: Thorin Oakenshield	-0.417	0.571	1200	2	2026-11-18
+Giant's Boulder	league: Thorin Oakenshield	-1.750	0.768	1200	2	2026-11-18
+Heraldic Banner	league: Thorin Oakenshield	0.917	0.520	1200	2	2026-11-18
+Iron Hills Stalwart	league: Thorin Oakenshield	-0.167	0.635	1200	2	2026-11-18
+Juggernaut	league: Thorin Oakenshield	-0.333	0.601	1200	2	2026-11-18
+Kree Sentinel	league: Thorin Oakenshield	-0.417	0.651	1200	2	2026-11-18
+Lathliss, Dragon Queen	league: Thorin Oakenshield	0.917	0.711	1200	2	2026-11-18
+Lyra Dawnbringer	league: Thorin Oakenshield	1.167	0.772	1200	2	2026-11-18
+Ori, Keeper of Songs	league: Thorin Oakenshield	1.167	0.470	1200	2	2026-11-18
+Ravenous Amulet	league: Thorin Oakenshield	-1.583	0.721	1200	2	2026-11-18
+Smaug, the Great Calamity	league: Thorin Oakenshield	-0.833	0.697	1200	2	2026-11-18
+Stone-Giant of High Pass	league: Thorin Oakenshield	0.417	0.639	1200	2	2026-11-18
+Stroke of Midnight	league: Thorin Oakenshield	-0.167	0.457	1200	2	2026-11-18
+Strongbox Raider	league: Thorin Oakenshield	-1.083	0.640	1200	2	2026-11-18
+Syr Alin, the Lion's Claw	league: Thorin Oakenshield	-0.250	0.640	1200	2	2026-11-18
+The Eagles Are Coming!	league: Thorin Oakenshield	0.250	0.712	1200	2	2026-11-18
+Thor Odinson	league: Thorin Oakenshield	0.333	0.677	1200	2	2026-11-18
+Óin the Brave	league: Thorin Oakenshield	-1.250	0.759	1200	2	2026-11-18
+Aggressive Mammoth	league: Thranduil, Sindarin Liege	0.917	0.968	1200	2	2026-11-18
+Beorn, Reluctant Host	league: Thranduil, Sindarin Liege	0.500	0.727	1200	2	2026-11-18
+Curator of Destinies	league: Thranduil, Sindarin Liege	2.417	0.907	1200	2	2026-11-18
+Elfsworn Giant	league: Thranduil, Sindarin Liege	0.250	0.838	1200	2	2026-11-18
+Gandalf, Wandering Wizard	league: Thranduil, Sindarin Liege	-0.500	0.890	1200	2	2026-11-18
+Ghalta, Primal Hunger	league: Thranduil, Sindarin Liege	1.750	1.021	1200	2	2026-11-18
+Giant's Boulder	league: Thranduil, Sindarin Liege	0.750	0.975	1200	2	2026-11-18
+Grappling Kraken	league: Thranduil, Sindarin Liege	0.583	0.777	1200	2	2026-11-18
+Long Lake Nuisance	league: Thranduil, Sindarin Liege	1.667	0.824	1200	2	2026-11-18
+Loot, Exuberant Explorer	league: Thranduil, Sindarin Liege	1.500	0.676	1200	2	2026-11-18
+Master's Councillors	league: Thranduil, Sindarin Liege	1.583	1.003	1200	2	2026-11-18
+Mirkwood Pathmaker	league: Thranduil, Sindarin Liege	0.750	0.595	1200	2	2026-11-18
+Old Fat Spider	league: Thranduil, Sindarin Liege	1.250	0.931	1200	2	2026-11-18
+Pelakka Wurm	league: Thranduil, Sindarin Liege	0.667	0.823	1200	2	2026-11-18
+She-Hulk, Jade Defender	league: Thranduil, Sindarin Liege	0.000	0.921	1200	2	2026-11-18
+Sphinx of Forgotten Lore	league: Thranduil, Sindarin Liege	0.500	0.850	1200	2	2026-11-18
+Trygon Predator	league: Thranduil, Sindarin Liege	2.000	0.743	1200	2	2026-11-18
+Vivien Reid	league: Thranduil, Sindarin Liege	0.083	0.821	1200	2	2026-11-18
+Voracious Greatshark	league: Thranduil, Sindarin Liege	0.000	0.782	1200	2	2026-11-18
+Wildborn Preserver	league: Thranduil, Sindarin Liege	-0.500	1.007	1200	2	2026-11-18
+Wilderland Scrounger	league: Thranduil, Sindarin Liege	0.833	0.745	1200	2	2026-11-18
+Wood Elves	league: Thranduil, Sindarin Liege	1.167	0.589	1200	2	2026-11-18
+Boughside Wanderers	league: Thranduil, Sindarin Liege	-0.417	0.931	1200	2	2026-11-18
+Cantankerous Keepers	league: Thranduil, Sindarin Liege	-1.083	1.003	1200	2	2026-11-18
+Druid of the Cowl	league: Thranduil, Sindarin Liege	1.750	0.966	1200	2	2026-11-18
+Dwynen, Gilt-Leaf Daen	league: Thranduil, Sindarin Liege	1.417	1.056	1200	2	2026-11-18
+Elven Raft-Steerer	league: Thranduil, Sindarin Liege	1.417	0.660	1200	2	2026-11-18
+Elvenking's Harper	league: Thranduil, Sindarin Liege	-0.167	0.858	1200	2	2026-11-18
+Elvish Regrower	league: Thranduil, Sindarin Liege	0.000	0.979	1200	2	2026-11-18
+Galion, Elvenking's Butler	league: Thranduil, Sindarin Liege	0.583	0.853	1200	2	2026-11-18
+Gigantosaurus	league: Thranduil, Sindarin Liege	-0.667	0.936	1200	2	2026-11-18
+Guardian of the Halls	league: Thranduil, Sindarin Liege	-0.083	0.983	1200	2	2026-11-18
+Mind Stone	league: Thranduil, Sindarin Liege	0.917	0.923	1200	2	2026-11-18
+Mirkwood Meditator	league: Thranduil, Sindarin Liege	0.167	0.601	1200	2	2026-11-18
+Mirkwood Nurturer	league: Thranduil, Sindarin Liege	-0.250	0.595	1200	2	2026-11-18
+Pet Avengers	league: Thranduil, Sindarin Liege	-0.083	0.947	1200	2	2026-11-18
+Reclamation Sage	league: Thranduil, Sindarin Liege	-0.083	0.732	1200	2	2026-11-18
+Silvan Reveler	league: Thranduil, Sindarin Liege	-1.333	0.957	1200	2	2026-11-18
+Skyship Buccaneer	league: Thranduil, Sindarin Liege	1.833	0.948	1200	2	2026-11-18
+Sol Ring	league: Thranduil, Sindarin Liege	3.250	1.122	1200	2	2026-11-18
+Springbloom Druid	league: Thranduil, Sindarin Liege	2.250	0.793	1200	2	2026-11-18
+Tajuru Pathwarden	league: Thranduil, Sindarin Liege	0.583	0.862	1200	2	2026-11-18
+Tatyova, Benthic Druid	league: Thranduil, Sindarin Liege	1.083	0.853	1200	2	2026-11-18
+Thranduil's Company	league: Thranduil, Sindarin Liege	1.250	0.930	1200	2	2026-11-18
+Thranduil, Sindarin Liege	league: Thranduil, Sindarin Liege	0.417	0.961	1200	2	2026-11-18
+Wildheart Invoker	league: Thranduil, Sindarin Liege	-0.500	0.898	1200	2	2026-11-18
+Woodland Weavemaster	league: Thranduil, Sindarin Liege	1.500	0.998	1200	2	2026-11-18
+Agent 13, Sharon Carter	league: Bard the Bowman	0.083	0.595	1200	2	2026-11-18
+Ancestor Dragon	league: Bard the Bowman	1.417	0.922	1200	2	2026-11-18
+Angelic Edict	league: Bard the Bowman	-0.417	1.151	1200	2	2026-11-18
+Arcanis the Omnipotent	league: Bard the Bowman	-1.833	0.957	1200	2	2026-11-18
+Archmage of Runes	league: Bard the Bowman	0.083	1.030	1200	2	2026-11-18
+Bard's Company	league: Bard the Bowman	2.833	1.150	1200	2	2026-11-18
+Bard, King of Dale	league: Bard the Bowman	-2.083	1.063	1200	2	2026-11-18
+Bilbo, Luckwearer	league: Bard the Bowman	-0.500	1.034	1200	2	2026-11-18
+Celebrate the Mountain-king	league: Bard the Bowman	1.833	1.128	1200	2	2026-11-18
+Drogskol Reaver	league: Bard the Bowman	2.500	0.924	1200	2	2026-11-18
+Esgaroth Garrison	league: Bard the Bowman	-0.250	1.108	1200	2	2026-11-18
+Exemplar of Light	league: Bard the Bowman	0.750	1.057	1200	2	2026-11-18
+Giant's Boulder	league: Bard the Bowman	-1.750	1.198	1200	2	2026-11-18
+Hero in Training	league: Bard the Bowman	1.417	0.730	1200	2	2026-11-18
+Jazal Goldmane	league: Bard the Bowman	-1.333	1.106	1200	2	2026-11-18
+Kiora, the Rising Tide	league: Bard the Bowman	-0.500	0.958	1200	2	2026-11-18
+Lake-town Mariners	league: Bard the Bowman	-0.500	0.866	1200	2	2026-11-18
+Long Lake Nuisance	league: Bard the Bowman	0.833	1.013	1200	2	2026-11-18
+Luminous Rebuke	league: Bard the Bowman	-0.500	1.136	1200	2	2026-11-18
+Master's Councillors	league: Bard the Bowman	1.250	1.140	1200	2	2026-11-18
+Panther Pounce	league: Bard the Bowman	0.417	1.158	1200	2	2026-11-18
+Patient Instructor	league: Bard the Bowman	1.583	0.794	1200	2	2026-11-18
+Sire of Seven Deaths	league: Bard the Bowman	7.000	1.116	1200	2	2026-11-18
+Sound the Trumpets	league: Bard the Bowman	-0.583	0.651	1200	2	2026-11-18
+The Arkenstone	league: Bard the Bowman	-0.250	1.121	1200	2	2026-11-18
+The Eagles Are Coming!	league: Bard the Bowman	0.583	1.122	1200	2	2026-11-18
+Zetalpa, Primal Dawn	league: Bard the Bowman	2.000	0.918	1200	2	2026-11-18
