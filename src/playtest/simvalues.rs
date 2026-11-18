@@ -24,9 +24,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 /// Bumped whenever the simulator changes how cards play: older measurements stop counting
 /// (they stay in the file, marked with their version).
-pub const SIM_VERSION: u32 = 1;
+// 2: Vehicles - crew stays tapped through the opponents' turns, so the AI keeps blockers.
+pub const SIM_VERSION: u32 = 2;
 
 pub const FILE: &str = "sim_card_values.tsv";
+/// Measurements shipped with the app (across the league's decks and every archetype), so the
+/// builder knows card power before the user runs any playtests. The user's own
+/// measurements are added on top and replace a shipped one of the same card and deck.
+pub const DEFAULT_FILE: &str = "sim_card_values_default.tsv";
 
 /// One card measured in one deck.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,41 +70,59 @@ impl Power {
 
 #[derive(Clone, Debug, Default)]
 pub struct SimValues {
+    /// The user's own measurements (saved to `FILE`).
     pub rows: Vec<Measurement>,
+    /// The shipped measurements (`DEFAULT_FILE`; never saved over).
+    pub shipped: Vec<Measurement>,
     power: BTreeMap<String, Power>,
 }
 
 impl SimValues {
     /// The stored measurements (none if the file is missing or unreadable).
     pub fn load(dir: &Path) -> SimValues {
-        let text = std::fs::read_to_string(dir.join(FILE)).unwrap_or_default();
-        let rows = text
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.starts_with("card\t") && !l.trim().is_empty())
-            .filter_map(|l| {
-                let f: Vec<&str> = l.split('\t').collect();
-                if f.len() < 7 {
-                    return None;
-                }
-                Some(Measurement {
-                    card: f[0].to_string(),
-                    deck: f[1].to_string(),
-                    value: f[2].parse().ok()?,
-                    se: f[3].parse().ok()?,
-                    games: f[4].parse().ok()?,
-                    sim: f[5].parse().ok()?,
-                    date: f[6].to_string(),
-                })
-            })
-            .collect();
         let mut v = SimValues {
-            rows,
+            rows: read_rows(&dir.join(FILE)),
+            shipped: read_rows(&dir.join(DEFAULT_FILE)),
             power: BTreeMap::new(),
         };
         v.recompute();
         v
     }
 
+    /// Only the user's own file (for tools that write measurements).
+    pub fn load_own(dir: &Path) -> SimValues {
+        let mut v = SimValues {
+            rows: read_rows(&dir.join(FILE)),
+            ..Default::default()
+        };
+        v.recompute();
+        v
+    }
+}
+
+fn read_rows(path: &Path) -> Vec<Measurement> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    text.lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("card\t") && !l.trim().is_empty())
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            if f.len() < 7 {
+                return None;
+            }
+            Some(Measurement {
+                card: f[0].to_string(),
+                deck: f[1].to_string(),
+                value: f[2].parse().ok()?,
+                se: f[3].parse().ok()?,
+                games: f[4].parse().ok()?,
+                sim: f[5].parse().ok()?,
+                date: f[6].to_string(),
+            })
+        })
+        .collect()
+}
+
+impl SimValues {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let mut out = String::from(
             "# Card power measured by playtests (see src/playtest/simvalues.rs): win-rate points\n\
@@ -140,7 +163,7 @@ impl SimValues {
     /// The decks measured with the current simulator, and how many cards each.
     pub fn decks(&self) -> BTreeMap<String, usize> {
         let mut out = BTreeMap::new();
-        for m in self.rows.iter().filter(|m| m.sim == SIM_VERSION) {
+        for m in self.current() {
             *out.entry(m.deck.clone()).or_insert(0) += 1;
         }
         out
@@ -150,14 +173,30 @@ impl SimValues {
         self.power.is_empty()
     }
 
+    /// Current-simulator measurements: the user's, and the shipped ones they don't replace.
+    fn current(&self) -> impl Iterator<Item = &Measurement> {
+        self.rows
+            .iter()
+            .chain(self.shipped.iter().filter(|s| {
+                !self
+                    .rows
+                    .iter()
+                    .any(|r| r.card == s.card && r.deck == s.deck && r.sim == SIM_VERSION)
+            }))
+            .filter(|m| m.sim == SIM_VERSION)
+    }
+
     fn recompute(&mut self) {
-        let mut by: BTreeMap<&str, Vec<&Measurement>> = BTreeMap::new();
-        for m in self.rows.iter().filter(|m| m.sim == SIM_VERSION) {
-            by.entry(&m.card).or_default().push(m);
+        let mut by: BTreeMap<String, Vec<Measurement>> = BTreeMap::new();
+        for m in self.current() {
+            by.entry(m.card.clone()).or_default().push(m.clone());
         }
         self.power = by
             .into_iter()
-            .map(|(card, ms)| (card.to_string(), combine(&ms)))
+            .map(|(card, ms)| {
+                let refs: Vec<&Measurement> = ms.iter().collect();
+                (card, combine(&refs))
+            })
             .collect();
     }
 }
@@ -475,5 +514,47 @@ impl PoolJob {
             ));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod shipped_tests {
+    use super::*;
+
+    fn row(card: &str, deck: &str, value: f32) -> String {
+        format!(
+            "{}\t{}\t{:.3}\t1.000\t1000\t{}\t2026-11-18\n",
+            card, deck, value, SIM_VERSION
+        )
+    }
+
+    #[test]
+    fn own_measurements_replace_shipped_ones_and_only_own_are_saved() {
+        let dir = std::env::temp_dir().join(format!("msh_simvalues_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let head = "card\tdeck\tvalue\tse\tgames\tsim\tdate\n";
+        std::fs::write(
+            dir.join(DEFAULT_FILE),
+            format!(
+                "{}{}{}",
+                head,
+                row("Sol Ring", "A", 6.0),
+                row("Opt", "A", 1.0)
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(FILE),
+            format!("{}{}", head, row("Sol Ring", "A", 2.0)),
+        )
+        .unwrap();
+        let v = SimValues::load(&dir);
+        // The user's Sol Ring in deck A replaces the shipped one; Opt comes from the shipped file.
+        assert!((v.power("Sol Ring").unwrap().value - 2.0).abs() < 1e-3);
+        assert!((v.power("Opt").unwrap().value - 1.0).abs() < 1e-3);
+        v.save(&dir).unwrap();
+        let own = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(own.contains("Sol Ring") && !own.contains("Opt"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

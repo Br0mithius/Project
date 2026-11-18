@@ -11,6 +11,11 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.write("target/x86_64-pc-windows-gnu/release/msh-deckbuilder.exe", "MSH-Deckbuilder/MSH Deckbuilder.exe")
     z.write("target/x86_64-pc-windows-gnu/release/msh-cli.exe", "MSH-Deckbuilder/msh-cli (command line).exe")
     z.write("data/cards.json", "MSH-Deckbuilder/data/cards.json")
+    # Shipped card power (measured across the league's decks); the user's own measurements
+    # go in a separate file, so updating never overwrites them.
+    import os
+    if os.path.exists("data/sim_card_values_default.tsv"):
+        z.write("data/sim_card_values_default.tsv", "MSH-Deckbuilder/data/sim_card_values_default.tsv")
     # No collection.txt: the app creates an empty one on first start, so unzipping over an
     # older copy never wipes a pool.
     z.write("dist/README-windows.txt", "MSH-Deckbuilder/README.txt")
