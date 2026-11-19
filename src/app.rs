@@ -154,6 +154,16 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Log a real game (opponents default to your ticked next table); `game seen` adds cards an opponent played",
     ),
     (
+        "avoid",
+        "[<card>] | remove <card>",
+        "Never use a card in any build, suggestion or playtest change (your call beats the simulator); no name lists them",
+    ),
+    (
+        "mana",
+        "[fix]",
+        "Land-equivalents vs the 26 cap, how often each spell is castable on curve; `mana fix` re-picks basics",
+    ),
+    (
         "jobs",
         "",
         "What job each card does (lock, removal, draw, ramp, flying, deathtouch...); flags filler",
@@ -368,6 +378,8 @@ impl App {
             "game" => self.game(rest),
             "unavailable" => self.unavailable(rest),
             "jobs" => self.jobs(),
+            "mana" => self.mana(rest),
+            "avoid" => self.avoid(rest),
             "games" => self.games(),
             "measure" => self.measure(rest),
             "lands" => self.lands(),
@@ -2147,6 +2159,63 @@ impl App {
             }
             Err(e) => println!("Couldn't save the game log: {}", e),
         }
+    }
+
+    fn avoid(&mut self, arg: &str) {
+        let arg = arg.trim();
+        let path = self.data_dir.join(crate::db::AVOID_FILE);
+        let mut names = self.rules.avoid.clone();
+        if arg.is_empty() {
+            if names.is_empty() {
+                println!("Your never-use list is empty.");
+            } else {
+                println!("Never used: {}", names.join(", "));
+            }
+            return;
+        }
+        let (remove, q) = match arg.strip_prefix("remove ") {
+            Some(q) => (true, q),
+            None => (false, arg),
+        };
+        let name = match self.db.lookup(q) {
+            crate::db::Lookup::Found(c) => c.name.clone(),
+            _ => {
+                println!("Not a card: {}", q);
+                return;
+            }
+        };
+        if remove {
+            names.retain(|n| !n.eq_ignore_ascii_case(&name));
+        } else if !names.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+            names.push(name.clone());
+        }
+        let text = format!(
+            "# Cards never used in a deck (one per line).\n{}\n",
+            names.join("\n")
+        );
+        match std::fs::write(&path, text) {
+            Ok(()) => {
+                self.rules.avoid = names;
+                println!(
+                    "{} {} the never-use list.",
+                    name,
+                    if remove { "removed from" } else { "added to" }
+                );
+            }
+            Err(e) => println!("Couldn't save: {}", e),
+        }
+    }
+
+    fn mana(&mut self, arg: &str) {
+        if arg.trim() == "fix" {
+            let (before, after) = crate::mana::rebalance_basics(&mut self.deck, &self.db);
+            println!(
+                "Basics re-chosen for castability: {:.1}% -> {:.1}% castable on curve. `undo` to go back.",
+                before * 100.0,
+                after * 100.0
+            );
+        }
+        print!("{}", crate::mana::report(&self.deck, &self.db, &self.rules));
     }
 
     fn jobs(&mut self) {

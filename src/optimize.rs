@@ -131,6 +131,18 @@ pub fn compare(
     seed: u64,
     progress: &Progress,
 ) -> Vec<Gain> {
+    // Every deck compared must be the legal size: a 59-card deck draws its best cards more
+    // often and reads as an improvement it isn't.
+    let size = base.total_count(rules);
+    assert!(
+        decks.iter().all(|d| d.total_count(rules) == size),
+        "compare: decks of different sizes ({} vs {:?})",
+        size,
+        decks
+            .iter()
+            .map(|d| d.total_count(rules))
+            .collect::<Vec<_>>()
+    );
     let base_prep = Prepared::new(base, db);
     let mut preps = vec![base_prep.with_swaps(&[])];
     for d in decks {
@@ -297,7 +309,7 @@ fn replace_filler(
     // Never above the land cap: trim basics (the most plentiful first) for the best spells.
     let cap = crate::analysis::land_cap(rules);
     let mut trimmed = Vec::new();
-    while crate::analysis::land_count(&d, db) > cap {
+    while crate::mana::land_equivalents(&d, db) > cap {
         let Some(basic) = d
             .cards
             .iter()
@@ -502,6 +514,16 @@ pub fn optimize(
             }
             None => break,
         }
+    }
+    // ------------------------------------------------ the mana base
+    // Basics re-chosen for castability (how often each spell is castable on curve).
+    let (before, after) = crate::mana::rebalance_basics(&mut cur, db);
+    if after > before + 0.001 {
+        notes.push(format!(
+            "Basics re-chosen for castability: castable on curve {:.1}% -> {:.1}%.",
+            before * 100.0,
+            after * 100.0
+        ));
     }
     // ------------------------------------------------ final check on games no stage saw
     let final_gain = if canon(&cur) != canon(original) {

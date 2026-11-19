@@ -700,7 +700,11 @@ pub fn build(
             analysis::suggestions_within(deck, db, coll, rules, Some(plays))
                 .into_iter()
                 .find(|s| {
-                    want(s.card) && !(cap.is_some_and(|m| top >= m) && s.card.mana_value() >= 6)
+                    want(s.card)
+                        && !(cap.is_some_and(|m| top >= m) && s.card.mana_value() >= 6)
+                        // Landcyclers count as lands: none once the land cap is reached.
+                        && !(crate::mana::is_land_equivalent(s.card)
+                            && crate::mana::land_equivalents(deck, db) >= land_cap)
                 })
                 .map(|s| s.card.name.clone())
         };
@@ -760,7 +764,7 @@ pub fn build(
         while spells(&deck) < slots {
             match analysis::suggestions_within(&deck, db, full_coll, rules, Some(plays))
                 .into_iter()
-                .next()
+                .find(|s| !crate::mana::is_land_equivalent(s.card))
             {
                 Some(s) => deck.add(&s.card.name, 1),
                 None => break,

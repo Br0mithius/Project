@@ -14,6 +14,7 @@ pub mod games;
 pub mod gui;
 pub mod lab;
 pub mod league;
+pub mod mana;
 pub mod opponents;
 pub mod optimize;
 pub mod packs;

@@ -2130,6 +2130,10 @@ pub fn support_factor(support: &[Support]) -> f32 {
 
 /// Owned copies not already used by `deck`.
 pub fn available(card: &Card, deck: &Deck, coll: &Collection, rules: &Rules) -> u32 {
+    // The player's never-use list wins over every score and playtest.
+    if rules.avoids(&card.name) {
+        return 0;
+    }
     let used = deck.used(&card.name);
     if card.is_basic() && rules.unlimited_basics {
         return 99;
@@ -2326,7 +2330,8 @@ pub fn land_count(deck: &Deck, db: &CardDb) -> u32 {
 /// Returns how many of each basic were added.
 pub fn fill_basics(deck: &mut Deck, db: &CardDb, rules: &Rules) -> [u32; 5] {
     let missing = deck.main_target(rules).saturating_sub(deck.main_count());
-    let split = basic_split(deck, db, missing);
+    // Chosen for castability (how often each spell can be cast on curve), not pip share.
+    let split = crate::mana::best_basics(deck, db, missing);
     for i in 0..5 {
         if split[i] > 0 {
             deck.add(BASIC_FOR_COLOR[i], split[i]);

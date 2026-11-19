@@ -3994,6 +3994,33 @@ impl GuiApp {
                         "Lands: {} · recommended {}{} (league range {}-{})",
                         st.lands, rec, why, lo, hi
                     ));
+                    // Castability: how often each spell can be cast on curve with this mana base.
+                    let cast = crate::mana::castability(&self.deck, &self.db);
+                    let le = crate::mana::land_equivalents(&self.deck, &self.db);
+                    let cap = analysis::land_cap(&self.rules);
+                    ui.label(
+                        RichText::new(format!(
+                            "Castable on curve: {:.0}% on average · land-equivalents {} (cap {})",
+                            cast.mean * 100.0,
+                            le,
+                            cap
+                        ))
+                        .color(if le > cap {
+                            Color32::from_rgb(255, 150, 110)
+                        } else {
+                            Color32::from_rgb(150, 220, 150)
+                        }),
+                    )
+                    .on_hover_text(
+                        "The chance of having enough lands and the right colours to cast each spell on the turn its mana value says. Land-equivalents count lands and landcycling cards; no builder goes over the cap.",
+                    );
+                    let hard: Vec<String> = cast
+                        .cards
+                        .iter()
+                        .take(4)
+                        .map(|(n, p)| format!("{} {:.0}%", n, p * 100.0))
+                        .collect();
+                    ui.label(RichText::new(format!("Hardest to cast: {}", hard.join(" · "))).small());
                     ui.add_space(6.0);
                     ui.label(RichText::new("What the deck does").strong());
                     for r in Role::ALL {

@@ -332,6 +332,9 @@ impl Collection {
     }
 }
 
+/// The never-use list's file name in the data folder.
+pub const AVOID_FILE: &str = "avoid.txt";
+
 /// House rules for the format; editable in-app with `rules <key> <value>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rules {
@@ -377,6 +380,10 @@ pub struct Rules {
     /// Playtest lab only: cards the lab never cuts (`lab ... keep <card>|<card>`).
     #[serde(skip)]
     pub lab_keep: Vec<String>,
+    /// Cards the player never wants in a deck (`data/avoid.txt`): no builder, suggestion or
+    /// playtest change uses them, whatever the simulator thinks.
+    #[serde(skip)]
+    pub avoid: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -406,6 +413,7 @@ impl Default for Rules {
             focus_us: 1.0,
             land_goal_override: None,
             lab_keep: Vec::new(),
+            avoid: Vec::new(),
         }
     }
 }
@@ -417,7 +425,27 @@ impl Rules {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
         r.data_dir = path.parent().map(Path::to_path_buf);
+        r.load_avoid();
         r
+    }
+
+    /// Reads the never-use list from `<data dir>/avoid.txt` (one card per line).
+    pub fn load_avoid(&mut self) {
+        self.avoid = self
+            .data_dir
+            .as_ref()
+            .and_then(|d| fs::read_to_string(d.join(AVOID_FILE)).ok())
+            .unwrap_or_default()
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(String::from)
+            .collect();
+    }
+
+    /// True when the player never wants `name` in a deck.
+    pub fn avoids(&self, name: &str) -> bool {
+        self.avoid.iter().any(|a| a.eq_ignore_ascii_case(name))
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {

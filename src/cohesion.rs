@@ -131,7 +131,9 @@ pub fn jobs(card: &Card) -> Vec<Job> {
             && (l.contains("add {") || l.contains("add one mana") || l.contains("add x mana"))
             && !l.contains("can't be spent")
     });
-    if taps_for_mana || has("search your library for a basic land") || has("landcycling") {
+    // Landcycling isn't ramp: the card is a land in all but name and counts toward the land
+    // cap (see `mana`).
+    if taps_for_mana || has("search your library for a basic land") {
         out.push(Job::Ramp);
     }
     if creature {

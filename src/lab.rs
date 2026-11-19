@@ -427,12 +427,14 @@ pub fn explore_with(
         notes.push("No opponent decks to play against (no league roster?).".to_string());
     }
     let prep = Prepared::new(&base, db);
-    let base_lands = analysis::land_count(&base, db);
+    // Land-equivalents (lands and landcyclers): the land cap counts both, so a landcycler
+    // can't slip a 27th land in through a spell slot.
+    let base_lands = crate::mana::land_equivalents(&base, db);
     // At the league's land goal (26 of 60) a spell isn't swapped for a basic, and below it
     // a basic isn't cut: the land count is a check of its own, reported apart.
     let land_goal = analysis::land_goal(rules);
     let at_goal = base_lands >= land_goal;
-    let is_land = |n: &str| db.get(n).is_some_and(|c| c.is_land());
+    let is_land = |n: &str| db.get(n).is_some_and(crate::mana::is_land_equivalent);
     // Cards the user locked in (`lab ... keep`) are never cut.
     let kept = |n: &str| rules.lab_keep.iter().any(|k| k == n);
     let swap_ok = |s: &Swap| {

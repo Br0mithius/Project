@@ -101,6 +101,17 @@ fn main() {
         .iter()
         .map(|f| Deck::load(std::path::Path::new(f), &db).unwrap())
         .collect();
+    // Same size or it's no comparison: a short deck draws its best cards more often.
+    for (f, d) in files.iter().zip(&loaded) {
+        let n = d.total_count(&rules);
+        if n != rules.deck_size {
+            eprintln!(
+                "{} has {} cards, not {}: fix it before comparing.",
+                f, n, rules.deck_size
+            );
+            std::process::exit(2);
+        }
+    }
     let base = Prepared::new(&loaded[0], &db);
     let mut paired = vec![true];
     let mut decks = vec![base.with_swaps(&[])];

@@ -148,6 +148,7 @@ pub fn app_rules(data_dir: &std::path::Path, session: Option<u32>) -> Rules {
         let _ = apply_session(&mut rules, n);
     }
     rules.data_dir = Some(data_dir.to_path_buf());
+    rules.load_avoid();
     rules
 }
 
