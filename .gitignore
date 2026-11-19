@@ -17,3 +17,4 @@ data/gauntlet_cache.json
 data/gauntlet_cache.json.tmp*
 data/table.json
 data/games.json
+data/unavailable.txt

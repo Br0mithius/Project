@@ -26,6 +26,8 @@ pub struct OptState {
     pub claims: Option<ClaimReport>,
     /// Score weight of the next table (0..1).
     pub table_weight: Option<f32>,
+    /// The "not claimable" name box.
+    pub unavailable_text: String,
 }
 
 impl GuiApp {
@@ -176,6 +178,34 @@ impl GuiApp {
                 {
                     self.start_opt(true, Effort::QUICK);
                 }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Not claimable (ghost listings):").on_hover_text(
+                "Cards Mana Mixer still lists in the trade pool after someone took them (e.g. as a Shop purchase). Claim tests and upgrades skip them.",
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.opt.unavailable_text)
+                    .hint_text("card name")
+                    .desired_width(200.0),
+            );
+            if ui.button("Mark").clicked() {
+                let q = self.opt.unavailable_text.trim().to_string();
+                match self.db.get(&q).map(|c| c.name.clone()) {
+                    Some(name) => match crate::upgrades::mark_unavailable(&self.data_dir, &name) {
+                        Ok(()) => {
+                            self.public_pool = crate::upgrades::load_public_pool(&self.data_dir);
+                            self.status = format!("{} marked not claimable.", name);
+                            self.opt.unavailable_text.clear();
+                        }
+                        Err(e) => self.status = format!("Couldn't save: {}", e),
+                    },
+                    None => self.status = format!("Not a card: {}", q),
+                }
+            }
+            let gone = crate::upgrades::unavailable(&self.data_dir);
+            if !gone.is_empty() {
+                ui.label(RichText::new(gone.join(", ")).small().weak());
             }
         });
         ui.separator();

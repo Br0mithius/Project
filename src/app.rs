@@ -154,6 +154,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Log a real game (opponents default to your ticked next table); `game seen` adds cards an opponent played",
     ),
     (
+        "unavailable",
+        "[<card>]",
+        "Mark a trade-pool card as not claimable (a ghost listing); without a name, list them",
+    ),
+    (
         "games",
         "",
         "Your real record, by opponent, against what the simulator predicts for your deck",
@@ -356,6 +361,7 @@ impl App {
             "optimize" | "optimise" => self.optimize(rest),
             "claims" => self.claims(rest),
             "game" => self.game(rest),
+            "unavailable" => self.unavailable(rest),
             "games" => self.games(),
             "measure" => self.measure(rest),
             "lands" => self.lands(),
@@ -2137,6 +2143,36 @@ impl App {
         }
     }
 
+    fn unavailable(&mut self, arg: &str) {
+        let arg = arg.trim();
+        if arg.is_empty() {
+            let names = crate::upgrades::unavailable(&self.data_dir);
+            if names.is_empty() {
+                println!("No cards marked unavailable.");
+            } else {
+                println!(
+                    "Not claimable (skipped by `claims` and `upgrades`): {}",
+                    names.join(", ")
+                );
+            }
+            return;
+        }
+        let name = match self.db.lookup(arg) {
+            crate::db::Lookup::Found(c) => c.name.clone(),
+            _ => {
+                println!("Not a card: {}", arg);
+                return;
+            }
+        };
+        match crate::upgrades::mark_unavailable(&self.data_dir, &name) {
+            Ok(()) => println!(
+                "{} marked unavailable: claim tests and upgrades skip it.",
+                name
+            ),
+            Err(e) => println!("Couldn't save: {}", e),
+        }
+    }
+
     fn games(&mut self) {
         let log = crate::games::GameLog::load(&self.data_dir);
         if log.games.is_empty() {
@@ -2217,6 +2253,26 @@ impl App {
                 }
             }
         };
+        // Never cards known to be unclaimable (ghost listings).
+        let gone = crate::upgrades::unavailable(&self.data_dir);
+        let skipped: Vec<String> = names
+            .iter()
+            .filter(|n| gone.iter().any(|g| g.eq_ignore_ascii_case(n)))
+            .cloned()
+            .collect();
+        let names: Vec<String> = names
+            .into_iter()
+            .filter(|n| !gone.iter().any(|g| g.eq_ignore_ascii_case(n)))
+            .collect();
+        if !skipped.is_empty() {
+            println!(
+                "{}",
+                self.style.dim(&format!(
+                    "Skipped (marked unavailable): {}.",
+                    skipped.join(", ")
+                ))
+            );
+        }
         if names.is_empty() {
             println!(
                 "No cards to test: save the Public Pool first (`publicpool <file>`) or give a list file."

@@ -54,10 +54,58 @@ fn floor_for(card: &Card) -> Option<&'static str> {
     }
 }
 
-/// The Public Pool list saved from Mana Mixer (`data/public_pool.txt`).
+/// Cards Mana Mixer lists in the trade pool that can't actually be claimed (taken as Shop
+/// purchases while still listed): `data/unavailable.txt`, one name per line.
+pub const UNAVAILABLE_FILE: &str = "unavailable.txt";
+
+/// The names in `data/unavailable.txt`.
+pub fn unavailable(data_dir: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(data_dir.join(UNAVAILABLE_FILE))
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| {
+            l.trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim()
+                .to_string()
+        })
+        .collect()
+}
+
+/// Marks a card as not claimable (kept in `data/unavailable.txt`).
+pub fn mark_unavailable(data_dir: &std::path::Path, name: &str) -> std::io::Result<()> {
+    let mut names = unavailable(data_dir);
+    if !names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+        names.push(name.to_string());
+    }
+    let mut out = String::from(
+        "# Listed in the trade pool but not claimable (e.g. taken as Shop purchases). One per line.\n",
+    );
+    for n in names {
+        out += &n;
+        out.push('\n');
+    }
+    std::fs::write(data_dir.join(UNAVAILABLE_FILE), out)
+}
+
+/// The Public Pool list saved from Mana Mixer (`data/public_pool.txt`), without the cards
+/// marked unavailable.
 pub fn load_public_pool(data_dir: &std::path::Path) -> Collection {
     let path = data_dir.join("public_pool.txt");
-    Collection::load(&path).unwrap_or_else(|_| Collection::new(path, Default::default()))
+    let mut c =
+        Collection::load(&path).unwrap_or_else(|_| Collection::new(path, Default::default()));
+    for n in unavailable(data_dir) {
+        let key = c
+            .counts
+            .keys()
+            .find(|k| k.eq_ignore_ascii_case(&n))
+            .cloned();
+        if let Some(k) = key {
+            c.counts.remove(&k);
+        }
+    }
+    c
 }
 
 /// Saves a pasted Public Pool list (any format the pool import reads).
@@ -278,5 +326,24 @@ mod tests {
             }
             assert!(u.gain >= 0.25);
         }
+    }
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    #[test]
+    fn marked_cards_leave_the_public_pool() {
+        let dir = std::env::temp_dir().join(format!("msh_unavail_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("public_pool.txt"), "1 Propaganda\n1 Opt\n").unwrap();
+        mark_unavailable(&dir, "Propaganda").unwrap();
+        mark_unavailable(&dir, "propaganda").unwrap(); // no duplicate
+        assert_eq!(unavailable(&dir), ["Propaganda"]);
+        let pool = load_public_pool(&dir);
+        assert!(pool.counts.contains_key("Opt"));
+        assert!(!pool.counts.contains_key("Propaganda"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
