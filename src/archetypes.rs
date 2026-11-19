@@ -1485,7 +1485,8 @@ mod tests {
         assert_eq!(deck.total_count(&rules), 60);
         let st = analysis::stats(&deck, &db);
         let t = targets(arch("Storied"));
-        assert_eq!(st.lands, t.lands.unwrap());
+        // Targets above the land cap are capped (no builder goes past 26 of 60).
+        assert_eq!(st.lands, t.lands.unwrap().min(analysis::land_cap(&rules)));
         assert!(st.creatures >= t.creatures, "{} creatures", st.creatures);
         let r = deck_report(arch("Storied"), &deck, &db).unwrap();
         assert!(r.cards.len() >= t.package as usize);
@@ -1495,5 +1496,31 @@ mod tests {
         // Archetypes whose targets didn't hold up keep the plain auto-build.
         let elf = db.get("Thranduil, Sindarin Liege").unwrap();
         assert!(autobuild(elf, &db, &all, &rules, None, None).2.is_none());
+    }
+
+    /// A lock-out control build: every spell does a job, the land cap holds, and the lock
+    /// quota is met.
+    #[test]
+    fn control_build_has_no_filler() {
+        let db = db();
+        let all = all(&db);
+        let mut rules = crate::db::Rules::default();
+        let _ = crate::league::apply_session(&mut rules, 6);
+        let cmd = db.get("Thanos, the Mad Titan").unwrap();
+        let (deck, _, a) = autobuild(cmd, &db, &all, &rules, None, None);
+        assert!(a.unwrap().name.contains("control"));
+        assert!(analysis::land_count(&deck, &db) <= analysis::land_cap(&rules));
+        let filler: Vec<String> = analysis::resolved(&deck, &db)
+            .iter()
+            .filter(|(c, _)| crate::cohesion::is_filler(c))
+            .map(|(c, _)| c.name.clone())
+            .collect();
+        assert!(filler.is_empty(), "filler: {:?}", filler);
+        let locks: u32 = analysis::resolved(&deck, &db)
+            .iter()
+            .filter(|(c, _)| crate::cohesion::jobs(c).contains(&crate::cohesion::Job::Lock))
+            .map(|(_, k)| *k)
+            .sum();
+        assert!(locks >= 5, "{} locks", locks);
     }
 }
