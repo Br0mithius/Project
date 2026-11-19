@@ -612,6 +612,19 @@ pub fn build(
 ) -> (Deck, u32) {
     let scale = rules.deck_size as f32 / 60.0;
     let n = |x: u32| (x as f32 * scale).round() as u32;
+    // Control decks take only cards that do a job (answers, locks, card advantage, ramp,
+    // creatures with a use): a fixed creature quota filled by score let vanilla bodies in,
+    // because a plain body scores like an average card.
+    let full_coll = coll;
+    let job_coll;
+    let cohesive = arch.name.to_lowercase().contains("control");
+    let coll = if cohesive {
+        job_coll = crate::cohesion::without_filler(coll, db);
+        &job_coll
+    } else {
+        coll
+    };
+    let land_cap = analysis::land_cap(rules);
     let mut start = Deck::new(&format!("{} ({})", arch.name, cmd.name));
     start.commander = Some(cmd.name.clone());
     let identity = cmd.identity();
@@ -638,7 +651,10 @@ pub fn build(
         &mut start,
         db,
         wanted,
-        t.lands.map(n).unwrap_or(analysis::land_range(rules).0),
+        t.lands
+            .map(n)
+            .unwrap_or(analysis::land_range(rules).0)
+            .min(land_cap),
     );
     let main = start.main_target(rules);
     let topend = |deck: &Deck| -> u32 {
@@ -703,6 +719,28 @@ pub fn build(
             (t.counters, &|c: &Card| c.has_role(Role::Counter)),
             (t.creatures, &|c: &Card| c.is_creature()),
         ];
+        // Lock-out control: the plan's jobs come first - locks, answers, card advantage,
+        // ramp - and only then creatures. Locks score low one card at a time, so without
+        // their own quota the score-driven fill left them out.
+        if cohesive {
+            use crate::cohesion::{Job, jobs};
+            let has_job = |c: &Card, js: &[Job]| jobs(c).iter().any(|j| js.contains(j));
+            let job_quotas: [(u32, &[Job]); 4] = [
+                (5, &[Job::Lock]),
+                (9, &[Job::Removal, Job::Sweeper]),
+                (7, &[Job::CardAdvantage]),
+                (8, &[Job::Ramp]),
+            ];
+            for (min, js) in job_quotas {
+                let f = |c: &Card| has_job(c, js);
+                while count(&deck, &f) < n(min) && spells(&deck) < slots {
+                    match pick(&deck, &f) {
+                        Some(name) => deck.add(&name, 1),
+                        None => break,
+                    }
+                }
+            }
+        }
         for (min, f) in quotas {
             while count(&deck, f) < n(min) && spells(&deck) < slots {
                 match pick(&deck, f) {
@@ -717,11 +755,22 @@ pub fn build(
                 None => break,
             }
         }
+        // Out of job cards: the best remaining real card, never extra basics (padding with
+        // basics is how decks went past the land cap).
+        while spells(&deck) < slots {
+            match analysis::suggestions_within(&deck, db, full_coll, rules, Some(plays))
+                .into_iter()
+                .next()
+            {
+                Some(s) => deck.add(&s.card.name, 1),
+                None => break,
+            }
+        }
         let short = slots.saturating_sub(spells(&deck));
         (deck, short)
     };
     let deck = match t.lands {
-        Some(l) => fill(n(l)),
+        Some(l) => fill(n(l).min(land_cap)),
         None => {
             // As auto-build: re-check the land count against the curve.
             let mut lands = analysis::recommended_lands(3.0, rules);

@@ -284,6 +284,81 @@ impl OptReport {
     }
 }
 
+/// `deck` with every filler card (no job) swapped for the best job card left in `coll`.
+fn replace_filler(
+    deck: &Deck,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    cohesive: bool,
+    notes: &mut Vec<String>,
+) -> Deck {
+    let mut d = deck.clone();
+    // Never above the land cap: trim basics (the most plentiful first) for the best spells.
+    let cap = crate::analysis::land_cap(rules);
+    let mut trimmed = Vec::new();
+    while crate::analysis::land_count(&d, db) > cap {
+        let Some(basic) = d
+            .cards
+            .iter()
+            .filter(|(n, _)| db.get(n).is_some_and(|c| c.is_basic()))
+            .max_by_key(|(_, k)| **k)
+            .map(|(n, _)| n.clone())
+        else {
+            break;
+        };
+        let Some(s) = crate::analysis::suggestions(&d, db, coll, rules)
+            .into_iter()
+            .find(|s| !s.card.is_land())
+        else {
+            break;
+        };
+        d.remove(&basic, 1);
+        d.add(&s.card.name, 1);
+        trimmed.push(format!("{} -> {}", basic, s.card.name));
+    }
+    if !trimmed.is_empty() {
+        notes.push(format!(
+            "Lands trimmed to the cap of {}: {}.",
+            cap,
+            trimmed.join(", ")
+        ));
+    }
+    if !cohesive {
+        return d;
+    }
+    let filler: Vec<String> = d
+        .cards
+        .keys()
+        .filter(|n| db.get(n).is_some_and(crate::cohesion::is_filler))
+        .cloned()
+        .collect();
+    let mut swaps = Vec::new();
+    for f in filler {
+        let copies = d.count_of(&f);
+        d.remove(&f, copies);
+        for _ in 0..copies {
+            match crate::analysis::suggestions(&d, db, coll, rules)
+                .into_iter()
+                .next()
+            {
+                Some(s) => {
+                    swaps.push(format!("{} -> {}", f, s.card.name));
+                    d.add(&s.card.name, 1);
+                }
+                None => d.add(&f, 1),
+            }
+        }
+    }
+    if !swaps.is_empty() {
+        notes.push(format!(
+            "Filler swapped for cards that do a job before the search: {}.",
+            swaps.join(", ")
+        ));
+    }
+    d
+}
+
 /// Whole-deck candidates for `cmd`: the auto-builds the program knows (default, singleton,
 /// every archetype the commander fits), complete and distinct.
 fn candidates(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> Vec<(String, Deck)> {
@@ -337,6 +412,18 @@ pub fn optimize(
     let mut notes = Vec::new();
     let mut steps = Vec::new();
     let screen = effort.confirm / 2;
+    // Control decks: only cards that do a job, and any filler already in the deck is
+    // swapped for the best card that does one before the search starts.
+    let cohesive = crate::analysis::cohesive_plan(cmd);
+    let job_coll;
+    let coll = if cohesive {
+        job_coll = crate::cohesion::without_filler(coll, db);
+        &job_coll
+    } else {
+        coll
+    };
+    let original = deck;
+    let deck = &replace_filler(deck, db, coll, rules, cohesive, &mut notes);
     // ------------------------------------------------ whole-deck candidates
     progress.set_stage("Building candidate decks");
     let cands: Vec<(String, Deck)> = candidates(cmd, db, coll, rules)
@@ -417,10 +504,10 @@ pub fn optimize(
         }
     }
     // ------------------------------------------------ final check on games no stage saw
-    let final_gain = if canon(&cur) != canon(deck) {
+    let final_gain = if canon(&cur) != canon(original) {
         progress.set_stage("Final check against your deck on fresh games");
         let g = compare(
-            deck,
+            original,
             std::slice::from_ref(&cur),
             db,
             opp,
@@ -437,7 +524,7 @@ pub fn optimize(
         None
     };
     Some(OptReport {
-        start: deck.clone(),
+        start: original.clone(),
         best: cur,
         steps,
         final_gain,

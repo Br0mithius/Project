@@ -397,6 +397,14 @@ pub fn explore_with(
 ) -> Option<LabReport> {
     let start = std::time::Instant::now();
     let mut notes = Vec::new();
+    // A control deck's bench holds only cards that do a job (see `cohesion`).
+    let job_coll;
+    let coll = if analysis::cohesive_plan(commander) {
+        job_coll = crate::cohesion::without_filler(coll, db);
+        &job_coll
+    } else {
+        coll
+    };
     let same_cmd = deck.commander.as_deref() == Some(commander.name.as_str());
     let piper = if same_cmd && deck.partner.as_deref() == Some(PIPER) {
         deck.piper_color

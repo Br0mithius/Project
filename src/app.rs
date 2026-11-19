@@ -154,6 +154,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Log a real game (opponents default to your ticked next table); `game seen` adds cards an opponent played",
     ),
     (
+        "jobs",
+        "",
+        "What job each card does (lock, removal, draw, ramp, flying, deathtouch...); flags filler",
+    ),
+    (
         "unavailable",
         "[<card>]",
         "Mark a trade-pool card as not claimable (a ghost listing); without a name, list them",
@@ -362,6 +367,7 @@ impl App {
             "claims" => self.claims(rest),
             "game" => self.game(rest),
             "unavailable" => self.unavailable(rest),
+            "jobs" => self.jobs(),
             "games" => self.games(),
             "measure" => self.measure(rest),
             "lands" => self.lands(),
@@ -2141,6 +2147,54 @@ impl App {
             }
             Err(e) => println!("Couldn't save the game log: {}", e),
         }
+    }
+
+    fn jobs(&mut self) {
+        let mut filler = Vec::new();
+        let mut tally: std::collections::BTreeMap<&'static str, u32> = Default::default();
+        for (card, n) in crate::analysis::resolved(&self.deck, &self.db) {
+            if card.is_land() {
+                continue;
+            }
+            let jobs = crate::cohesion::jobs(card);
+            if jobs.is_empty() {
+                filler.push(card.name.clone());
+            }
+            for j in &jobs {
+                *tally.entry(j.label()).or_default() += n;
+            }
+            println!(
+                "  {:<36} {}",
+                card.name,
+                if jobs.is_empty() {
+                    self.style.bold("FILLER - no job")
+                } else {
+                    jobs.iter()
+                        .map(|j| j.label())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            );
+        }
+        let lands = crate::analysis::land_count(&self.deck, &self.db);
+        println!(
+            "Jobs: {}",
+            tally
+                .iter()
+                .map(|(k, v)| format!("{} {}", v, k))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+        println!(
+            "Lands: {} (cap {}). Filler: {}",
+            lands,
+            crate::analysis::land_cap(&self.rules),
+            if filler.is_empty() {
+                "none".to_string()
+            } else {
+                filler.join(", ")
+            }
+        );
     }
 
     fn unavailable(&mut self, arg: &str) {

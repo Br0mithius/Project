@@ -6,6 +6,7 @@ pub mod analysis;
 pub mod app;
 pub mod archetypes;
 pub mod card;
+pub mod cohesion;
 pub mod db;
 pub mod deck;
 pub mod edhrec;

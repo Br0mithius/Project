@@ -344,6 +344,21 @@ pub fn land_goal(rules: &Rules) -> u32 {
     (lo + hi) / 2
 }
 
+/// The most lands any builder puts in a deck: the league's goal (26 of 60, scaled). Past
+/// it a deck floods in real play; the simulator's mana sinks (commander abilities, land
+/// abilities) hide flooding, so it keeps measuring "one more land" as a small gain - which
+/// is why archetype targets of 27-28 had crept in. No builder goes above this.
+pub fn land_cap(rules: &Rules) -> u32 {
+    land_goal(rules)
+}
+
+/// True for the control archetypes: every card must do a job there (no filler, see
+/// `cohesion`).
+pub fn cohesive_plan(cmd: &Card) -> bool {
+    crate::archetypes::for_commander(&cmd.name)
+        .is_some_and(|a| a.name.to_lowercase().contains("control"))
+}
+
 /// Lands for a deck with this average mana value: the bottom of the league's range for a
 /// cheap curve, otherwise its goal (`land_goal`, 26 of 60). Not more for a high curve: the
 /// league's goal is 26, which real-play mana formulas also give a 3.8-average five-colour

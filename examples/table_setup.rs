@@ -25,7 +25,9 @@ fn main() {
             None => (false, who),
         };
         let deck = strong_build(cmd, &db, &rules).expect("commander");
-        table.opponents.retain(|o| !o.player.eq_ignore_ascii_case(who));
+        table
+            .opponents
+            .retain(|o| !o.player.eq_ignore_ascii_case(who));
         table.opponents.push(RealOpponent {
             player: who.to_string(),
             commander: cmd.to_string(),

@@ -93,19 +93,16 @@ pub fn mark_unavailable(data_dir: &std::path::Path, name: &str) -> std::io::Resu
 /// marked unavailable.
 pub fn load_public_pool(data_dir: &std::path::Path) -> Collection {
     let path = data_dir.join("public_pool.txt");
-    let mut c =
-        Collection::load(&path).unwrap_or_else(|_| Collection::new(path, Default::default()));
-    for n in unavailable(data_dir) {
-        let key = c
-            .counts
-            .keys()
-            .find(|k| k.eq_ignore_ascii_case(&n))
-            .cloned();
-        if let Some(k) = key {
-            c.counts.remove(&k);
-        }
-    }
-    c
+    let c = Collection::load(&path)
+        .unwrap_or_else(|_| Collection::new(path.clone(), Default::default()));
+    let gone = unavailable(data_dir);
+    // Rebuilt (not edited in place): ownership lookups use the collection's index.
+    let counts = c
+        .counts
+        .into_iter()
+        .filter(|(k, _)| !gone.iter().any(|g| g.eq_ignore_ascii_case(k)))
+        .collect();
+    Collection::new(path, counts)
 }
 
 /// Saves a pasted Public Pool list (any format the pool import reads).
@@ -344,6 +341,7 @@ mod unavailable_tests {
         let pool = load_public_pool(&dir);
         assert!(pool.counts.contains_key("Opt"));
         assert!(!pool.counts.contains_key("Propaganda"));
+        assert_eq!(pool.owned("Propaganda"), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
