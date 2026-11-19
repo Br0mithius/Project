@@ -215,6 +215,8 @@ pub fn parse_count_line(line: &str) -> Option<(u32, String)> {
 #[derive(Clone)]
 pub struct Collection {
     pub path: PathBuf,
+    /// Read freely, but never edit in place: ownership lookups (`owned`) go through
+    /// `index`, which would then disagree. Use `adjust`, `filtered` or `Collection::new`.
     pub counts: BTreeMap<String, u32>,
     /// Normalised name -> copies owned, for fast lookups.
     index: HashMap<String, u32>,
@@ -287,6 +289,17 @@ impl Collection {
         self.counts = counts;
         self.reindex();
         Ok(())
+    }
+
+    /// A copy holding only the cards `keep` accepts (index rebuilt, so `owned` agrees).
+    pub fn filtered(&self, keep: impl Fn(&str) -> bool) -> Collection {
+        let counts = self
+            .counts
+            .iter()
+            .filter(|(k, _)| keep(k))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        Collection::new(self.path.clone(), counts)
     }
 
     /// Adjusts a count (negative removes) and rewrites the file, keeping comment lines.

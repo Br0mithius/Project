@@ -97,12 +97,7 @@ pub fn load_public_pool(data_dir: &std::path::Path) -> Collection {
         .unwrap_or_else(|_| Collection::new(path.clone(), Default::default()));
     let gone = unavailable(data_dir);
     // Rebuilt (not edited in place): ownership lookups use the collection's index.
-    let counts = c
-        .counts
-        .into_iter()
-        .filter(|(k, _)| !gone.iter().any(|g| g.eq_ignore_ascii_case(k)))
-        .collect();
-    Collection::new(path, counts)
+    c.filtered(|k| !gone.iter().any(|g| g.eq_ignore_ascii_case(k)))
 }
 
 /// Saves a pasted Public Pool list (any format the pool import reads).

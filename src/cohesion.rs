@@ -165,13 +165,7 @@ pub fn is_filler(card: &Card) -> bool {
 pub fn without_filler(coll: &Collection, db: &crate::db::CardDb) -> Collection {
     // Rebuilt with `Collection::new`, not by editing `counts`: ownership lookups go
     // through the collection's index, which must drop the filler too.
-    let counts = coll
-        .counts
-        .iter()
-        .filter(|(name, _)| db.get(name).is_none_or(|card| !is_filler(card)))
-        .map(|(k, v)| (k.clone(), *v))
-        .collect();
-    Collection::new(coll.path.clone(), counts)
+    coll.filtered(|name| db.get(name).is_none_or(|card| !is_filler(card)))
 }
 
 #[cfg(test)]
