@@ -214,6 +214,8 @@ enum Action {
     RemoveList(String),
     /// Replace the deck (a playtest lab suggestion), with a status message.
     ApplyDeck(Deck, String),
+    /// Put a card on the never-use list (true) or take it off (false).
+    Avoid(String, bool),
     RunLab(crate::lab::Effort),
     StopLab,
     /// Measure every card's power by playtests (`true`: every league deck too).
@@ -481,6 +483,7 @@ impl GuiApp {
             r
         };
         rules.data_dir = Some(data_dir.clone());
+        rules.load_avoid();
         let current = paths::decks_dir(&data_dir).join("_current.txt");
         let deck = Deck::load(&current, &db).unwrap_or_else(|_| Deck::new("my deck"));
         let welcome: String = match &deck.commander {
@@ -906,6 +909,23 @@ impl GuiApp {
                         self.sim = None;
                     }
                 }
+                Action::Avoid(name, avoid) => match self.rules.set_avoid(&name, avoid) {
+                    Ok(()) => {
+                        if avoid {
+                            let n = self.deck.count_of(&name);
+                            if n > 0 {
+                                self.deck.remove(&name, n);
+                            }
+                            self.status = format!(
+                                "{} will never be used: no build, suggestion or playtest change adds it. Allow it again from Stats.",
+                                name
+                            );
+                        } else {
+                            self.status = format!("{} can be used again.", name);
+                        }
+                    }
+                    Err(e) => self.status = format!("Couldn't save the never-use list: {}", e),
+                },
                 Action::RulesChanged => {
                     self.rules.session = 0;
                     let _ = self.rules.save(&self.data_dir.join("rules.json"));
@@ -1709,6 +1729,15 @@ impl GuiApp {
                 acts.push(Action::AutoBuild(name.clone(), None));
                 ui.close();
             }
+            let avoided = self.rules.avoids(&name);
+            if ui
+                .button(if avoided { "Allow this card again" } else { "Never use this card" })
+                .on_hover_text("Never-use cards are left out of every build, suggestion and playtest change, whatever the simulator thinks of them.")
+                .clicked()
+            {
+                acts.push(Action::Avoid(name.clone(), !avoided));
+                ui.close();
+            }
             if ui.button("Inspect").clicked() {
                 acts.push(Action::Select(name.clone()));
                 ui.close();
@@ -2174,6 +2203,14 @@ impl GuiApp {
                                 }
                                 if ui.button("Add another").clicked() {
                                     acts.push(Action::Add(name.clone(), 1));
+                                    ui.close();
+                                }
+                                if ui
+                                    .button("Never use this card")
+                                    .on_hover_text("Removes it and keeps it out of every build, suggestion and playtest change.")
+                                    .clicked()
+                                {
+                                    acts.push(Action::Avoid(name.clone(), true));
                                     ui.close();
                                 }
                             });
@@ -3987,7 +4024,10 @@ impl GuiApp {
                         .as_ref()
                         .and_then(|c| crate::archetypes::for_commander(c));
                     let (rec, why) = match arch.and_then(|a| crate::archetypes::targets(a).lands) {
-                        Some(n) => (n.clamp(lo, hi), " for this archetype"),
+                        Some(n) => (
+                            n.clamp(lo, hi).min(analysis::land_cap(&self.rules)),
+                            " for this archetype",
+                        ),
                         None => (analysis::recommended_lands(st.avg_mv, &self.rules), ""),
                     };
                     ui.label(format!(
@@ -4021,6 +4061,18 @@ impl GuiApp {
                         .map(|(n, p)| format!("{} {:.0}%", n, p * 100.0))
                         .collect();
                     ui.label(RichText::new(format!("Hardest to cast: {}", hard.join(" · "))).small());
+                    if ui
+                        .small_button("Re-pick basics for castability")
+                        .on_hover_text("Keeps the same number of basic lands but chooses them so your spells are castable on curve as often as possible. Undo goes back.")
+                        .clicked()
+                    {
+                        let mut d = self.deck.clone();
+                        let (before, after) = crate::mana::rebalance_basics(&mut d, &self.db);
+                        acts.push(Action::ApplyDeck(
+                            d,
+                            format!("Basics re-picked: castable on curve {:.1}% -> {:.1}%.", before * 100.0, after * 100.0),
+                        ));
+                    }
                     ui.add_space(6.0);
                     ui.label(RichText::new("What the deck does").strong());
                     for r in Role::ALL {
@@ -4064,6 +4116,50 @@ impl GuiApp {
                                 self.tab = Tab::Build;
                             }
                         });
+                    }
+                    // What each card is for: jobs tallied, and cards with none (filler).
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Card jobs").strong()).on_hover_text(
+                        "What each spell does for the deck: locks, removal, sweepers, card advantage, ramp, flyers, deathtouch/lifelink, drain. A card with no job is filler.",
+                    );
+                    let mut tally: std::collections::BTreeMap<&'static str, u32> = Default::default();
+                    let mut filler: Vec<String> = Vec::new();
+                    for (card, n) in analysis::resolved(&self.deck, &self.db) {
+                        if card.is_land() {
+                            continue;
+                        }
+                        let jobs = crate::cohesion::jobs(card);
+                        if jobs.is_empty() {
+                            filler.push(card.name.clone());
+                        }
+                        for j in jobs {
+                            *tally.entry(j.label()).or_default() += n;
+                        }
+                    }
+                    for (job, n) in &tally {
+                        ui.label(format!("{}: {}", job, n));
+                    }
+                    if filler.is_empty() {
+                        ui.label(RichText::new("No filler: every spell has a job.").color(Color32::from_rgb(150, 220, 150)));
+                    } else {
+                        ui.label(RichText::new(format!("Filler ({}): no job", filler.len())).color(Color32::from_rgb(255, 190, 110)));
+                        for name in filler {
+                            if ui.link(&name).clicked() {
+                                acts.push(Action::Select(name.clone()));
+                                self.tab = Tab::Build;
+                            }
+                        }
+                    }
+                    if !self.rules.avoid.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Never used").strong()).on_hover_text(
+                            "Cards you ruled out (right-click a card > Never use this card). Click one to allow it again.",
+                        );
+                        for name in self.rules.avoid.clone() {
+                            if ui.link(format!("{} (allow again)", name)).clicked() {
+                                acts.push(Action::Avoid(name, false));
+                            }
+                        }
                     }
                 });
                 ui.separator();

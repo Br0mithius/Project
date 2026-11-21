@@ -150,7 +150,7 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
     ),
     (
         "game",
-        "won|lost [vs <player>, ...] | seen <player>: <card>; <card>",
+        "won|lost [<turns>] [flooded|fine|short] [vs <player>, ...] | seen <player>: <card>; <card>",
         "Log a real game (opponents default to your ticked next table); `game seen` adds cards an opponent played",
     ),
     (
@@ -2112,6 +2112,17 @@ impl App {
             println!("Usage: game won|lost [vs <player>, ...]");
             return;
         };
+        // Optional notes before "vs": a number = turns the game lasted; flooded / fine / short.
+        let head = lower.split(" vs ").next().unwrap_or("");
+        let turns: u32 = head
+            .split_whitespace()
+            .find_map(|w| w.parse().ok())
+            .unwrap_or(0);
+        let mana = ["flooded", "fine", "short"]
+            .iter()
+            .find(|m| head.contains(*m))
+            .map(|m| m.to_string())
+            .unwrap_or_default();
         let names: Vec<String> = match lower.find(" vs ") {
             Some(i) => arg[i + 4..]
                 .split(',')
@@ -2141,6 +2152,16 @@ impl App {
             won,
             winner: if won { "me".into() } else { String::new() },
             notes: String::new(),
+            turns,
+            mana,
+            predicted: crate::games::predict(
+                &self.deck,
+                &crate::table::gauntlet(&table, &self.db),
+                &self.db,
+                &self.rules,
+                400,
+            )
+            .map(|p| p.0),
         });
         match log.save(&self.data_dir) {
             Ok(()) => {
@@ -2163,8 +2184,7 @@ impl App {
 
     fn avoid(&mut self, arg: &str) {
         let arg = arg.trim();
-        let path = self.data_dir.join(crate::db::AVOID_FILE);
-        let mut names = self.rules.avoid.clone();
+        let names = self.rules.avoid.clone();
         if arg.is_empty() {
             if names.is_empty() {
                 println!("Your never-use list is empty.");
@@ -2184,24 +2204,12 @@ impl App {
                 return;
             }
         };
-        if remove {
-            names.retain(|n| !n.eq_ignore_ascii_case(&name));
-        } else if !names.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
-            names.push(name.clone());
-        }
-        let text = format!(
-            "# Cards never used in a deck (one per line).\n{}\n",
-            names.join("\n")
-        );
-        match std::fs::write(&path, text) {
-            Ok(()) => {
-                self.rules.avoid = names;
-                println!(
-                    "{} {} the never-use list.",
-                    name,
-                    if remove { "removed from" } else { "added to" }
-                );
-            }
+        match self.rules.set_avoid(&name, !remove) {
+            Ok(()) => println!(
+                "{} {} the never-use list.",
+                name,
+                if remove { "removed from" } else { "added to" }
+            ),
             Err(e) => println!("Couldn't save: {}", e),
         }
     }
@@ -2332,28 +2340,23 @@ impl App {
                 }
             );
         }
-        // What the simulator predicts for the current deck against the next table.
+        // What the simulator expects for the current deck against the next table.
         let table = crate::table::Table::load(&self.data_dir);
         let g = crate::table::gauntlet(&table, &self.db);
-        if g.is_empty() || self.deck.commander.is_none() {
-            println!("(Tick your next table on Season & Rules to compare with the simulator.)");
-            return;
+        let sim = crate::games::predict(&self.deck, &g, &self.db, &self.rules, 1000);
+        match sim {
+            Some((win, rounds)) => println!(
+                "Simulator now: {:.0}% win rate for this deck against your next table, games of {:.1} rounds.",
+                win * 100.0,
+                rounds
+            ),
+            None => {
+                println!("(Tick your next table on Season & Rules to compare with the simulator.)")
+            }
         }
-        let p = crate::playtest::Prepared::new(&self.deck, &self.db);
-        let o = crate::playtest::lab::play_all(
-            &[&p],
-            &g,
-            &self.rules,
-            2000,
-            0x6A3E,
-            &std::sync::atomic::AtomicUsize::new(0),
-            &std::sync::atomic::AtomicBool::new(false),
-        );
-        let commander = self.deck.commander.clone();
-        println!(
-            "{}",
-            log.record(commander.as_deref()).verdict(o.win_rate(0))
-        );
+        for line in log.calibration(sim.map(|s| s.1)) {
+            println!("{}", line);
+        }
     }
 
     fn claims(&mut self, arg: &str) {

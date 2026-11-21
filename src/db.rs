@@ -456,6 +456,23 @@ impl Rules {
             .collect();
     }
 
+    /// Adds `name` to the never-use list (or takes it off) and saves the list.
+    pub fn set_avoid(&mut self, name: &str, avoid: bool) -> Result<(), String> {
+        let mut names = self.avoid.clone();
+        names.retain(|n| !n.eq_ignore_ascii_case(name));
+        if avoid {
+            names.push(name.to_string());
+        }
+        let dir = self.data_dir.clone().ok_or("no data folder")?;
+        let text = format!(
+            "# Cards never used in a deck (one per line).\n{}\n",
+            names.join("\n")
+        );
+        fs::write(dir.join(AVOID_FILE), text).map_err(|e| e.to_string())?;
+        self.avoid = names;
+        Ok(())
+    }
+
     /// True when the player never wants `name` in a deck.
     pub fn avoids(&self, name: &str) -> bool {
         self.avoid.iter().any(|a| a.eq_ignore_ascii_case(name))

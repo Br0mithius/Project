@@ -19,6 +19,9 @@ pub struct TableUi {
     pub seen_text: String,
     /// The last real-vs-simulated verdict.
     pub verdict: Option<String>,
+    /// Notes for the next game logged: turns it lasted (0 = not noted) and how the mana went.
+    pub turns: u32,
+    pub mana: String,
 }
 
 impl GuiApp {
@@ -340,6 +343,19 @@ impl GuiApp {
             .small(),
         );
         let mut changed = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Optional notes for the game:")
+                .on_hover_text("These tell the program whether real games match the simulator: how long they last and whether your mana works.");
+            ui.label("turns");
+            ui.add(egui::DragValue::new(&mut self.table_ui.turns).range(0..=40))
+                .on_hover_text("How many turns the game lasted (0 = not noted)");
+            ui.label("mana");
+            for (m, label) in [("", "not noted"), ("flooded", "flooded"), ("fine", "fine"), ("short", "short")] {
+                if ui.selectable_label(self.table_ui.mana == m, label).clicked() {
+                    self.table_ui.mana = m.to_string();
+                }
+            }
+        });
         ui.horizontal(|ui| {
             let names: Vec<String> = self.table.next_table().map(|o| o.player.clone()).collect();
             for won in [true, false] {
@@ -371,6 +387,16 @@ impl GuiApp {
                         won,
                         winner: if won { "me".into() } else { String::new() },
                         notes: String::new(),
+                        turns: self.table_ui.turns,
+                        mana: self.table_ui.mana.clone(),
+                        predicted: crate::games::predict(
+                            &self.deck,
+                            &crate::table::gauntlet(&self.table, &self.db),
+                            &self.db,
+                            &self.rules,
+                            400,
+                        )
+                        .map(|p| p.0),
                     });
                     changed = true;
                 }
@@ -483,20 +509,18 @@ impl GuiApp {
                 .clicked()
             {
                 let g = crate::table::gauntlet(&self.table, &self.db);
-                self.table_ui.verdict = Some(if g.is_empty() {
-                    "Tick your next table first.".to_string()
-                } else {
-                    let p = crate::playtest::Prepared::new(&self.deck, &self.db);
-                    let o = crate::playtest::lab::play_all(
-                        &[&p],
-                        &g,
-                        &self.rules,
-                        2000,
-                        0x6A3E,
-                        &std::sync::atomic::AtomicUsize::new(0),
-                        &std::sync::atomic::AtomicBool::new(false),
-                    );
-                    log.record(self.deck.commander.as_deref()).verdict(o.win_rate(0))
+                let sim = crate::games::predict(&self.deck, &g, &self.db, &self.rules, 1000);
+                self.table_ui.verdict = Some(match sim {
+                    None => "Tick your next table first.".to_string(),
+                    Some((win, rounds)) => {
+                        let mut lines = vec![format!(
+                            "Simulator now: {:.0}% win rate for this deck against your next table, games of {:.1} rounds.",
+                            win * 100.0,
+                            rounds
+                        )];
+                        lines.extend(log.calibration(Some(rounds)));
+                        lines.join("\n")
+                    }
                 });
             }
             if let Some(v) = &self.table_ui.verdict {

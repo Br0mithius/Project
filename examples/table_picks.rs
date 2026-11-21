@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 fn main() {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "data".into()));
-    let db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    // As the app does: measured card values decide which cards the picks replace.
+    db.attach_ratings(&dir);
     let table = Table::load(&dir);
     let out = std::env::args().nth(2).map(PathBuf::from);
     for o in &table.opponents {
