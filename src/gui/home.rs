@@ -13,6 +13,10 @@ const GOLD: Color32 = Color32::from_rgb(255, 205, 80);
 #[derive(Default)]
 pub struct HomeState {
     log: Option<(std::time::Instant, crate::games::GameLog)>,
+    /// The simulator's forecast for the current deck against the next table: the deck
+    /// revision it was made for, and (win rate, rounds) once the background run is back.
+    forecast: Option<(u64, Option<(f32, f32)>)>,
+    forecast_rx: Option<std::sync::mpsc::Receiver<(u64, Option<(f32, f32)>)>>,
 }
 
 /// A titled panel.
@@ -52,8 +56,48 @@ impl GuiApp {
             .unwrap_or_default()
     }
 
+    /// Starts (once per deck change) and collects the win-rate forecast.
+    fn forecast(&mut self, ctx: &egui::Context) -> Option<Option<(f32, f32)>> {
+        if let Some(rx) = &self.home.forecast_rx {
+            match rx.try_recv() {
+                Ok(r) => {
+                    self.home.forecast = Some(r);
+                    self.home.forecast_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.home.forecast_rx = None,
+                Err(_) => ctx.request_repaint_after(std::time::Duration::from_millis(400)),
+            }
+        }
+        let stale = self
+            .home
+            .forecast
+            .as_ref()
+            .is_none_or(|(rev, _)| *rev != self.rev);
+        if stale && self.home.forecast_rx.is_none() && self.deck.commander.is_some() {
+            let (deck, db, rules, table, rev) = (
+                self.deck.clone(),
+                self.db.clone(),
+                self.rules.clone(),
+                self.table.clone(),
+                self.rev,
+            );
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let g = crate::table::gauntlet(&table, &db);
+                let _ = tx.send((rev, crate::games::predict(&deck, &g, &db, &rules, 600)));
+            });
+            self.home.forecast_rx = Some(rx);
+        }
+        self.home
+            .forecast
+            .as_ref()
+            .filter(|(rev, _)| *rev == self.rev)
+            .map(|(_, f)| *f)
+    }
+
     pub(super) fn home_tab(&mut self, ui: &mut Ui, _acts: &mut Vec<Action>) {
         let log = self.game_log();
+        let forecast = self.forecast(ui.ctx());
         let lands = crate::mana::land_equivalents(&self.deck, &self.db);
         let cap = analysis::land_cap(&self.rules);
         let total = self.deck.total_count(&self.rules);
@@ -144,6 +188,25 @@ impl GuiApp {
                             ))
                             .color(if filler.is_empty() && lands <= cap { GOOD } else { WARN }),
                         );
+                        match forecast {
+                            Some(Some((win, rounds))) => {
+                                ui.label(format!(
+                                    "Simulator forecast against your next table: wins {:.0}% (an even game is 25%), games of {:.0} rounds",
+                                    win * 100.0,
+                                    rounds
+                                ))
+                                .on_hover_text("600 simulated games against the decks ticked at your next table, with their trade picks in. Log real games to check it.");
+                            }
+                            Some(None) => {
+                                ui.label(RichText::new("No forecast: tick the people at your next table first.").weak());
+                            }
+                            None => {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(RichText::new("Forecasting against your next table...").weak());
+                                });
+                            }
+                        }
                         ui.add_space(4.0);
                         ui.horizontal_wrapped(|ui| {
                             if ui.button("Edit deck").clicked() {
@@ -180,6 +243,17 @@ impl GuiApp {
                     let (cards, single) = s.deck_rules();
                     ui.label(RichText::new(format!("Session {} · {}", s.number, s.date_label())).size(18.0).strong());
                     ui.label(format!("{} · {} cards{}", s.label, cards, if single { ", singleton" } else { "" }));
+                    let days = crate::league::days_until(s);
+                    ui.label(
+                        RichText::new(match days {
+                            0 => "Today".to_string(),
+                            1 => "Tomorrow".to_string(),
+                            d if d > 1 => format!("In {} days", d),
+                            d => format!("{} days ago - pick the next session at the top", -d),
+                        })
+                        .color(if (0..=2).contains(&days) { WARN } else { GOOD }),
+                    );
+                    ui.label(RichText::new("Trades for the round lock before the session: check Mana Mixer for the exact time.").small().weak());
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui.button("Plan trades").clicked() {

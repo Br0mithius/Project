@@ -341,13 +341,13 @@ fn show_opt_report(ui: &mut Ui, r: &OptReport) {
                 RichText::new("How it got there (each step measured on games that didn't pick it)")
                     .strong(),
             );
-            egui::Grid::new("opt_steps").striped(true).show(ui, |ui| {
-                for st in &r.steps {
+            // Rows, not a grid: a grid column squeezed the description into a narrow strip.
+            for st in &r.steps {
+                ui.horizontal_top(|ui| {
                     ui.label(gain_text(&st.gain));
                     ui.add(egui::Label::new(st.what.as_str()).wrap());
-                    ui.end_row();
-                }
-            });
+                });
+            }
         }
         for n in &r.notes {
             ui.label(RichText::new(n).small().weak());

@@ -1777,7 +1777,10 @@ impl GuiApp {
                         let owned = self.coll.owned(&card.name);
                         let avail = self.available(card);
                         let fits = self.fits(card);
-                        let badge = if card.is_basic() {
+                        let badge = if self.rules.avoids(&card.name) {
+                            // On the never-use list: dimmed, and says so.
+                            Some("never use".into())
+                        } else if card.is_basic() {
                             Some(format!("{} in deck", self.deck.count_of(&card.name)))
                         } else if owned == 0 {
                             Some("not owned".into())
@@ -3712,6 +3715,32 @@ impl GuiApp {
                                     acts.push(Action::Select(card.name.clone()));
                                 }
                                 ui.label(RichText::new(format!("Score {:.1} · fit {:.1} · {} VP", total, fit, vp)).strong().small());
+                                // What the card would do in the deck, and its playtested power.
+                                if !card.is_land() {
+                                    let jobs = crate::cohesion::jobs(card);
+                                    let cat = crate::cohesion::category(card);
+                                    ui.horizontal(|ui| {
+                                        let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                                        ui.painter().rect_filled(r, CornerRadius::same(2), category_color(cat));
+                                        ui.label(
+                                            RichText::new(if jobs.is_empty() {
+                                                "No job: filler".to_string()
+                                            } else {
+                                                jobs.iter().map(|j| j.label()).collect::<Vec<_>>().join(", ")
+                                            })
+                                            .small()
+                                            .color(if jobs.is_empty() {
+                                                Color32::from_rgb(255, 160, 90)
+                                            } else {
+                                                Color32::from_gray(210)
+                                            }),
+                                        );
+                                    });
+                                    if let Some(p) = self.db.sim_values.power(&card.name) {
+                                        ui.label(RichText::new(format!("Playtested {:+.1} ± {:.1} ({} deck{})", p.value, p.se, p.decks, if p.decks == 1 { "" } else { "s" })).small())
+                                            .on_hover_text("Win-rate points over a plain 3-mana creature, measured in simulated games");
+                                    }
+                                }
                                 for w in why.iter().take(4) {
                                     ui.label(RichText::new(format!("• {}", w)).small());
                                 }

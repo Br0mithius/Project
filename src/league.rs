@@ -118,6 +118,11 @@ fn today_days() -> i64 {
         .unwrap_or(0)
 }
 
+/// Days from today until `s` (negative once it has passed).
+pub fn days_until(s: &Session) -> i64 {
+    days_from_civil(s.date.0, s.date.1, s.date.2) - today_days()
+}
+
 /// The next session on or after today (the one you're building for); the finale after that.
 pub fn upcoming_session() -> &'static Session {
     let today = today_days();
