@@ -1853,6 +1853,14 @@ fn read_effects(sentence: &str) -> Vec<Effect> {
     {
         let to = if let Some(i) = s.find("target ") {
             read_target(&s[i + 7..], false)
+        } else if s.starts_with("equipped creature") || s.starts_with("enchanted creature") {
+            // "Equipped creature has hexproof and can't be blocked" (My Precious): the
+            // creature it's attached to, as for the other keywords - not the Equipment.
+            pump_target(if s.starts_with("equipped") {
+                "equipped creature"
+            } else {
+                "enchanted creature"
+            })
         } else if let Some(i) = s
             .find(" can't be blocked")
             .filter(|_| s.contains("you control"))
