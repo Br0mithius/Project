@@ -404,6 +404,11 @@ pub struct GuiApp {
     /// Measured card power list, the card synergy test.
     extra: lab_extra::ExtraState,
     opt: optimize_view::OptState,
+    /// Trade planner: games won since the last round (5 VP each), the claims being
+    /// considered, and the claim search box.
+    trade_wins: u32,
+    trade_claims: Vec<String>,
+    trade_claim_query: String,
     home: home::HomeState,
     /// Archetypes tab.
     arch: arch_tab::ArchState,
@@ -628,6 +633,9 @@ impl GuiApp {
             lab_view: Default::default(),
             extra: Default::default(),
             opt: Default::default(),
+            trade_wins: 0,
+            trade_claims: Vec::new(),
+            trade_claim_query: String::new(),
             arch: Default::default(),
             table: crate::table::Table::default(),
             table_ui: Default::default(),
@@ -3317,10 +3325,10 @@ impl GuiApp {
                 );
             }
         });
-        ui.label(
-            "Each commander is ranked by the full deck auto-build makes from your pool, graded on eight parts below and playtested \
-             in simulated 4-player games. Mono-colour commanders are also tried with The Prismatic Piper adding their two most \
-             promising colours. Scores run 0-100: 50 is your middle option.",
+        home::help(
+            ui,
+            "Your possible commanders, ranked by the deck each makes from your pool.",
+            "Each commander is ranked by the full deck auto-build makes from your pool, graded on eight parts and playtested in simulated 4-player games. Mono-colour commanders are also tried with The Prismatic Piper adding their two most promising colours. Scores run 0-100: 50 is your middle option.",
         );
         ui.horizontal_wrapped(|ui| {
             let data = if self.db.edhrec.is_empty() {
@@ -3630,9 +3638,10 @@ impl GuiApp {
 
     fn draft_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.heading("Draft helper");
-        ui.label(
-            "At a draft, add the cards you see in the pack. They're ranked for your deck: fit with your commander first, \
-             then trade value (VP) and raw strength - worth taking so a table-mate doesn't get it.",
+        home::help(
+            ui,
+            "At a draft, add the cards in the pack to see which to take.",
+            "Cards are ranked for your deck: fit with your commander first, then trade value (VP) and raw strength - worth taking so a table-mate doesn't get it.",
         );
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
@@ -3764,6 +3773,98 @@ impl GuiApp {
             if need.is_some() {
                 ui.label(RichText::new("Rarity floor: claiming a rare needs a rare traded in; a mythic needs a mythic or two rares.").small());
             }
+            // ---- This round: budget, claims and balance in one place.
+            home::card(ui, "This round's budget", |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Games won since last round");
+                    ui.add(egui::DragValue::new(&mut self.trade_wins).range(0..=10))
+                        .on_hover_text("Each win is worth 5 VP this round");
+                });
+                let bonus = self.trade_wins * 5;
+                let mut cost = 0u32;
+                let mut remove = None;
+                let rares_in = plan.iter().filter(|p| p.0.rarity.eq_ignore_ascii_case("rare")).map(|p| p.1).sum::<u32>();
+                let mythics_in = plan.iter().filter(|p| p.0.rarity.eq_ignore_ascii_case("mythic")).map(|p| p.1).sum::<u32>();
+                let mut floor_note = None;
+                ui.label(RichText::new("Claims").strong());
+                if self.trade_claims.is_empty() {
+                    ui.label(RichText::new("None yet - add cards below.").weak());
+                }
+                for (i, name) in self.trade_claims.iter().enumerate() {
+                    let Some(c) = self.db.get(name) else { continue };
+                    let vp = league::vp_value(c) * 2;
+                    cost += vp;
+                    ui.horizontal(|ui| {
+                        if ui.small_button("x").on_hover_text("Remove this claim").clicked() {
+                            remove = Some(i);
+                        }
+                        ui.label(format!("{} VP", vp));
+                        ui.label(name.as_str());
+                        ui.label(RichText::new(&c.rarity).small().weak());
+                    });
+                    if c.rarity.eq_ignore_ascii_case("rare") && rares_in + mythics_in == 0 {
+                        floor_note = Some("A rare claim needs a rare traded in this round: your plan has none.");
+                    }
+                    if c.rarity.eq_ignore_ascii_case("mythic") && mythics_in == 0 && rares_in < 2 {
+                        floor_note = Some("A mythic claim needs a mythic or two rares traded in this round.");
+                    }
+                }
+                if let Some(i) = remove {
+                    self.trade_claims.remove(i);
+                }
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.trade_claim_query)
+                        .hint_text("Add a claim: type a card name...")
+                        .desired_width(260.0),
+                );
+                let q = crate::db::normalize(&self.trade_claim_query);
+                if q.len() >= 2 {
+                    let gone = crate::upgrades::unavailable(&self.data_dir);
+                    let matches: Vec<String> = self
+                        .db
+                        .cards
+                        .iter()
+                        .filter(|c| crate::db::normalize(&c.name).contains(&q))
+                        .filter(|c| !gone.iter().any(|g| g.eq_ignore_ascii_case(&c.name)))
+                        .take(6)
+                        .map(|c| c.name.clone())
+                        .collect();
+                    ui.horizontal_wrapped(|ui| {
+                        for m in matches {
+                            if ui.small_button(&m).clicked() {
+                                self.trade_claims.push(m);
+                                self.trade_claim_query.clear();
+                            }
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+                let have = total + bonus;
+                let balance = have as i64 - cost as i64;
+                ui.label(format!("Trade-ins {} VP + wins {} VP = {} VP · claims {} VP", total, bonus, have, cost));
+                ui.label(
+                    RichText::new(if balance < 0 {
+                        format!("Short by {} VP: add trade-ins or drop a claim.", -balance)
+                    } else if balance > 0 {
+                        format!("{} VP unspent - VP doesn't carry over, so add a claim or trade in less.", balance)
+                    } else {
+                        "Balanced: every VP is spent.".to_string()
+                    })
+                    .strong()
+                    .color(if balance == 0 {
+                        Color32::from_rgb(130, 220, 140)
+                    } else {
+                        Color32::from_rgb(255, 190, 110)
+                    }),
+                );
+                if total < 10 {
+                    ui.label(RichText::new("Trade-ins are under the 10 VP weekly minimum (the shortfall becomes debt).").color(Color32::from_rgb(255, 150, 110)));
+                }
+                if let Some(n) = floor_note {
+                    ui.label(RichText::new(n).color(Color32::from_rgb(255, 150, 110)));
+                }
+            });
+            ui.add_space(6.0);
             // Fixed-width cells in rows that fit the column: a long note under one card used to
             // widen the row past the column and draw the cards over the Values list.
             let cell = 150.0;
@@ -3927,9 +4028,10 @@ impl GuiApp {
             ui.label("Choose a commander first (Commanders tab), then this shows the cards that would improve its deck and how to get them.");
             return;
         }
-        ui.label(
-            "Cards you don't have yet that score better than your deck's weakest card: what's in the Public Pool to claim now, \
-             and what could come in the league packs still to be handed out, with the odds of opening it.",
+        home::help(
+            ui,
+            "Cards you don't own that would improve your deck.",
+            "Cards that score better than your deck's weakest card: what's in the Public Pool to claim now, and what could come in the league packs still to be handed out, with the odds of opening it.",
         );
         let next = league::upcoming_session().number;
         if self.memo.upgrades.is_none() {
@@ -4863,6 +4965,96 @@ impl eframe::App for GuiApp {
                 });
             });
         });
+        // Activity bar: every background job in one place, with progress, Stop, and a click
+        // through to its page. Hidden when nothing is running.
+        let mut jobs: Vec<(String, f32, Tab, Option<Action>, bool)> = Vec::new();
+        if let Some(j) = &self.lab_job {
+            jobs.push((
+                format!("Playtest lab: {}", j.stage()),
+                j.fraction(),
+                Tab::Lab,
+                Some(Action::StopLab),
+                false,
+            ));
+        }
+        if let Some(j) = &self.measure_job {
+            let f = (j.done.load(std::sync::atomic::Ordering::Relaxed) as f32
+                / j.total.max(1) as f32)
+                .min(1.0);
+            jobs.push((
+                "Measuring card power".into(),
+                f,
+                Tab::Lab,
+                Some(Action::StopMeasure),
+                false,
+            ));
+        }
+        if let Some(j) = &self.extra.syn_job {
+            jobs.push((
+                "Card synergy test".into(),
+                j.fraction(),
+                Tab::Lab,
+                Some(Action::StopSynergy),
+                false,
+            ));
+        }
+        if let Some(j) = &self.opt.job {
+            jobs.push((j.label(), j.fraction(), Tab::Lab, None, true));
+        }
+        if let Some(j) = &self.rank_job {
+            let f = (j.done.load(std::sync::atomic::Ordering::Relaxed) as f32
+                / j.total.max(1) as f32)
+                .min(1.0);
+            jobs.push((
+                "Ranking your commanders".into(),
+                f,
+                Tab::Commanders,
+                None,
+                false,
+            ));
+        }
+        if self.data_job.is_some() {
+            jobs.push(("Updating card data".into(), -1.0, self.tab, None, false));
+        }
+        if !jobs.is_empty() {
+            Panel::bottom("activity").show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("Working")
+                            .strong()
+                            .color(Color32::from_rgb(255, 205, 80)),
+                    );
+                    for (label, f, tab, stop, is_opt) in jobs {
+                        ui.separator();
+                        if ui
+                            .link(label.as_str())
+                            .on_hover_text("Go to its page")
+                            .clicked()
+                        {
+                            self.tab = tab;
+                        }
+                        if f >= 0.0 {
+                            ui.add(
+                                egui::ProgressBar::new(f)
+                                    .desired_width(120.0)
+                                    .text(format!("{:.0}%", f * 100.0)),
+                            );
+                        } else {
+                            ui.spinner();
+                        }
+                        if let Some(a) = stop {
+                            if ui.small_button("Stop").clicked() {
+                                acts.push(a);
+                            }
+                        } else if is_opt && ui.small_button("Stop").clicked() {
+                            if let Some(j) = &self.opt.job {
+                                j.cancel();
+                            }
+                        }
+                    }
+                });
+            });
+        }
         if let Some(e) = &self.error {
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading("Something went wrong loading your files");

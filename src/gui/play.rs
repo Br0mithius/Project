@@ -364,11 +364,10 @@ impl GuiApp {
 
     fn play_setup(&mut self, ui: &mut Ui) {
         ui.heading("Play a game by hand");
-        ui.label(
-            "You play the deck from the Deck Builder (seat P0) against three simulated league \
-             opponents, with the same rules engine as the Playtest Lab. You tap your own mana; \
-             every other decision of yours is asked in the side panel, and the bot's suggestion \
-             is always shown. If something looks wrong, press \"Report bug\".",
+        super::home::help(
+            ui,
+            "Play your deck by hand against three simulated opponents.",
+            "You play the deck from the Deck Builder (seat P0) against three simulated league opponents, with the same rules engine as the Playtest Lab. You tap your own mana; every other decision of yours is asked in the side panel, and the bot's suggestion is always shown. If something looks wrong, press \"Report bug\".",
         );
         ui.add_space(8.0);
         ui.label(format!(

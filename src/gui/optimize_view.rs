@@ -19,6 +19,18 @@ pub struct OptJob {
     what: &'static str,
 }
 
+impl OptJob {
+    pub(super) fn fraction(&self) -> f32 {
+        self.progress.fraction()
+    }
+    pub(super) fn label(&self) -> String {
+        format!("{}: {}", self.what, self.progress.stage())
+    }
+    pub(super) fn cancel(&self) {
+        self.progress.cancel();
+    }
+}
+
 #[derive(Default)]
 pub struct OptState {
     pub job: Option<OptJob>,

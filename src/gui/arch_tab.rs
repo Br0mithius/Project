@@ -119,10 +119,10 @@ impl GuiApp {
 
     pub(super) fn archetypes_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.heading("Archetypes");
-        ui.label(
-            "Deck plans the builder recognises: broad Commander archetypes and the league sets' key traits. \
-             Pool fit: how close the cards and commanders you own are to a working deck of that kind (half enablers, \
-             30% payoffs, 20% an owned commander). Deck fit: the same for your current deck.",
+        super::home::help(
+            ui,
+            "Deck plans the builder knows, and how close your pool and deck are to each.",
+            "Broad Commander archetypes and the league sets' key traits. Pool fit: how close the cards and commanders you own are to a working deck of that kind (half enablers, 30% payoffs, 20% an owned commander). Deck fit: the same for your current deck.",
         );
         ui.horizontal_wrapped(|ui| {
             ui.label("Show:");

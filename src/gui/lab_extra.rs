@@ -53,6 +53,13 @@ pub struct SynJob {
     against_table: bool,
 }
 
+impl SynJob {
+    /// How far along the synergy test is (0..1).
+    pub(super) fn fraction(&self) -> f32 {
+        (self.done.load(Ordering::Relaxed) as f32 / self.total.max(1) as f32).min(1.0)
+    }
+}
+
 pub struct ExtraState {
     pub scope: PowerScope,
     pub sort: PowerSort,

@@ -17,13 +17,15 @@ pub struct HomeState {
 
 /// A titled panel.
 pub(super) fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
+    // The frame's margins and border come off the width, so the panel stays in its column.
+    let inner = (ui.available_width() - 32.0).max(120.0);
     egui::Frame::new()
         .fill(Color32::from_rgb(34, 35, 42))
         .stroke(egui::Stroke::new(1.0, Color32::from_rgb(52, 54, 64)))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(14.0)
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
+            ui.set_width(inner);
             ui.label(RichText::new(title).size(16.0).strong().color(GOLD));
             ui.add_space(4.0);
             body(ui);
@@ -228,6 +230,7 @@ impl GuiApp {
 pub(super) fn help(ui: &mut Ui, short: &str, long: &str) {
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(short).weak());
-        ui.label(RichText::new("(?)").color(GOLD)).on_hover_text(long);
+        ui.label(RichText::new("(?)").color(GOLD))
+            .on_hover_text(long);
     });
 }
