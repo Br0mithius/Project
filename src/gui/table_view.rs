@@ -38,15 +38,10 @@ impl GuiApp {
     }
 
     fn table_body(&mut self, ui: &mut Ui) {
-        ui.label(
-            RichText::new(format!(
-                "The people you actually play against: paste each one's decklist, or pick their commander and auto-build \
-                 a strong version (every league card available). Tick who sits at your next table - the Playtest Lab and \
-                 the card synergy test can then play against exactly those decks (\"Play against: my next table\"). \
-                 Saved on this PC only, in {}.",
-                crate::table::FILE
-            ))
-            .small(),
+        super::home::help(
+            ui,
+            "The people you actually play against. Tick who sits at your next table.",
+            "Paste each opponent's decklist, or pick their commander and auto-build a strong version (every league card available). Tick who sits at your next table: the Playtest Lab, the optimiser and the synergy test can then play against exactly those decks. Saved on this PC only, in table.json.",
         );
         let mut changed = false;
         let mut remove = None;

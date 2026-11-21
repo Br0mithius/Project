@@ -122,10 +122,10 @@ impl GuiApp {
     }
 
     pub(super) fn optimize_view(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
-        ui.label(
-            "Searches for the strongest deck by playtests: whole-deck builds raced against each other, then the lab's \
-             swap search round after round, and a final check against your deck on fresh games (a lucky first run \
-             can't fool it). Claims: every Public Pool card you could claim, played in your deck and ranked by gain.",
+        super::home::help(
+            ui,
+            "Finds the strongest version of your deck by playtests, and tests what you could claim.",
+            "Optimise: whole-deck builds are raced against yours, then single swaps are searched round after round, and the result is checked against your deck on fresh games, so a lucky first run can't fool it. Claims: every Public Pool card you could claim is played in your deck and ranked by its gain.",
         );
         let at_table = self.table.next_count(&self.db);
         ui.horizontal_wrapped(|ui| {
@@ -230,15 +230,158 @@ impl GuiApp {
                             ));
                         }
                     }
-                    ui.label(RichText::new(r.text()).monospace());
+                    show_opt_report(ui, r);
                     ui.separator();
                 }
                 if let Some(c) = &self.opt.claims {
-                    ui.label(RichText::new(c.text()).monospace());
+                    show_claims(ui, c);
                 }
                 if self.opt.report.is_none() && self.opt.claims.is_none() {
                     ui.label(RichText::new("No results yet.").weak());
                 }
             });
     }
+}
+
+const GOOD: egui::Color32 = egui::Color32::from_rgb(130, 220, 140);
+const BAD: egui::Color32 = egui::Color32::from_rgb(255, 130, 110);
+
+/// "+2.2 ± 0.4", green when clearly better (2+ standard errors), red when clearly worse.
+fn gain_text(m: &crate::playtest::lab::Measure) -> RichText {
+    let t = RichText::new(format!("{:+.1} ± {:.1}", m.gain * 100.0, m.stderr * 100.0)).monospace();
+    if m.z() >= 2.0 {
+        t.color(GOOD).strong()
+    } else if m.z() <= -2.0 {
+        t.color(BAD)
+    } else {
+        t
+    }
+}
+
+fn show_opt_report(ui: &mut Ui, r: &OptReport) {
+    super::home::card(ui, "Optimiser result", |ui| {
+        ui.label(
+            RichText::new(if r.table_decks > 0 {
+                format!(
+                    "Played against your next table ({} decks, {:.0}% of the score) and the simulated league. Numbers are win-rate points; green = clearly better.",
+                    r.table_decks,
+                    r.table_weight * 100.0
+                )
+            } else {
+                "Played against the simulated league. Numbers are win-rate points; green = clearly better.".to_string()
+            })
+            .small()
+            .weak(),
+        );
+        match &r.final_gain {
+            None => {
+                ui.label(RichText::new("No change held up on fresh games: your deck is already the strongest found.").color(GOOD));
+            }
+            Some(g) => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Optimised deck vs yours, on fresh games:").strong());
+                    ui.label(gain_text(&g.score).size(16.0));
+                    if let Some(t) = &g.table {
+                        ui.label(RichText::new("your table").weak());
+                        ui.label(gain_text(t));
+                    }
+                    if let Some(l) = &g.league {
+                        ui.label(RichText::new("league").weak());
+                        ui.label(gain_text(l));
+                    }
+                });
+                ui.label(if g.score.z() >= 2.0 {
+                    RichText::new("Clearly better: worth playing.").color(GOOD)
+                } else if g.score.gain > 0.0 {
+                    RichText::new(
+                        "Better on these games but within noise: the gain may be small or none.",
+                    )
+                } else {
+                    RichText::new("Not better on fresh games: keep your deck.").color(BAD)
+                });
+                ui.add_space(6.0);
+                let (mut adds, mut cuts) = (Vec::new(), Vec::new());
+                let names: std::collections::BTreeSet<&String> =
+                    r.start.cards.keys().chain(r.best.cards.keys()).collect();
+                for n in names {
+                    let (a, b) = (r.start.count_of(n), r.best.count_of(n));
+                    if b > a {
+                        adds.push(format!("{} {}", b - a, n));
+                    } else if a > b {
+                        cuts.push(format!("{} {}", a - b, n));
+                    }
+                }
+                ui.columns(2, |cols| {
+                    cols[0].label(RichText::new("In").strong().color(GOOD));
+                    for a in &adds {
+                        cols[0].label(format!("+ {}", a));
+                    }
+                    cols[1].label(RichText::new("Out").strong().color(BAD));
+                    for c in &cuts {
+                        cols[1].label(format!("- {}", c));
+                    }
+                });
+            }
+        }
+        if !r.steps.is_empty() {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("How it got there (each step measured on games that didn't pick it)")
+                    .strong(),
+            );
+            egui::Grid::new("opt_steps").striped(true).show(ui, |ui| {
+                for st in &r.steps {
+                    ui.label(gain_text(&st.gain));
+                    ui.add(egui::Label::new(st.what.as_str()).wrap());
+                    ui.end_row();
+                }
+            });
+        }
+        for n in &r.notes {
+            ui.label(RichText::new(n).small().weak());
+        }
+    });
+}
+
+fn show_claims(ui: &mut Ui, c: &ClaimReport) {
+    super::home::card(ui, "Claims tested in your deck", |ui| {
+        ui.label(
+            RichText::new(format!(
+                "{} cards played in your deck in place of the card shown ({} skipped: off-colour, unclaimable or already in). Gain = win-rate points over your deck; the top rows were measured again on fresh games.",
+                c.tested, c.skipped
+            ))
+            .small()
+            .weak(),
+        );
+        egui::Grid::new("claims_grid")
+            .striped(true)
+            .min_col_width(40.0)
+            .show(ui, |ui| {
+                for h in ["Gain", "Card", "Cost", "Replaces", ""] {
+                    ui.label(RichText::new(h).strong());
+                }
+                ui.end_row();
+                for cl in c.claims.iter().take(30) {
+                    let m = cl.confirmed.unwrap_or(cl.screened);
+                    ui.label(gain_text(&m));
+                    ui.label(cl.card.as_str());
+                    ui.label(if cl.vp == 0 {
+                        "shop/tree".to_string()
+                    } else {
+                        format!("{} VP", cl.vp)
+                    });
+                    ui.label(RichText::new(cl.cut.as_str()).weak());
+                    ui.label(
+                        RichText::new(if cl.confirmed.is_some() {
+                            "confirmed"
+                        } else {
+                            "screened only"
+                        })
+                        .small()
+                        .weak(),
+                    );
+                    ui.end_row();
+                }
+            });
+    });
 }

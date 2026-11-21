@@ -2892,10 +2892,10 @@ impl GuiApp {
             lab_extra::LabView::Optimise => return self.optimize_view(ui, acts),
             lab_extra::LabView::Deck => {}
         }
-        ui.label(
-            "The deck builder picks cards by score, and scores can be wrong. The lab plays your deck and changed versions \
-             of it through the same simulated 4-player games, measures what each card and each possible addition is worth, \
-             and confirms the best combination on fresh games. Your deck only changes if you apply a suggestion.",
+        home::help(
+            ui,
+            "Playtests your deck and changed versions of it, and suggests swaps that hold up.",
+            "The deck builder picks cards by score, and scores can be wrong. The lab plays your deck and changed versions of it through the same simulated 4-player games, measures what each card and each possible addition is worth, and confirms the best combination on fresh games. Your deck only changes if you apply a suggestion.",
         );
         ui.add_space(4.0);
         let has_cmd = self.deck.commander.is_some();

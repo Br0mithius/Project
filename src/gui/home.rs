@@ -223,3 +223,11 @@ impl GuiApp {
         });
     }
 }
+
+/// A one-line summary with the full explanation on hover (a "(?)" marks it).
+pub(super) fn help(ui: &mut Ui, short: &str, long: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(short).weak());
+        ui.label(RichText::new("(?)").color(GOLD)).on_hover_text(long);
+    });
+}
