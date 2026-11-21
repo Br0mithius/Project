@@ -141,6 +141,8 @@ struct Settings {
     text_scale: f32,
     /// Brighter secondary text, for readability.
     high_contrast: bool,
+    /// Deck columns grouped by what the cards do (locks, answers...) instead of mana value.
+    group_by_job: bool,
 }
 
 /// The opponents the playtest lab plays against.
@@ -210,6 +212,7 @@ impl Default for Settings {
             lab_target: LabTarget::League,
             text_scale: 1.0,
             high_contrast: false,
+            group_by_job: false,
         }
     }
 }
@@ -447,6 +450,20 @@ fn migrate_old_images(data_dir: &std::path::Path, images_dir: &std::path::Path, 
         }
     }
     let _ = std::fs::remove_dir(&old); // only succeeds if now empty
+}
+
+/// The stripe colour for a card's main job.
+fn category_color(c: crate::cohesion::Category) -> Color32 {
+    use crate::cohesion::Category::*;
+    match c {
+        Lock => Color32::from_rgb(150, 120, 235),
+        Answer => Color32::from_rgb(225, 95, 95),
+        Cards => Color32::from_rgb(90, 160, 240),
+        Ramp => Color32::from_rgb(95, 200, 120),
+        Threat => Color32::from_rgb(240, 200, 80),
+        Filler => Color32::from_rgb(255, 140, 60),
+        Land => Color32::from_gray(120),
+    }
 }
 
 /// Secondary ("weak") text colour: the default dark-theme grey is dim at small sizes, so it
@@ -2090,6 +2107,15 @@ impl GuiApp {
                     ui.separator();
                     ui.selectable_value(&mut self.settings.visual_deck, true, "Cards");
                     ui.selectable_value(&mut self.settings.visual_deck, false, "List");
+                    ui.separator();
+                    ui.label(RichText::new("Group by").weak());
+                    let before = self.settings.group_by_job;
+                    ui.selectable_value(&mut self.settings.group_by_job, false, "mana value");
+                    ui.selectable_value(&mut self.settings.group_by_job, true, "job")
+                        .on_hover_text("Columns by what the cards do: locks, answers, card advantage, ramp, threats - and filler, cards with no job.");
+                    if before != self.settings.group_by_job {
+                        self.save_settings();
+                    }
                 });
                 // The Prismatic Piper offer for mono-colour commanders.
                 if let Some(cmd) = self.deck.commander.as_ref().and_then(|c| self.db.get(c)) {
@@ -2152,12 +2178,19 @@ impl GuiApp {
                 let st = analysis::stats(&self.deck, &self.db);
                 let (lo, hi) = analysis::land_range(&self.rules);
                 ui.label(
-                    RichText::new(format!("Lands: {} (league advice {}-{})", st.lands, lo, hi))
-                        .color(if st.lands >= lo.saturating_sub(1) && st.lands <= hi + 1 {
+                    RichText::new(format!(
+                        "Lands: {} (cap {}) · castable on curve {:.0}%",
+                        st.lands,
+                        analysis::land_cap(&self.rules),
+                        crate::mana::castability(&self.deck, &self.db).mean * 100.0
+                    ))
+                    .color(
+                        if st.lands >= lo.saturating_sub(1) && st.lands <= hi + 1 {
                             Color32::from_rgb(140, 220, 140)
                         } else {
                             Color32::from_rgb(255, 190, 110)
-                        }),
+                        },
+                    ),
                 );
             });
             ui.separator();
@@ -2178,10 +2211,16 @@ impl GuiApp {
 
     /// Cards in columns by mana value, stacked like a real table spread.
     fn visual_deck(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        let by_job = self.settings.group_by_job;
         let mut cols: Vec<Vec<(Card, u32)>> = vec![Vec::new(); 7];
         for (name, n) in self.deck.cards.clone() {
             if let Some(c) = self.card(&name).cloned() {
-                let col = if c.is_land() {
+                let col = if by_job {
+                    crate::cohesion::Category::ALL
+                        .iter()
+                        .position(|k| *k == crate::cohesion::category(&c))
+                        .unwrap_or(5)
+                } else if c.is_land() {
                     6
                 } else {
                     analysis::curve_bucket(c.mana_value())
@@ -2189,6 +2228,17 @@ impl GuiApp {
                 cols[col].push((c, n));
             }
         }
+        // The colour key for the stripe on each card.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for k in crate::cohesion::Category::ALL.iter().take(6) {
+                let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(r, CornerRadius::same(2), category_color(*k));
+                ui.label(RichText::new(k.label()).small());
+                ui.add_space(6.0);
+            }
+        });
         for col in cols.iter_mut() {
             col.sort_by(|a, b| {
                 a.0.cmc
@@ -2212,7 +2262,9 @@ impl GuiApp {
                     let col = &cols[i];
                     ui.vertical(|ui| {
                         let count: u32 = col.iter().map(|(_, n)| n).sum();
-                        let title = if i == 6 {
+                        let title = if by_job {
+                            crate::cohesion::Category::ALL[i].label().to_string()
+                        } else if i == 6 {
                             "Lands".to_string()
                         } else {
                             format!("MV {}", curve_label(i))
@@ -2260,6 +2312,16 @@ impl GuiApp {
                                 },
                                 resp.hovered(),
                             );
+                            // A stripe in the colour of the card's job (orange = filler).
+                            let cat = crate::cohesion::category(card);
+                            if cat != crate::cohesion::Category::Land {
+                                let visible = if k + 1 == col.len() { full.y } else { step };
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(rect.min, vec2(4.0, visible)),
+                                    CornerRadius::ZERO,
+                                    category_color(cat),
+                                );
+                            }
                             if resp.clicked() {
                                 acts.push(Action::Select(card.name.clone()));
                             }
@@ -2267,10 +2329,21 @@ impl GuiApp {
                                 acts.push(Action::Remove(card.name.clone(), 1));
                             }
                             let name = card.name.clone();
+                            let jobs = crate::cohesion::jobs(card);
+                            let job_note = if card.is_land() {
+                                String::new()
+                            } else if jobs.is_empty() {
+                                "Job: none (filler) · ".to_string()
+                            } else {
+                                format!(
+                                    "Job: {} · ",
+                                    jobs.iter().map(|j| j.label()).collect::<Vec<_>>().join(", ")
+                                )
+                            };
                             let resp = self.with_zoom(
                                 resp,
                                 card,
-                                Some("Click to inspect · double-click to remove one".into()),
+                                Some(format!("{}Click to inspect · double-click to remove one", job_note)),
                             );
                             resp.context_menu(|ui| {
                                 if ui.button("Remove one").clicked() {

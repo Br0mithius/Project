@@ -156,6 +156,64 @@ pub fn jobs(card: &Card) -> Vec<Job> {
     out
 }
 
+/// A card's main role in the deck, for grouping and colour-coding: the first of its jobs in
+/// the order a control deck cares about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Category {
+    Lock,
+    Answer,
+    Cards,
+    Ramp,
+    Threat,
+    Filler,
+    Land,
+}
+
+impl Category {
+    pub const ALL: [Category; 7] = [
+        Category::Lock,
+        Category::Answer,
+        Category::Cards,
+        Category::Ramp,
+        Category::Threat,
+        Category::Filler,
+        Category::Land,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Lock => "Locks",
+            Category::Answer => "Answers",
+            Category::Cards => "Card advantage",
+            Category::Ramp => "Ramp",
+            Category::Threat => "Threats",
+            Category::Filler => "Filler",
+            Category::Land => "Lands",
+        }
+    }
+}
+
+/// `card`'s main role (see `Category`).
+pub fn category(card: &Card) -> Category {
+    if card.is_land() {
+        return Category::Land;
+    }
+    let j = jobs(card);
+    if j.contains(&Job::Lock) {
+        Category::Lock
+    } else if j.contains(&Job::Removal) || j.contains(&Job::Sweeper) {
+        Category::Answer
+    } else if j.contains(&Job::CardAdvantage) {
+        Category::Cards
+    } else if j.contains(&Job::Ramp) {
+        Category::Ramp
+    } else if j.is_empty() {
+        Category::Filler
+    } else {
+        Category::Threat
+    }
+}
+
 /// True when `card` does no job (lands never count as filler).
 pub fn is_filler(card: &Card) -> bool {
     !card.is_land() && jobs(card).is_empty()
