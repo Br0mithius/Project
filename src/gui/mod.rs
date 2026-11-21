@@ -159,7 +159,7 @@ enum LabTarget {
 impl LabTarget {
     fn label(self) -> &'static str {
         match self {
-            LabTarget::League => "simulated league",
+            LabTarget::League => "peer field",
             LabTarget::Table => "my next table",
             LabTarget::Both => "both (reported apart)",
         }
@@ -2707,7 +2707,7 @@ impl GuiApp {
                 let against = if is_table {
                     "against your next table"
                 } else {
-                    "against the simulated league"
+                    "against the peer field (decks about as strong as yours)"
                 };
                 self.status = match &report.best {
                     Some(b) => format!(
@@ -3035,7 +3035,7 @@ impl GuiApp {
         if self.lab.is_some() && self.lab_table.is_some() {
             ui.horizontal(|ui| {
                 ui.label("Results against:");
-                ui.selectable_value(&mut self.lab_show_table, false, "the simulated league");
+                ui.selectable_value(&mut self.lab_show_table, false, "the peer field");
                 ui.selectable_value(&mut self.lab_show_table, true, "my next table");
             });
         }

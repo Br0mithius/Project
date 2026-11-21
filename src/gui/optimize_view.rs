@@ -83,7 +83,7 @@ impl GuiApp {
         std::thread::spawn(move || {
             let opp = Opponents {
                 table,
-                league: crate::ranking::TestBed::new(&db, &rules).gauntlet,
+                league: crate::table::peer_field(&db, &rules),
                 table_weight: weight,
             };
             let r = if claims {
@@ -151,13 +151,13 @@ impl GuiApp {
                     at_table > 0,
                     egui::Slider::new(&mut w, 0.0..=100.0).step_by(10.0).suffix("%"),
                 )
-                .on_hover_text("How much of the score comes from your ticked next table (the rest: the simulated league)")
+                .on_hover_text("How much of the score comes from your ticked next table (the rest: a peer field: decks about as strong as yours)")
                 .changed()
             {
                 self.opt.table_weight = Some(w / 100.0);
             }
             if at_table == 0 {
-                ui.label(RichText::new("no next table ticked: league only").weak());
+                ui.label(RichText::new("no next table ticked: peer field only").weak());
             }
         });
         let has_cmd = self.deck.commander.is_some();
@@ -278,12 +278,12 @@ fn show_opt_report(ui: &mut Ui, r: &OptReport) {
         ui.label(
             RichText::new(if r.table_decks > 0 {
                 format!(
-                    "Played against your next table ({} decks, {:.0}% of the score) and the simulated league. Numbers are win-rate points; green = clearly better.",
+                    "Played against your next table ({} decks, {:.0}% of the score) and a peer field (decks about as strong as yours). Numbers are win-rate points; green = clearly better.",
                     r.table_decks,
                     r.table_weight * 100.0
                 )
             } else {
-                "Played against the simulated league. Numbers are win-rate points; green = clearly better.".to_string()
+                "Played against a peer field (decks about as strong as yours). Numbers are win-rate points; green = clearly better.".to_string()
             })
             .small()
             .weak(),

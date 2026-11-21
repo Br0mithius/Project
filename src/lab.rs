@@ -370,16 +370,9 @@ pub fn explore(
     progress: &Progress,
 ) -> Option<LabReport> {
     progress.set_stage("Building the opponents' decks");
-    let bed = crate::ranking::TestBed::new(db, rules);
+    let gauntlet = crate::table::peer_field(db, rules);
     explore_with(
-        commander,
-        deck,
-        db,
-        coll,
-        rules,
-        effort,
-        &bed.gauntlet,
-        progress,
+        commander, deck, db, coll, rules, effort, &gauntlet, progress,
     )
 }
 

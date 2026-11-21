@@ -1957,7 +1957,7 @@ impl App {
         let table = crate::table::Table::load(&self.data_dir);
         crate::optimize::Opponents {
             table: crate::table::gauntlet(&table, &self.db),
-            league: crate::ranking::TestBed::new(&self.db, &self.rules).gauntlet,
+            league: crate::table::peer_field(&self.db, &self.rules),
             table_weight,
         }
     }
@@ -2015,10 +2015,10 @@ impl App {
                 "Optimising {} against {} ({}; a few minutes quick, longer thorough)...",
                 cmd.name,
                 if opp.table.is_empty() {
-                    "the simulated league".to_string()
+                    "a peer field (decks about as strong as yours)".to_string()
                 } else {
                     format!(
-                        "your next table ({} decks) and the simulated league",
+                        "your next table ({} decks) and a peer field",
                         opp.table.len()
                     )
                 },

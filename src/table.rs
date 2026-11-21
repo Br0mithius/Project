@@ -342,6 +342,36 @@ pub fn gauntlet(table: &Table, db: &CardDb) -> Vec<Prepared> {
         .collect()
 }
 
+/// The peer field: opponents about as strong as a well-built deck, or slightly worse, with
+/// real threats (`data/peer_field.txt`, compiled in; made by `examples/peer_field.rs`).
+///
+/// Playtests score a card by the opponents it meets. Against the simulated league's weak
+/// decks a tuned deck won 55-60% of four-player games and removal read as dead weight
+/// (five removal spells measured 4.6 win-rate points worse than five ordinary creatures);
+/// against this field the same deck wins about 35% and the same removal measures 3.6
+/// points better than the creatures - which is how it plays at a real table.
+pub fn peer_decks(db: &CardDb) -> Vec<Deck> {
+    include_str!("../data/peer_field.txt")
+        .split("===")
+        .skip(1)
+        .map(|text| Deck::from_text("peer", text, db))
+        .filter(|d| d.commander.is_some() && d.main_count() >= 40)
+        .map(|mut d| {
+            d.name = format!("peer {}", d.commander.clone().unwrap_or_default());
+            d
+        })
+        .collect()
+}
+
+/// `peer_decks`, ready to play; the simulated league when there are none.
+pub fn peer_field(db: &CardDb, rules: &Rules) -> Vec<Prepared> {
+    let decks = peer_decks(db);
+    if decks.is_empty() {
+        return crate::ranking::TestBed::new(db, rules).gauntlet;
+    }
+    decks.iter().map(|d| Prepared::new(d, db)).collect()
+}
+
 /// A strong version of `commander`'s deck: auto-build from every league card (one copy
 /// each), the way an opponent with a deep pool would build it.
 pub fn strong_build(commander: &str, db: &CardDb, rules: &Rules) -> Result<Deck, String> {
@@ -374,6 +404,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("msh_table_{}_{}", tag, std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn peer_field_is_playable() {
+        let db = db();
+        let peers = peer_decks(&db);
+        assert!(peers.len() >= 6, "{} peer decks", peers.len());
+        let rules = Rules::default();
+        for d in &peers {
+            assert_eq!(d.main_count(), d.main_target(&rules), "{}", d.name);
+        }
     }
 
     #[test]

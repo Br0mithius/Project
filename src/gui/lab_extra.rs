@@ -438,7 +438,7 @@ impl GuiApp {
         std::thread::spawn(move || {
             let gauntlet = match table {
                 Some(g) => g,
-                None => crate::ranking::TestBed::new(&db, &rules).gauntlet,
+                None => crate::table::peer_field(&db, &rules),
             };
             let r = crate::playtest::synergy::package_synergy(
                 &deck, &cards, &db, &rules, &gauntlet, games, 20261029, &d, &c,
@@ -622,7 +622,7 @@ impl GuiApp {
                         .speed(100),
                 );
                 ui.label("against:");
-                ui.selectable_value(&mut self.extra.syn_table, false, "simulated league");
+                ui.selectable_value(&mut self.extra.syn_table, false, "peer field");
                 ui.selectable_value(&mut self.extra.syn_table, true, "my next table");
                 let n = self.extra.syn_cards.len().max(2);
                 ui.label(
@@ -655,7 +655,7 @@ impl GuiApp {
                 if *table {
                     "your next table"
                 } else {
-                    "the simulated league"
+                    "the peer field"
                 },
                 r.full_win * 100.0,
                 r.out_win * 100.0

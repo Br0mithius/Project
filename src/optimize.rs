@@ -240,12 +240,12 @@ impl OptReport {
             self.seconds,
             if self.table_decks > 0 {
                 format!(
-                    "your next table ({} decks, trade picks in; {:.0}% of the score) and the simulated league",
+                    "your next table ({} decks, trade picks in; {:.0}% of the score) and a peer field (decks about as strong as yours)",
                     self.table_decks,
                     self.table_weight * 100.0
                 )
             } else {
-                "the simulated league (tick your next table on Season & Rules to play against it)"
+                "a peer field (decks about as strong as yours) (tick your next table on Season & Rules to play against it)"
                     .to_string()
             }
         );
@@ -265,7 +265,7 @@ impl OptReport {
             if let Some(t) = &g.table {
                 s += &format!("  (your table {}", pts(t));
                 if let Some(l) = &g.league {
-                    s += &format!(", league {}", pts(l));
+                    s += &format!(", peer field {}", pts(l));
                 }
                 s += ")";
             }
