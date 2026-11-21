@@ -4,6 +4,7 @@
 use eframe::egui;
 mod arch_tab;
 mod cards;
+mod home;
 mod images;
 mod lab_extra;
 mod opponents;
@@ -45,6 +46,7 @@ pub fn run(data_dir: PathBuf) -> Result<(), String> {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
+    Home,
     Build,
     Lab,
     Commanders,
@@ -58,6 +60,35 @@ enum Tab {
     Archetypes,
 }
 
+/// Navigation: sections across the top, each with its pages underneath.
+const GROUPS: [(&str, &[(Tab, &str)]); 5] = [
+    ("Home", &[(Tab::Home, "Home")]),
+    (
+        "Deck",
+        &[
+            (Tab::Build, "Builder"),
+            (Tab::Stats, "Stats & mana"),
+            (Tab::Commanders, "Commanders"),
+            (Tab::Archetypes, "Archetypes"),
+        ],
+    ),
+    (
+        "Playtest",
+        &[(Tab::Lab, "Lab & optimiser"), (Tab::Play, "Play a game")],
+    ),
+    (
+        "League",
+        &[
+            (Tab::Trade, "Trades & VP"),
+            (Tab::Upgrades, "Upgrades"),
+            (Tab::Draft, "Draft helper"),
+            (Tab::Season, "Season, table & game log"),
+        ],
+    ),
+    ("My pool", &[(Tab::Collection, "My pool")]),
+];
+
+#[allow(dead_code)]
 const TABS: [(Tab, &str); 11] = [
     (Tab::Build, "Deck Builder"),
     (Tab::Lab, "Playtest Lab"),
@@ -370,6 +401,7 @@ pub struct GuiApp {
     /// Measured card power list, the card synergy test.
     extra: lab_extra::ExtraState,
     opt: optimize_view::OptState,
+    home: home::HomeState,
     /// Archetypes tab.
     arch: arch_tab::ArchState,
     /// My table: the real opponents (data/table.json) and their editor.
@@ -442,7 +474,29 @@ impl GuiApp {
         ctx.set_theme(egui::ThemePreference::Dark);
         ctx.global_style_mut(|s| {
             s.spacing.item_spacing = vec2(8.0, 6.0);
-            s.spacing.button_padding = vec2(8.0, 4.0);
+            s.spacing.button_padding = vec2(10.0, 5.0);
+            // A calmer look: rounded controls, a slightly blue-black ground, soft separators,
+            // and one accent (gold for where you are, blue-violet for what's selected).
+            let r = CornerRadius::same(7);
+            for w in [
+                &mut s.visuals.widgets.noninteractive,
+                &mut s.visuals.widgets.inactive,
+                &mut s.visuals.widgets.hovered,
+                &mut s.visuals.widgets.active,
+                &mut s.visuals.widgets.open,
+            ] {
+                w.corner_radius = r;
+            }
+            s.visuals.panel_fill = Color32::from_rgb(24, 25, 30);
+            s.visuals.window_fill = Color32::from_rgb(30, 31, 38);
+            s.visuals.extreme_bg_color = Color32::from_rgb(16, 17, 21);
+            s.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(46, 48, 58);
+            s.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(62, 65, 80);
+            s.visuals.widgets.noninteractive.bg_stroke =
+                Stroke::new(1.0, Color32::from_rgb(48, 50, 60));
+            s.visuals.selection.bg_fill = Color32::from_rgb(58, 74, 140);
+            s.visuals.window_corner_radius = CornerRadius::same(10);
+            s.visuals.menu_corner_radius = CornerRadius::same(8);
             // Hover zoom: appear quickly once the mouse rests, and allow a big card.
             s.interaction.tooltip_delay = 0.25;
             s.interaction.show_tooltips_only_when_still = true;
@@ -513,7 +567,8 @@ impl GuiApp {
             history: Vec::new(),
             settings,
             images,
-            tab: Tab::Build,
+            tab: Tab::Home,
+            home: Default::default(),
             selected: None,
             status: welcome,
             search: String::new(),
@@ -1372,20 +1427,41 @@ impl GuiApp {
             });
         });
         ui.add_space(2.0);
+        // Sections, then the current section's pages.
+        let current = GROUPS
+            .iter()
+            .position(|(_, pages)| pages.iter().any(|(t, _)| *t == self.tab))
+            .unwrap_or(0);
         ui.horizontal_wrapped(|ui| {
-            for (t, label) in TABS {
-                let sel = self.tab == t;
-                let text = RichText::new(label).size(15.0);
+            for (i, (name, pages)) in GROUPS.iter().enumerate() {
+                let sel = i == current;
+                let text = RichText::new(*name).size(16.0);
                 let text = if sel {
                     text.strong().color(Color32::from_rgb(255, 205, 80))
                 } else {
                     text
                 };
-                if ui.selectable_label(sel, text).clicked() {
-                    self.tab = t;
+                if ui.selectable_label(sel, text).clicked() && !sel {
+                    self.tab = pages[0].0;
                 }
             }
         });
+        let pages = GROUPS[current].1;
+        if pages.len() > 1 {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(4.0);
+                for (t, label) in pages {
+                    let sel = self.tab == *t;
+                    let text = RichText::new(*label).size(13.5);
+                    if ui
+                        .selectable_label(sel, if sel { text.strong() } else { text })
+                        .clicked()
+                    {
+                        self.tab = *t;
+                    }
+                }
+            });
+        }
     }
 
     fn deck_summary(&mut self, ui: &mut Ui) {
@@ -2307,7 +2383,7 @@ impl GuiApp {
             .memo
             .suggestions
             .get_or_insert_with(|| {
-                analysis::suggestions(&self.deck, &self.db, &self.coll, &self.rules)
+                analysis::suggestions_for_plan(&self.deck, &self.db, &self.coll, &self.rules)
                     .into_iter()
                     .take(12)
                     .map(|s| (s.card.clone(), s.score, s.reasons))
@@ -4722,6 +4798,9 @@ impl eframe::App for GuiApp {
             return;
         }
         match self.tab {
+            Tab::Home => {
+                egui::CentralPanel::default().show(ui, |ui| self.home_tab(ui, &mut acts));
+            }
             Tab::Build => self.build_tab(ui, &mut acts),
             Tab::Lab => {
                 Panel::right("inspector_l")

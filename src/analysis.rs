@@ -2165,6 +2165,25 @@ pub fn suggestions<'a>(
     suggestions_within(deck, db, coll, rules, None)
 }
 
+/// Suggestions the deck's plan accepts: for a control commander, only cards that do a job
+/// (no filler - see `cohesion`); otherwise all of `suggestions`.
+pub fn suggestions_for_plan<'a>(
+    deck: &Deck,
+    db: &'a CardDb,
+    coll: &Collection,
+    rules: &Rules,
+) -> Vec<Scored<'a>> {
+    let cohesive = deck
+        .commander
+        .as_ref()
+        .and_then(|c| db.get(c))
+        .is_some_and(cohesive_plan);
+    suggestions(deck, db, coll, rules)
+        .into_iter()
+        .filter(|s| !cohesive || !crate::cohesion::is_filler(s.card))
+        .collect()
+}
+
 /// Like `suggestions`, optionally limited to cards inside `colors`.
 pub fn suggestions_within<'a>(
     deck: &Deck,

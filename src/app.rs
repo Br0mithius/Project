@@ -1699,7 +1699,7 @@ impl App {
         if self.deck.commander.is_none() {
             println!("{}", self.style.warn("Tip: pick a commander first so suggestions respect colour identity and synergy."));
         }
-        let list = analysis::suggestions(&self.deck, &self.db, &self.coll, &self.rules);
+        let list = analysis::suggestions_for_plan(&self.deck, &self.db, &self.coll, &self.rules);
         if list.is_empty() {
             println!("Nothing left in your pool that fits.");
             return;
