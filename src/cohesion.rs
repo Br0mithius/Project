@@ -214,6 +214,53 @@ pub fn category(card: &Card) -> Category {
     }
 }
 
+/// What a lock-out control deck must hold: at least this many cards (of 60) doing one of
+/// these jobs. Auto-build fills them first, and the swap search never trades below them.
+pub const QUOTAS: [(u32, &[Job]); 4] = [
+    (5, &[Job::Lock]),
+    (9, &[Job::Removal, Job::Sweeper]),
+    (7, &[Job::CardAdvantage]),
+    (8, &[Job::Ramp]),
+];
+
+/// Does swapping `cut` for `add` keep `deck`'s plan? A card that fills one of the plan's
+/// quotas (`QUOTAS`) is only swapped for a card doing that same job, unless the deck holds
+/// `slack` more of them than the quota asks (room for that many swaps at once). So a lock
+/// may be upgraded to a better lock, never traded for a body.
+///
+/// Why: playtests score a card by the opponents they are played against. Against weak
+/// simulated decks nothing needs an answer and removal reads as dead weight (five removal
+/// spells measured 4.6 win-rate points worse than five ordinary creatures against the
+/// simulated league, about even against the real pod's decks, and 5.4 to 6.5 points
+/// better against decks as strong as ours), so the measurements alone would strip a
+/// control deck of the answers it needs when the opposition is real.
+pub fn swap_keeps_plan(
+    deck: &crate::deck::Deck,
+    db: &crate::db::CardDb,
+    cut: &str,
+    add: &str,
+    slack: u32,
+) -> bool {
+    let Some(cut_card) = db.get(cut) else {
+        return true;
+    };
+    let cut_jobs = jobs(cut_card);
+    let add_jobs = db.get(add).map(jobs).unwrap_or_default();
+    QUOTAS.iter().all(|(min, js)| {
+        let in_group = |j: &[Job]| j.iter().any(|x| js.contains(x));
+        if !in_group(&cut_jobs) || in_group(&add_jobs) {
+            return true;
+        }
+        let have: u32 = deck
+            .cards
+            .iter()
+            .filter(|(n, _)| db.get(n).is_some_and(|c| in_group(&jobs(c))))
+            .map(|(_, k)| *k)
+            .sum();
+        have >= min + slack.max(1)
+    })
+}
+
 /// True when `card` does no job (lands never count as filler).
 pub fn is_filler(card: &Card) -> bool {
     !card.is_land() && jobs(card).is_empty()
@@ -283,6 +330,33 @@ mod tests {
             ]
             .into(),
         );
+        // The plan guard: a lock is swapped for a lock, not for a body, when the deck holds
+        // no more locks than the plan asks.
+        let mut deck = crate::deck::Deck::default();
+        for n in [
+            "Web Up",
+            "Stasis Snare",
+            "Super Villain Lockup",
+            "Celebrate the Mountain-king",
+            "Storm, Windrider",
+        ] {
+            deck.add(n, 1);
+        }
+        assert!(!swap_keeps_plan(
+            &deck,
+            &db,
+            "Stasis Snare",
+            "Ravening Warg",
+            1
+        ));
+        assert!(swap_keeps_plan(
+            &deck,
+            &db,
+            "Stasis Snare",
+            "Sound the Trumpets",
+            1
+        ));
+        assert!(swap_keeps_plan(&deck, &db, "Storm, Windrider", "Web Up", 1));
         let jc = without_filler(&coll, &db);
         assert_eq!(jc.owned("Crimson Operative"), 0);
         assert_eq!(jc.owned("Sol Ring"), 1);

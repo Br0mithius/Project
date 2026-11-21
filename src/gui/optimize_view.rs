@@ -61,7 +61,10 @@ impl GuiApp {
             self.status = "Choose a commander first.".into();
             return;
         };
-        let weight = self.opt.table_weight.unwrap_or(0.5);
+        let weight = self
+            .opt
+            .table_weight
+            .unwrap_or(crate::optimize::DEFAULT_TABLE_WEIGHT);
         let (table, weight) = self.opponents_for_opt(weight);
         let names: Vec<String> = self.public_pool.counts.keys().cloned().collect();
         if claims && names.is_empty() {
@@ -142,7 +145,7 @@ impl GuiApp {
         let at_table = self.table.next_count(&self.db);
         ui.horizontal_wrapped(|ui| {
             ui.label("Weight of your next table:");
-            let mut w = self.opt.table_weight.unwrap_or(0.5) * 100.0;
+            let mut w = self.opt.table_weight.unwrap_or(crate::optimize::DEFAULT_TABLE_WEIGHT) * 100.0;
             if ui
                 .add_enabled(
                     at_table > 0,

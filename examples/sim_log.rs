@@ -20,7 +20,18 @@ fn main() {
     let db = CardDb::load(&dir.join("cards.json")).unwrap();
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
     let rules = Rules::default();
-    let gauntlet = playtest::gauntlet(&db, &rules, 2026);
+    // SIM_OPP="a.txt,b.txt,c.txt": those deck files are the opponents instead of the league.
+    let gauntlet: Vec<Prepared> = match std::env::var("SIM_OPP") {
+        Ok(list) => list
+            .split(',')
+            .map(|f| {
+                let d = msh_deckbuilder::deck::Deck::load(std::path::Path::new(f), &db)
+                    .expect("opponent deck file");
+                Prepared::new(&d, &db)
+            })
+            .collect(),
+        Err(_) => playtest::gauntlet(&db, &rules, 2026),
+    };
     let opts = ranking::candidates(&db, &coll, &rules);
     let (name, piper) = &opts[0];
     let cmd = db.get(name).unwrap();

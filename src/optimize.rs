@@ -26,6 +26,11 @@ use crate::playtest::lab::{Measure, play_all};
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
+/// The table's default share of the score. The simulated league's decks are stand-ins for
+/// players nobody has met, and weaker than real ones (our deck won 55-60% of four-player
+/// games against them): scored half on them, the search preferred bodies to answers.
+pub const DEFAULT_TABLE_WEIGHT: f32 = 0.8;
+
 /// Who the games are against: the next table's decks (trade picks in) and the simulated
 /// league, weighted. With no table, only the league counts.
 pub struct Opponents {

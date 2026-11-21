@@ -444,6 +444,14 @@ pub fn explore_with(
             && s.add != FILLER
     };
 
+    // A control deck's plan cards (locks, answers, card advantage, ramp) are swapped only
+    // like for like (see `cohesion::swap_keeps_plan`).
+    let guard = analysis::cohesive_plan(commander);
+    let plan_ok = |s: &Swap| {
+        !guard
+            || crate::cohesion::swap_keeps_plan(&base, db, &s.cut, &s.add, effort.max_swaps as u32)
+    };
+
     // ------------------------------------------------------------ the bench
     let plays = played_colors(&base, db);
     let bench: Vec<(String, f32)> =
@@ -635,12 +643,14 @@ pub fn explore_with(
         cut_rank.push((m.cut.clone(), -g.gain));
     }
     cut_rank.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    let mut adds = additions_to_try(&base, &bench, plays, db, coll, rules, effort.bench);
+    // Room is made from the least valuable cards some addition may replace.
     let cuts: Vec<String> = cut_rank
         .iter()
+        .filter(|c| !guard || adds.iter().any(|a| plan_ok(&Swap::new(&c.0, a))))
         .take(effort.cut_slots)
         .map(|c| c.0.clone())
         .collect();
-    let mut adds = additions_to_try(&base, &bench, plays, db, coll, rules, effort.bench);
     for name in &adds {
         if !heuristic.contains_key(name) {
             if let Some(c) = db.get(name) {
@@ -657,7 +667,7 @@ pub fn explore_with(
     for cut in &cuts {
         for add in &adds {
             let s = Swap::new(cut, add);
-            if add != cut && !(is_basic(add) && is_basic(cut)) && swap_ok(&s) {
+            if add != cut && !(is_basic(add) && is_basic(cut)) && swap_ok(&s) && plan_ok(&s) {
                 b_decks.push(vec![s]);
             }
         }
@@ -690,7 +700,7 @@ pub fn explore_with(
     progress.set_stage("Combining the best swaps");
     let mut candidates: Vec<(Swap, Measure)> = screened
         .iter()
-        .filter(|(_, m)| m.gain > 0.0 && m.z() >= 0.5)
+        .filter(|(s, m)| m.gain > 0.0 && m.z() >= 0.5 && plan_ok(s))
         .cloned()
         .collect();
     candidates.sort_by(|a, b| {

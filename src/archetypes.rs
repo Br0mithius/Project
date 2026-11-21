@@ -729,13 +729,7 @@ pub fn build(
         if cohesive {
             use crate::cohesion::{Job, jobs};
             let has_job = |c: &Card, js: &[Job]| jobs(c).iter().any(|j| js.contains(j));
-            let job_quotas: [(u32, &[Job]); 4] = [
-                (5, &[Job::Lock]),
-                (9, &[Job::Removal, Job::Sweeper]),
-                (7, &[Job::CardAdvantage]),
-                (8, &[Job::Ramp]),
-            ];
-            for (min, js) in job_quotas {
+            for (min, js) in crate::cohesion::QUOTAS {
                 let f = |c: &Card| has_job(c, js);
                 while count(&deck, &f) < n(min) && spells(&deck) < slots {
                     match pick(&deck, &f) {

@@ -3524,7 +3524,8 @@ fn do_act(g: &mut Game, p: usize, act: Act) -> bool {
 
 /// Mana to keep open for counterspells and instant-speed answers, if that's worth more
 /// than what it would cost to tap out.
-fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
+/// Mana to keep open for the best instant-speed card in hand, and that card's hand slot.
+fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> (u32, Option<usize>) {
     let pl = &g.players[p];
     let rmhold = false;
     // Only a card the untapped mana can pay for, colours included: a counterspell's {U}{U}
@@ -3553,18 +3554,32 @@ fn holdup(g: &Game, p: usize, opts: &[(f32, u32, Act)], avail: u32) -> u32 {
             if rmhold && is_instant_removal(c) {
                 v = v.max(spell_value(g, p, idx, false, false));
             }
-            Some((v, cost))
+            Some((v, cost, h))
         })
-        .filter(|(v, _)| *v >= 1.5)
+        .filter(|(v, _, _)| *v >= 1.5)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    let Some((value, cost)) = best else { return 0 };
+    let Some((value, cost, slot)) = best else {
+        return (0, None);
+    };
     let n = cost.total();
     if n > avail {
-        return 0;
+        return (0, None);
     }
+    // The held card itself isn't part of the turn's plan while its mana is kept open:
+    // casting it in the main phase with the other mana left the reserve held for nothing.
+    // (Game logs: Mortify cast in the main phase with half the mana while the other half
+    // stayed "held" for it, and no blocker cast. Measured, every seat changed, 8,000 games:
+    // +0.3 ± 0.6 win-rate points - no measurable change, kept because it is the correct play.)
+    let skip: Vec<usize> = (0..opts.len())
+        .filter(|&k| matches!(opts[k].2, Act::Cast(Src::Hand(h), _) if h == slot))
+        .collect();
     let full = plan_set(opts, avail, &[]).map(|x| x.1).unwrap_or(0.0);
-    let held = plan_set(opts, avail - n, &[]).map(|x| x.1).unwrap_or(0.0);
-    if held + value * 0.6 >= full { n } else { 0 }
+    let held = plan_set(opts, avail - n, &skip).map(|x| x.1).unwrap_or(0.0);
+    if held + value * 0.6 >= full {
+        (n, Some(slot))
+    } else {
+        (0, None)
+    }
 }
 
 /// What an action is, for the log.
@@ -3870,7 +3885,14 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
         let avail = g.mana_available(p);
         // (Combat AI: mana for the attack taxes our planned swing pays.)
         let tax_keep = if post { 0 } else { attack_tax_reserve(g, p) };
-        let reserve = holdup(g, p, &opts, avail) + tax_keep;
+        let (hold, held_slot) = holdup(g, p, &opts, avail);
+        if let Some(slot) = held_slot {
+            opts.retain(|o| !matches!(o.2, Act::Cast(Src::Hand(h), _) if h == slot));
+            if opts.is_empty() {
+                return;
+            }
+        }
+        let reserve = hold + tax_keep;
         if reserve > 0 {
             g.note(|| format!("AI P{} holds up {} mana", p, reserve));
         }

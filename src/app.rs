@@ -1996,7 +1996,7 @@ impl App {
         } else if words.iter().any(|w| w == "league") {
             0.0
         } else {
-            0.5
+            crate::optimize::DEFAULT_TABLE_WEIGHT
         };
         let Some(cmd) = self
             .deck
