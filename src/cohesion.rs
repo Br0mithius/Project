@@ -80,7 +80,7 @@ pub fn jobs(card: &Card) -> Vec<Job> {
     // Locks and answers that hold a permanent.
     let exiles = has("exile target") || has("exile up to one target");
     if (exiles && (has("leaves the battlefield") || has("until ~ leaves")))
-        || has("counter target spell")
+        || has("counter target")
         || has("can't attack")
         || has("can't block")
         || has("doesn't untap")
@@ -119,6 +119,8 @@ pub fn jobs(card: &Card) -> Vec<Job> {
         || has("draws two")
         || has("draw three")
         || has("draw x")
+        || has("draw cards equal")
+        || has("draws cards equal")
         || has("connive")
         || (has("draw a card") && repeatable)
         || (has("draw a card") && has("each opponent discards"))
@@ -328,6 +330,8 @@ mod tests {
         assert!(j("Hero's Downfall").contains(&Job::Removal));
         assert!(j("Futurist Forge").contains(&Job::CardAdvantage));
         assert!(j("Sol Ring").contains(&Job::Ramp));
+        assert!(j("Essence Scatter").contains(&Job::Lock));
+        assert!(j("Prime Speaker Zegana").contains(&Job::CardAdvantage));
         for n in ["Circuitous Route", "Springbloom Druid", "Burnished Hart"] {
             assert!(j(n).contains(&Job::Ramp), "{}: {:?}", n, j(n));
         }
