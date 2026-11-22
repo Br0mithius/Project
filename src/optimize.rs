@@ -26,10 +26,13 @@ use crate::playtest::lab::{Measure, play_all};
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
-/// The table's default share of the score. The simulated league's decks are stand-ins for
-/// players nobody has met, and weaker than real ones (our deck won 55-60% of four-player
-/// games against them): scored half on them, the search preferred bodies to answers.
-pub const DEFAULT_TABLE_WEIGHT: f32 = 0.8;
+/// The table's default share of the score; the rest is the peer field (decks about as
+/// strong as the user's). The stand-ins for real opponents are guesses built around their
+/// commanders and trade picks, and even tuned by this optimiser they stay well below a
+/// tuned deck (it won about 49% of four-player games against them, 35% against the peer
+/// field), so they are the smaller share: a deck is judged mostly by opposition as good
+/// as itself, where answers matter.
+pub const DEFAULT_TABLE_WEIGHT: f32 = 0.3;
 
 /// Who the games are against: the next table's decks (trade picks in) and the simulated
 /// league, weighted. With no table, only the league counts.
