@@ -133,7 +133,14 @@ pub fn jobs(card: &Card) -> Vec<Job> {
     });
     // Landcycling isn't ramp: the card is a land in all but name and counts toward the land
     // cap (see `mana`).
-    if taps_for_mana || has("search your library for a basic land") {
+    // Land search of any wording ("for up to two basic land cards", "for a land card").
+    let finds_land = t.lines().any(|l| {
+        l.contains("search your library for")
+            && l.contains("land")
+            && !l.contains("landcycling")
+            && !l.contains("cycling")
+    });
+    if taps_for_mana || finds_land || has("play an additional land") {
         out.push(Job::Ramp);
     }
     if creature {
@@ -321,6 +328,9 @@ mod tests {
         assert!(j("Hero's Downfall").contains(&Job::Removal));
         assert!(j("Futurist Forge").contains(&Job::CardAdvantage));
         assert!(j("Sol Ring").contains(&Job::Ramp));
+        for n in ["Circuitous Route", "Springbloom Druid", "Burnished Hart"] {
+            assert!(j(n).contains(&Job::Ramp), "{}: {:?}", n, j(n));
+        }
         // The job-only pool really drops filler (ownership included).
         let coll = Collection::new(
             std::path::PathBuf::new(),
