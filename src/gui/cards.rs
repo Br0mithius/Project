@@ -394,7 +394,8 @@ pub fn paint_card_face(painter: &egui::Painter, rect: Rect, card: &Card) {
 
 /// Rules text with mana symbols written plainly ({T} -> "Tap") so it reads well as text.
 pub fn rules_text_for_display(card: &Card) -> String {
-    card.oracle_text
+    // The front face only: the other side is shown as a card of its own.
+    card.front_text()
         .replace("{T}", "Tap")
         .replace("{Q}", "Untap")
         .replace(['{', '}'], "")

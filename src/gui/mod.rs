@@ -1878,7 +1878,43 @@ impl GuiApp {
             });
             if tex.is_some() {
                 // The picture shows the printed text; repeat it below for easy reading.
-                ui.label(RichText::new(&card.oracle_text).size(13.0));
+                ui.label(RichText::new(card.front_text()).size(13.0));
+            }
+            // Double-faced and Adventure cards: the other side, as a card of its own.
+            if let Some(back) = card.back_face() {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!("Other side: {}", back.name))
+                        .strong()
+                        .size(13.0),
+                );
+                ui.vertical_centered(|ui| {
+                    card_widget(
+                        ui,
+                        CardLook {
+                            card: &back,
+                            width: w,
+                            image: None,
+                            badge: None,
+                            dimmed: false,
+                            selected: false,
+                        },
+                    );
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "{} {}\n{}{}\n{}",
+                        back.name,
+                        back.mana_cost,
+                        back.type_line,
+                        match (&back.power, &back.toughness) {
+                            (Some(p), Some(t)) => format!(" ({}/{})", p, t),
+                            _ => String::new(),
+                        },
+                        back.oracle_text
+                    ))
+                    .size(13.0),
+                );
             }
             ui.add_space(4.0);
             let owned = self.coll.owned(&card.name);

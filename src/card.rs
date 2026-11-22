@@ -416,6 +416,69 @@ impl Card {
             .clone()
     }
 
+    /// The front face's rules text (a double-faced or Adventure card keeps its other side
+    /// after a "// Back face:" line in the rules text).
+    pub fn front_text(&self) -> &str {
+        self.oracle_text
+            .split("// Back face:")
+            .next()
+            .unwrap_or("")
+            .trim_end()
+    }
+
+    /// The other side of a double-faced card or the Adventure half, as a card of its own
+    /// (name, cost, type line, power/toughness and rules text), for showing it.
+    pub fn back_face(&self) -> Option<Card> {
+        let raw = self.oracle_text.split_once("// Back face:")?.1.trim_start();
+        let mut lines = raw.lines();
+        let head = lines.next()?.trim();
+        let (name, cost) = match head.find(" {") {
+            Some(i) => (head[..i].trim(), head[i + 1..].trim()),
+            None => (head, ""),
+        };
+        if name.is_empty() {
+            return None;
+        }
+        let mut type_line = lines.next().unwrap_or("").trim().to_string();
+        // "Creature — Giant 5/5": the type line carries the back's power and toughness.
+        let mut pt = None;
+        if let Some(i) = type_line.rfind(' ') {
+            if let Some((p, t)) = type_line[i + 1..].split_once('/') {
+                let stat =
+                    |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit() || c == '*');
+                if stat(p) && stat(t) {
+                    pt = Some((p.to_string(), t.to_string()));
+                    type_line.truncate(i);
+                }
+            }
+        }
+        let text = lines.collect::<Vec<_>>().join("\n");
+        // Mana value from the cost's symbols.
+        let cmc: f32 = cost
+            .split(['{', '}'])
+            .filter(|x| !x.is_empty())
+            .map(|x| match x.parse::<f32>() {
+                Ok(n) => n,
+                Err(_) if x.eq_ignore_ascii_case("x") => 0.0,
+                Err(_) => 1.0,
+            })
+            .sum();
+        Some(Card {
+            name: name.to_string(),
+            mana_cost: cost.to_string(),
+            cmc,
+            type_line,
+            oracle_text: text.trim().to_string(),
+            power: pt.as_ref().map(|x| x.0.clone()),
+            toughness: pt.as_ref().map(|x| x.1.clone()),
+            rarity: self.rarity.clone(),
+            color_identity: self.color_identity.clone(),
+            set: self.set.clone(),
+            collector_number: self.collector_number.clone(),
+            ..Default::default()
+        })
+    }
+
     /// The name as Mana Mixer, ManaBox and Scryfall write it: "Front // Back" for Adventures
     /// and double-faced cards (the back face is stored in the rules text), otherwise the name.
     pub fn full_name(&self) -> String {
@@ -692,6 +755,28 @@ pub fn symbols_in(s: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn back_face_is_a_card_of_its_own() {
+        let mut c = card("{4}{G}", "Legendary Creature — Human Bear", "Trample");
+        assert!(c.back_face().is_none());
+        c.oracle_text = "Trample\n\n// Back face: Till and Tend {1}{G}\nSorcery — Adventure\nYou may play an additional land this turn.".into();
+        assert_eq!(c.front_text(), "Trample");
+        let b = c.back_face().unwrap();
+        assert_eq!(b.name, "Till and Tend");
+        assert_eq!(b.mana_cost, "{1}{G}");
+        assert_eq!(b.cmc, 2.0);
+        assert_eq!(b.type_line, "Sorcery — Adventure");
+        assert_eq!(b.oracle_text, "You may play an additional land this turn.");
+        // A creature back face keeps its power and toughness.
+        c.oracle_text = "Text\n\n// Back face: The Incredible Hulk\nLegendary Creature — Gamma Hero 8/8\nTrample".into();
+        let b = c.back_face().unwrap();
+        assert_eq!(
+            (b.power.as_deref(), b.toughness.as_deref()),
+            (Some("8"), Some("8"))
+        );
+        assert_eq!(b.type_line, "Legendary Creature — Gamma Hero");
+    }
 
     fn card(cost: &str, ty: &str, text: &str) -> Card {
         Card {
