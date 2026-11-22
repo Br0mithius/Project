@@ -164,32 +164,6 @@ fn main() {
                         )
                         .0;
                         d.commander = Some(cmd.name.clone());
-                        // An equipment deck plays its Equipment: at least eight pieces, the
-                        // best ones in place of the weakest other spells.
-                        let is_gear =
-                            |n: &str| db.get(n).is_some_and(|c| c.type_line.contains("Equipment"));
-                        if q.eq_ignore_ascii_case("voltron") {
-                            let rules = Rules::default();
-                            while d.cards.keys().filter(|n| is_gear(n)).count() < 8 {
-                                let Some(add) =
-                                    msh_deckbuilder::analysis::suggestions(&d, &db, &all, &rules)
-                                        .into_iter()
-                                        .find(|s| is_gear(&s.card.name))
-                                        .map(|s| s.card.name.clone())
-                                else {
-                                    break;
-                                };
-                                let Some(cut) = msh_deckbuilder::analysis::weakest(&d, &db, &rules)
-                                    .into_iter()
-                                    .find(|w| !is_gear(&w.card.name))
-                                    .map(|w| w.card.name.clone())
-                                else {
-                                    break;
-                                };
-                                d.remove(&cut, 1);
-                                d.add(&add, 1);
-                            }
-                        }
                         d
                     }
                     None => {
@@ -226,6 +200,36 @@ fn main() {
                     .cloned()
                     .unwrap_or_default(),
             );
+            // An equipment deck plays its Equipment: at least eight pieces, the best ones
+            // in place of the weakest other spells (never a trade pick).
+            let mut deck = deck;
+            if archetype
+                .as_ref()
+                .is_some_and(|q| q.eq_ignore_ascii_case("voltron"))
+            {
+                let is_gear =
+                    |n: &str| db.get(n).is_some_and(|c| c.type_line.contains("Equipment"));
+                let rules = Rules::default();
+                while deck.cards.keys().filter(|n| is_gear(n)).count() < 8 {
+                    let Some(add) =
+                        msh_deckbuilder::analysis::suggestions(&deck, &db, &all, &rules)
+                            .into_iter()
+                            .find(|s| is_gear(&s.card.name))
+                            .map(|s| s.card.name.clone())
+                    else {
+                        break;
+                    };
+                    let Some(cut) = msh_deckbuilder::analysis::weakest(&deck, &db, &rules)
+                        .into_iter()
+                        .find(|w| !is_gear(&w.card.name) && !keep.contains(&w.card.name))
+                        .map(|w| w.card.name.clone())
+                    else {
+                        break;
+                    };
+                    deck.remove(&cut, 1);
+                    deck.add(&add, 1);
+                }
+            }
             let mut locked = if free { Vec::new() } else { keep.clone() };
             if archetype.is_some() {
                 locked.extend(
