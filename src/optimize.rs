@@ -449,6 +449,13 @@ pub fn optimize(
     let cands: Vec<(String, Deck)> = candidates(cmd, db, coll, rules)
         .into_iter()
         .filter(|(_, d)| canon(d) != canon(deck))
+        // Cards locked in (`lab_keep`) stay: a whole-deck alternative without them is out.
+        .filter(|(_, d)| {
+            rules
+                .lab_keep
+                .iter()
+                .all(|k| deck.count_of(k) == 0 || d.count_of(k) > 0)
+        })
         .collect();
     let per = (opp.table.len().min(1) + opp.league.len().min(1)) as u32;
     progress.total.store(
