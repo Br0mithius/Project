@@ -35,6 +35,11 @@ fn main() {
     // `--archetype <name>` (with `--only`): the deck is rebuilt as that archetype ("Voltron"
     // for an equipment deck) and its theme cards (Equipment and Auras) are kept in.
     let mut archetype: Option<String> = None;
+    // `--rebuild`: the deck is rebuilt from the pool first (its commander's own archetype
+    // unless `--archetype`). `--exclude-set FRA`: the pool leaves that set out (cards
+    // nobody has yet).
+    let mut rebuild = false;
+    let mut exclude: Option<String> = None;
     let mut i = 2;
     while i < a.len() {
         match a[i].as_str() {
@@ -52,6 +57,11 @@ fn main() {
                 only = Some(a[i + 1].clone());
                 i += 1;
             }
+            "--rebuild" => rebuild = true,
+            "--exclude-set" => {
+                exclude = Some(a[i + 1].to_uppercase());
+                i += 1;
+            }
             "--archetype" => {
                 archetype = Some(a[i + 1].clone());
                 i += 1;
@@ -66,7 +76,15 @@ fn main() {
     }
     let all = Collection::new(
         PathBuf::new(),
-        db.cards.iter().map(|c| (c.name.clone(), 1)).collect(),
+        db.cards
+            .iter()
+            .filter(|c| {
+                exclude
+                    .as_ref()
+                    .is_none_or(|x| !c.set.eq_ignore_ascii_case(x))
+            })
+            .map(|c| (c.name.clone(), 1))
+            .collect(),
     );
     let field = |skip: &str| -> Vec<Prepared> {
         msh_deckbuilder::table::peer_decks(&db)
@@ -126,7 +144,7 @@ fn main() {
             {
                 continue;
             }
-            if new_cmd.is_some() || archetype.is_some() {
+            if rebuild || new_cmd.is_some() || archetype.is_some() {
                 let c = new_cmd
                     .clone()
                     .unwrap_or_else(|| table.opponents[k].commander.clone());
@@ -146,10 +164,48 @@ fn main() {
                         )
                         .0;
                         d.commander = Some(cmd.name.clone());
+                        // An equipment deck plays its Equipment: at least eight pieces, the
+                        // best ones in place of the weakest other spells.
+                        let is_gear =
+                            |n: &str| db.get(n).is_some_and(|c| c.type_line.contains("Equipment"));
+                        if q.eq_ignore_ascii_case("voltron") {
+                            let rules = Rules::default();
+                            while d.cards.keys().filter(|n| is_gear(n)).count() < 8 {
+                                let Some(add) =
+                                    msh_deckbuilder::analysis::suggestions(&d, &db, &all, &rules)
+                                        .into_iter()
+                                        .find(|s| is_gear(&s.card.name))
+                                        .map(|s| s.card.name.clone())
+                                else {
+                                    break;
+                                };
+                                let Some(cut) = msh_deckbuilder::analysis::weakest(&d, &db, &rules)
+                                    .into_iter()
+                                    .find(|w| !is_gear(&w.card.name))
+                                    .map(|w| w.card.name.clone())
+                                else {
+                                    break;
+                                };
+                                d.remove(&cut, 1);
+                                d.add(&add, 1);
+                            }
+                        }
                         d
                     }
-                    None => msh_deckbuilder::table::strong_build(&c, &db, &Rules::default())
-                        .expect("new commander"),
+                    None => {
+                        let cmd = db.get(&c).expect("commander");
+                        let mut d = msh_deckbuilder::archetypes::autobuild(
+                            cmd,
+                            &db,
+                            &all,
+                            &Rules::default(),
+                            None,
+                            None,
+                        )
+                        .0;
+                        d.commander = Some(cmd.name.clone());
+                        d
+                    }
                 };
                 table.opponents[k].commander = d.commander.clone().unwrap_or_default();
                 table.opponents[k].decklist = d.to_text();
