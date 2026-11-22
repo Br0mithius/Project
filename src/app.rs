@@ -164,6 +164,11 @@ pub const COMMANDS: &[(&str, &str, &str)] = &[
         "Land-equivalents vs the 26 cap, how often each spell is castable on curve; `mana fix` re-picks basics",
     ),
     (
+        "colorpacks",
+        "[test [games]] | use <colours>",
+        "Colour packs for your commander (what each colour pair is best at); `test` races every pack's build against your deck, `use GU` loads that pack's build",
+    ),
+    (
         "jobs",
         "",
         "What job each card does (lock, removal, draw, ramp, flying, deathtouch...); flags filler",
@@ -378,6 +383,7 @@ impl App {
             "game" => self.game(rest),
             "unavailable" => self.unavailable(rest),
             "jobs" => self.jobs(),
+            "colorpacks" | "colourpacks" | "cpacks" => self.colorpacks(rest),
             "mana" => self.mana(rest),
             "avoid" => self.avoid(rest),
             "games" => self.games(),
@@ -2224,6 +2230,131 @@ impl App {
             );
         }
         print!("{}", crate::mana::report(&self.deck, &self.db, &self.rules));
+    }
+
+    fn colorpacks(&mut self, arg: &str) {
+        let Some(cmd) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|c| self.db.get(c))
+            .cloned()
+        else {
+            println!("Choose a commander first (`commander <name>` or `auto <name>`).");
+            return;
+        };
+        let packs = crate::colorpacks::for_commander(&cmd);
+        if packs.is_empty() {
+            println!(
+                "{} has fewer than two colours: colour packs are for pairs.",
+                cmd.name
+            );
+            return;
+        }
+        let words: Vec<&str> = arg.split_whitespace().collect();
+        match words.first().copied() {
+            Some("use") => {
+                let want = crate::card::ColorSet::parse(words.get(1).copied().unwrap_or(""));
+                match packs.iter().find(|p| Some(p.color_set()) == want) {
+                    Some(p) => {
+                        self.deck =
+                            crate::colorpacks::build(p, &cmd, &self.db, &self.coll, &self.rules);
+                        println!("Built the {} pack. `undo` to go back.", p.name);
+                    }
+                    None => println!(
+                        "No such pack for {}: give its two colours, e.g. `colorpacks use GU`.",
+                        cmd.name
+                    ),
+                }
+            }
+            Some("test") => {
+                let games: u32 = words.get(1).and_then(|g| g.parse().ok()).unwrap_or(2000);
+                let size = self.deck.total_count(&self.rules);
+                let built: Vec<(&crate::colorpacks::Pack, crate::deck::Deck)> = packs
+                    .iter()
+                    .map(|p| {
+                        (
+                            *p,
+                            crate::colorpacks::build(p, &cmd, &self.db, &self.coll, &self.rules),
+                        )
+                    })
+                    .filter(|(_, d)| d.total_count(&self.rules) == size)
+                    .collect();
+                if built.is_empty() {
+                    println!("Your deck isn't complete, or your pool can't fill a pack's deck.");
+                    return;
+                }
+                let opp = self.opponents(crate::optimize::DEFAULT_TABLE_WEIGHT);
+                let decks: Vec<crate::deck::Deck> = built.iter().map(|(_, d)| d.clone()).collect();
+                let progress = crate::lab::Progress::new();
+                progress.total.store(
+                    games as usize * (decks.len() + 1) * 2,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                let gains = self.with_progress(&progress, || {
+                    crate::optimize::compare(
+                        &self.deck,
+                        &decks,
+                        &self.db,
+                        &opp,
+                        &self.rules,
+                        games,
+                        0xC0_10AC,
+                        &progress,
+                    )
+                });
+                let mut rows: Vec<(f32, String)> = built
+                    .iter()
+                    .zip(gains.iter())
+                    .map(|((p, d), g)| {
+                        let census = p
+                            .census(d, &self.db)
+                            .iter()
+                            .map(|(k, have, want)| format!("{} {}/{}", k.label(), have, want))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        (
+                            g.score.gain,
+                            format!(
+                                "  {:+5.1} ± {:.1} pts  {} ({})\n                   {}",
+                                g.score.gain * 100.0,
+                                g.score.stderr * 100.0,
+                                p.name,
+                                p.colors,
+                                census
+                            ),
+                        )
+                    })
+                    .collect();
+                rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                println!(
+                    "Colour packs for {} against your deck ({} games each; win-rate points, 2+ standard errors = clearly better or worse):",
+                    cmd.name, games
+                );
+                for (_, r) in rows {
+                    println!("{}", r);
+                }
+                println!(
+                    "`colorpacks use <colours>` loads a pack's build; `optimize` races them and then tunes the winner."
+                );
+            }
+            _ => {
+                println!(
+                    "Colour packs {} can play (slots: in your deck / wanted):",
+                    cmd.name
+                );
+                for p in packs {
+                    let census = p
+                        .census(&self.deck, &self.db)
+                        .iter()
+                        .map(|(k, have, want)| format!("{} {}/{}", k.label(), have, want))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    println!("  {} ({}): {}\n      {}", p.name, p.colors, p.plan, census);
+                }
+                println!("`colorpacks test` races each pack's build against your deck.");
+            }
+        }
     }
 
     fn jobs(&mut self) {

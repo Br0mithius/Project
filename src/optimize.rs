@@ -411,6 +411,13 @@ fn candidates(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> Vec<
         let (d, _) = archetypes::autobuild_as(a, cmd, db, coll, rules);
         push(format!("auto-build as {}", a.name), d);
     }
+    // The colour packs the commander's colours allow (see `colorpacks`).
+    for pack in crate::colorpacks::for_commander(cmd) {
+        push(
+            format!("{} pack", pack.name),
+            crate::colorpacks::build(pack, cmd, db, coll, rules),
+        );
+    }
     out
 }
 

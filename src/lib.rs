@@ -7,6 +7,7 @@ pub mod app;
 pub mod archetypes;
 pub mod card;
 pub mod cohesion;
+pub mod colorpacks;
 pub mod db;
 pub mod deck;
 pub mod edhrec;

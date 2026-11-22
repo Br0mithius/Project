@@ -610,6 +610,23 @@ pub fn build(
     rules: &crate::db::Rules,
     t: &Targets,
 ) -> (Deck, u32) {
+    build_with(arch, cmd, db, coll, rules, t, &[])
+}
+
+/// A minimum count of cards of one kind, filled before the builder's own quotas.
+pub type Quota<'a> = (u32, &'a dyn Fn(&Card) -> bool);
+
+/// `build`, with extra quotas (a colour pack's slots, see `colorpacks`) filled right after the
+/// archetype package.
+pub fn build_with(
+    arch: &SetArchetype,
+    cmd: &Card,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &crate::db::Rules,
+    t: &Targets,
+    extra: &[Quota],
+) -> (Deck, u32) {
     let scale = rules.deck_size as f32 / 60.0;
     let n = |x: u32| (x as f32 * scale).round() as u32;
     // Control decks take only cards that do a job (answers, locks, card advantage, ramp,
@@ -723,6 +740,25 @@ pub fn build(
             (t.counters, &|c: &Card| c.has_role(Role::Counter)),
             (t.creatures, &|c: &Card| c.is_creature()),
         ];
+        // A pack's slots take only cards about as good as a fair card of their cost (as
+        // the archetype package does): a slot left short beats a weak card forced in.
+        // (Playtests: without the floor most colour packs measured worse than auto-build.)
+        for (min, f) in extra {
+            while count(&deck, f) < n(*min) && spells(&deck) < slots {
+                let top = topend(&deck);
+                let best = analysis::suggestions_within(&deck, db, coll, rules, Some(plays))
+                    .into_iter()
+                    .find(|s| {
+                        f(s.card)
+                            && !(cap.is_some_and(|m| top >= m) && s.card.mana_value() >= 6)
+                            && !crate::mana::is_land_equivalent(s.card)
+                    });
+                match best {
+                    Some(s) if s.score >= PACKAGE_FLOOR => deck.add(&s.card.name, 1),
+                    _ => break,
+                }
+            }
+        }
         // Lock-out control: the plan's jobs come first - locks, answers, card advantage,
         // ramp - and only then creatures. Locks score low one card at a time, so without
         // their own quota the score-driven fill left them out.

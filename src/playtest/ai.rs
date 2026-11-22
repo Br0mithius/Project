@@ -1444,6 +1444,10 @@ pub fn has_flash(g: &Game, p: usize, c: &SimCard) -> bool {
 fn is_protection(c: &SimCard) -> bool {
     c.is(T_INSTANT)
         && effects_of(c, false).any(|e| match e {
+            // "Target creature gains 'when ~ dies, return it to the battlefield'" (Undying
+            // Malice, Fake Your Own Death): cast in answer to removal. (Audit: drawn 19
+            // times in 41 games of an equipment deck, cast 4 times.)
+            Effect::Rule(l) => l == "returns when it dies",
             Effect::Grant { keywords, to, .. } => {
                 !to.mass
                     && to.whose != Whose::Theirs
@@ -4062,6 +4066,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
     } else {
         spell.types
     };
+    let spell_colors = spell.colors;
     for k in 1..n {
         let o = (caster + k) % n;
         if !g.players[o].alive {
@@ -4089,6 +4094,20 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
             if t.contains("instant or sorcery spell") && spell_types & (T_INSTANT | T_SORCERY) == 0
             {
                 return false;
+            }
+            // "Counter target red or green spell" (Flashfreeze): only a spell of a named
+            // colour. (Audit: it was countering spells of any colour.)
+            if let Some(i) = t.find("counter target ") {
+                let rest = &t[i + 15..];
+                let before = &rest[..rest.find(" spell").unwrap_or(0)];
+                let named = ["white", "blue", "black", "red", "green"]
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, w)| before.split_whitespace().any(|x| x == **w))
+                    .fold(0u8, |m, (k, _)| m | 1 << k);
+                if named != 0 && spell_colors & named == 0 {
+                    return false;
+                }
             }
             !t.contains("activated or triggered ability") || t.contains("spell")
         }) else {
