@@ -1,4 +1,4 @@
-//! Tests the colour packs (`colorpacks`): for each two-colour pair, commanders of exactly
+//! Tests the colour packs (`colorpacks`): for each pack, commanders of exactly
 //! those colours are built two ways from every league card - the builder's own auto-build
 //! and the pair's pack - and both play the same games against the peer field.
 //! `cargo run --release --example pack_lab -- <data dir> [games] [commanders per pair]`
@@ -21,12 +21,27 @@ fn main() {
     );
     let field = msh_deckbuilder::table::peer_field(&db, &rules);
     for pack in colorpacks::PACKS {
-        let cmds: Vec<_> = db
+        // Commanders of exactly the pack's colours; when the pool has too few, ones
+        // whose colours include them.
+        let mut cmds: Vec<_> = db
             .cards
             .iter()
             .filter(|c| c.can_be_commander() && c.identity() == pack.color_set())
             .take(per)
             .collect();
+        if cmds.len() < per {
+            let more: Vec<_> = db
+                .cards
+                .iter()
+                .filter(|c| {
+                    c.can_be_commander()
+                        && c.identity() != pack.color_set()
+                        && pack.color_set().is_subset_of(c.identity())
+                })
+                .take(per - cmds.len())
+                .collect();
+            cmds.extend(more);
+        }
         let mut sum = 0.0;
         let mut n = 0;
         println!("{} ({})", pack.name, pack.colors);

@@ -2246,7 +2246,7 @@ impl App {
         let packs = crate::colorpacks::for_commander(&cmd);
         if packs.is_empty() {
             println!(
-                "{} has fewer than two colours: colour packs are for pairs.",
+                "{} has fewer than two colours: colour packs need two or three.",
                 cmd.name
             );
             return;
@@ -2262,7 +2262,7 @@ impl App {
                         println!("Built the {} pack. `undo` to go back.", p.name);
                     }
                     None => println!(
-                        "No such pack for {}: give its two colours, e.g. `colorpacks use GU`.",
+                        "No such pack for {}: give its colours, e.g. `colorpacks use GU` or `colorpacks use WUB`.",
                         cmd.name
                     ),
                 }

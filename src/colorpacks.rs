@@ -5,6 +5,9 @@
 //! the commander's colours against the current deck (`optimize`), and `packs test` in the
 //! command line prints the race.
 //!
+//! Three-colour packs combine what the three pairs inside them share (white-blue-black:
+//! the full control suite; black-red-green: removal, ramp and big creatures; and so on).
+//!
 //! What each pair excels at follows the usual reading of the colour pairs: white-blue
 //! control and fliers; blue-black control with evasion; black-red removal and
 //! aggression; red-green big creatures; green-white going wide with tokens; white-black
@@ -170,11 +173,11 @@ impl Kind {
     }
 }
 
-/// A two-colour pack: the pair's plan as slots with minimum counts (per 60 cards).
+/// A two- or three-colour pack: the colours' plan as slots with minimum counts (per 60 cards).
 #[derive(Debug)]
 pub struct Pack {
     pub name: &'static str,
-    /// The pair, WUBRG letters.
+    /// Its colours, WUBRG letters.
     pub colors: &'static str,
     pub plan: &'static str,
     pub slots: &'static [(u32, Kind)],
@@ -295,6 +298,120 @@ pub const PACKS: &[Pack] = &[
             (2, Kind::Lock),
         ],
     },
+    // ---- three colours: what the three pairs inside share.
+    Pack {
+        name: "White-blue-black control",
+        colors: "WUB",
+        plan: "The full control suite: removal, sweepers, counters and card draw, with fliers to finish.",
+        slots: &[
+            (9, Kind::Removal),
+            (7, Kind::Cards),
+            (5, Kind::Lock),
+            (5, Kind::Flyer),
+        ],
+    },
+    Pack {
+        name: "Blue-black-red removal and cards",
+        colors: "UBR",
+        plan: "Kill everything, keep drawing, and let drain and a few evasive threats close.",
+        slots: &[
+            (10, Kind::Removal),
+            (7, Kind::Cards),
+            (3, Kind::Lock),
+            (4, Kind::Drain),
+        ],
+    },
+    Pack {
+        name: "Black-red-green midrange",
+        colors: "BRG",
+        plan: "Ramp, the best removal, and big creatures that come back.",
+        slots: &[
+            (8, Kind::Removal),
+            (6, Kind::Ramp),
+            (7, Kind::Big),
+            (3, Kind::Recursion),
+        ],
+    },
+    Pack {
+        name: "Red-green-white big creatures",
+        colors: "RGW",
+        plan: "Ramp into big creatures and tokens, then pump the whole team.",
+        slots: &[
+            (6, Kind::Ramp),
+            (8, Kind::Big),
+            (5, Kind::Tokens),
+            (3, Kind::Finisher),
+            (4, Kind::Removal),
+        ],
+    },
+    Pack {
+        name: "Green-white-blue ramp and fliers",
+        colors: "GWU",
+        plan: "Ramp and draw, hold the ground with locks, win in the air.",
+        slots: &[
+            (6, Kind::Ramp),
+            (6, Kind::Cards),
+            (6, Kind::Flyer),
+            (4, Kind::Lock),
+            (4, Kind::Removal),
+        ],
+    },
+    Pack {
+        name: "White-black-green counters and attrition",
+        colors: "WBG",
+        plan: "Removal and recursion grind the table down while +1/+1 counters and lifegain build a lead.",
+        slots: &[
+            (8, Kind::Removal),
+            (4, Kind::Recursion),
+            (4, Kind::Counters),
+            (4, Kind::Lifegain),
+            (5, Kind::Ramp),
+        ],
+    },
+    Pack {
+        name: "Blue-red-white fliers and burn",
+        colors: "URW",
+        plan: "Burn and counters clear the way for fliers; card draw keeps it going.",
+        slots: &[
+            (8, Kind::Removal),
+            (7, Kind::Flyer),
+            (5, Kind::Cards),
+            (3, Kind::Lock),
+        ],
+    },
+    Pack {
+        name: "Black-green-blue ramp and value",
+        colors: "BGU",
+        plan: "Ramp, draw the most cards, kill what matters and reuse the graveyard.",
+        slots: &[
+            (7, Kind::Ramp),
+            (7, Kind::Cards),
+            (7, Kind::Removal),
+            (3, Kind::Recursion),
+        ],
+    },
+    Pack {
+        name: "Red-white-black aggression",
+        colors: "RWB",
+        plan: "Cheap attackers and tokens, backed by removal and drain.",
+        slots: &[
+            (8, Kind::Removal),
+            (5, Kind::Aggro),
+            (4, Kind::Tokens),
+            (4, Kind::Drain),
+        ],
+    },
+    Pack {
+        name: "Green-blue-red ramp and big spells",
+        colors: "GUR",
+        plan: "Ramp hard, draw cards, land the biggest creatures, burn what blocks.",
+        slots: &[
+            (8, Kind::Ramp),
+            (6, Kind::Cards),
+            (7, Kind::Big),
+            (5, Kind::Removal),
+        ],
+    },
 ];
 
 impl Pack {
@@ -382,16 +499,20 @@ mod tests {
         assert!(is(Kind::Lock, "Essence Scatter"));
         assert!(is(Kind::Cards, "Prime Speaker Zegana"));
         assert!(!is(Kind::Big, "Llanowar Elves"));
-        // Ten pairs, each a different one.
-        assert_eq!(PACKS.len(), 10);
-        // A blue-green commander gets the blue-green pack only; a five-colour one all ten.
+        // Ten pairs and ten three-colour sets, each a different one.
+        assert_eq!(PACKS.len(), 20);
+        let mut seen: Vec<ColorSet> = PACKS.iter().map(|p| p.color_set()).collect();
+        seen.sort_by_key(|c| c.0);
+        seen.dedup();
+        assert_eq!(seen.len(), 20);
+        // A blue-green commander gets the blue-green pack only; a five-colour one all twenty.
         let tatyova = db.get("Tatyova, Benthic Druid").unwrap();
         let fits = for_commander(tatyova);
         assert_eq!(fits.len(), 1);
         assert_eq!(fits[0].colors, "GU");
         assert_eq!(
             for_commander(db.get("Thanos, the Mad Titan").unwrap()).len(),
-            10
+            20
         );
         // Built from every card, the pack's slots are filled.
         let all = Collection::new(
