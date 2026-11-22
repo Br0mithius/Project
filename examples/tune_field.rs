@@ -28,6 +28,13 @@ fn main() {
     // `--free`: trade picks and seen cards start in the deck but may be tuned out (a
     // player doesn't play every card they picked up).
     let mut free = false;
+    // `--only <player>`: just that opponent; with `--commander <name>` they changed
+    // commander: their deck is rebuilt around it (strong build, picks in) before tuning.
+    let mut only: Option<String> = None;
+    let mut new_cmd: Option<String> = None;
+    // `--archetype <name>` (with `--only`): the deck is rebuilt as that archetype ("Voltron"
+    // for an equipment deck) and its theme cards (Equipment and Auras) are kept in.
+    let mut archetype: Option<String> = None;
     let mut i = 2;
     while i < a.len() {
         match a[i].as_str() {
@@ -41,6 +48,18 @@ fn main() {
             }
             "--table" => table_mode = true,
             "--free" => free = true,
+            "--only" => {
+                only = Some(a[i + 1].clone());
+                i += 1;
+            }
+            "--archetype" => {
+                archetype = Some(a[i + 1].clone());
+                i += 1;
+            }
+            "--commander" => {
+                new_cmd = Some(a[i + 1].clone());
+                i += 1;
+            }
             f => files.push(f.to_string()),
         }
         i += 1;
@@ -101,6 +120,40 @@ fn main() {
         let mut table = Table::load(&dir);
         table.load_seen(&dir);
         for k in 0..table.opponents.len() {
+            if only
+                .as_ref()
+                .is_some_and(|w| !w.eq_ignore_ascii_case(&table.opponents[k].player))
+            {
+                continue;
+            }
+            if new_cmd.is_some() || archetype.is_some() {
+                let c = new_cmd
+                    .clone()
+                    .unwrap_or_else(|| table.opponents[k].commander.clone());
+                let d = match &archetype {
+                    Some(q) => {
+                        let arch = msh_deckbuilder::archetypes::find(q)
+                            .into_iter()
+                            .next()
+                            .expect("archetype");
+                        let cmd = db.get(&c).expect("commander");
+                        let mut d = msh_deckbuilder::archetypes::autobuild_as(
+                            arch,
+                            cmd,
+                            &db,
+                            &all,
+                            &Rules::default(),
+                        )
+                        .0;
+                        d.commander = Some(cmd.name.clone());
+                        d
+                    }
+                    None => msh_deckbuilder::table::strong_build(&c, &db, &Rules::default())
+                        .expect("new commander"),
+                };
+                table.opponents[k].commander = d.commander.clone().unwrap_or_default();
+                table.opponents[k].decklist = d.to_text();
+            }
             let o = table.opponents[k].clone();
             let Ok(deck) = table.deck_of(&o, &db) else {
                 continue;
@@ -117,9 +170,27 @@ fn main() {
                     .cloned()
                     .unwrap_or_default(),
             );
-            let tuned = tune(&deck, if free { Vec::new() } else { keep.clone() });
+            let mut locked = if free { Vec::new() } else { keep.clone() };
+            if archetype.is_some() {
+                locked.extend(
+                    deck.cards
+                        .keys()
+                        .filter(|n| {
+                            db.get(n).is_some_and(|c| {
+                                c.type_line.contains("Equipment") || c.type_line.contains("Aura")
+                            })
+                        })
+                        .cloned(),
+                );
+            }
+            let tuned = tune(&deck, locked);
             let picks_in = keep.iter().filter(|k| tuned.count_of(k) > 0).count();
-            println!("  {}: {} of {} picks and seen cards in the deck", o.player, picks_in, keep.len());
+            println!(
+                "  {}: {} of {} picks and seen cards in the deck",
+                o.player,
+                picks_in,
+                keep.len()
+            );
             let _ = std::fs::write(out.join(format!("{}.txt", o.player)), tuned.to_text());
             table.opponents[k].decklist = tuned.to_text();
         }
