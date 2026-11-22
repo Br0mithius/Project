@@ -5,7 +5,7 @@
 //! `cargo run --release --example tune_field -- <data dir> <out dir> [--rounds N]
 //! [--ref <deck file>]... (--table | <deck file>...)`
 //! `--table`: tunes every opponent in `<data dir>/table.json` with their trade picks and
-//! seen cards kept in, writes the tuned lists back to table.json (and to the out dir).
+//! seen cards kept in (`--free`: in to start with, but the tuning may cut them), writes the tuned lists back to table.json (and to the out dir).
 //! Otherwise each deck file is tuned and written to the out dir under the same name.
 use msh_deckbuilder::db::{CardDb, Collection, Rules};
 use msh_deckbuilder::deck::Deck;
@@ -25,6 +25,9 @@ fn main() {
     let mut refs: Vec<Deck> = Vec::new();
     let mut files: Vec<String> = Vec::new();
     let mut table_mode = false;
+    // `--free`: trade picks and seen cards start in the deck but may be tuned out (a
+    // player doesn't play every card they picked up).
+    let mut free = false;
     let mut i = 2;
     while i < a.len() {
         match a[i].as_str() {
@@ -37,6 +40,7 @@ fn main() {
                 i += 1;
             }
             "--table" => table_mode = true,
+            "--free" => free = true,
             f => files.push(f.to_string()),
         }
         i += 1;
@@ -113,7 +117,9 @@ fn main() {
                     .cloned()
                     .unwrap_or_default(),
             );
-            let tuned = tune(&deck, keep);
+            let tuned = tune(&deck, if free { Vec::new() } else { keep.clone() });
+            let picks_in = keep.iter().filter(|k| tuned.count_of(k) > 0).count();
+            println!("  {}: {} of {} picks and seen cards in the deck", o.player, picks_in, keep.len());
             let _ = std::fs::write(out.join(format!("{}.txt", o.player)), tuned.to_text());
             table.opponents[k].decklist = tuned.to_text();
         }

@@ -88,6 +88,7 @@ impl Effort {
 /// screened well is judged on games that didn't pick it.
 const SEED_WORTH: u64 = 0x1AB_0001;
 const SEED_ADDITIONS: u64 = 0x1AB_0002;
+const SEED_PACKAGES: u64 = 0x1AB_0007;
 const SEED_CONFIRM: u64 = 0x1AB_0003;
 const SEED_RECONFIRM: u64 = 0x1AB_0004;
 const SEED_COLORS: u64 = 0x1AB_0005;
@@ -209,6 +210,20 @@ pub struct LandChange {
     pub confirmed: Option<Measure>,
 }
 
+/// One of the deck's packages (its locks, its answers, its card advantage, its ramp)
+/// measured as a whole: every card of it replaced at once by the best bench cards that do
+/// something else. One card at a time, a package's worth hides in the noise (a removal
+/// spell read 0 ± 1.2 points; the five together +3.6 ± 0.6).
+#[derive(Debug, Clone)]
+pub struct Package {
+    pub label: &'static str,
+    pub cards: usize,
+    /// Win-rate points lost when the whole package is replaced.
+    pub worth: Measure,
+    /// Clearly worth having (2+ standard errors): its cards are only swapped like for like.
+    pub protected: bool,
+}
+
 /// The deck rebuilt in a colour set.
 #[derive(Debug, Clone)]
 pub struct ColorOption {
@@ -254,6 +269,8 @@ pub struct LabReport {
     /// Best measured gain for each bench card tried, best first.
     pub additions: Vec<Addition>,
     pub lands: Vec<LandChange>,
+    /// The deck's packages measured as wholes (see `Package`).
+    pub packages: Vec<Package>,
     /// Lands in the tested deck, and the league's land goal (`analysis::land_goal`): at or
     /// above it the lab suggests no swap of a spell for a basic.
     pub land_count: u32,
@@ -486,7 +503,7 @@ pub fn explore_with(
     let colour_sets = color_options(commander, piper, db, coll, rules);
 
     // Rough plan of the work, refined as stages are planned.
-    let stage_a = spells.len() + 3;
+    let stage_a = spells.len() + 3 + 4;
     let stage_b = effort.cut_slots * (effort.bench.min(bench.len()) + 1) + 1;
     let stage_c = 2 * effort.max_swaps.min(4) + 2;
     let colours = if colour_sets.len() > 1 {
@@ -622,6 +639,68 @@ pub fn explore_with(
     for w in worth.iter_mut() {
         w.dead_weight = w.worth.gain < 0.0 && w.worth.gain + 2.0 * w.worth.stderr < typical;
     }
+
+    // ------------------------------------------------------------ 1b. packages
+    progress.set_stage("Measuring the deck's packages");
+    let mut packages: Vec<Package> = Vec::new();
+    {
+        use crate::cohesion::{Category, category};
+        let mut metas: Vec<(Category, usize)> = Vec::new();
+        let mut p_decks: Vec<Vec<Swap>> = Vec::new();
+        for cat in [
+            Category::Lock,
+            Category::Answer,
+            Category::Cards,
+            Category::Ramp,
+        ] {
+            let members: Vec<&str> = spells
+                .iter()
+                .filter(|(c, _)| category(c) == cat)
+                .map(|(c, _)| c.name.as_str())
+                .collect();
+            if members.len() < 2 {
+                continue;
+            }
+            let mut outside = bench.iter().map(|b| b.0.as_str()).filter(|b| {
+                db.get(b)
+                    .is_some_and(|c| !c.is_land() && category(c) != cat)
+            });
+            p_decks.push(
+                members
+                    .iter()
+                    .map(|m| Swap::new(m, outside.next().unwrap_or(FILLER)))
+                    .collect(),
+            );
+            metas.push((cat, members.len()));
+        }
+        if !p_decks.is_empty() {
+            let out_p = run(&p_decks, effort.screen, SEED_PACKAGES)?;
+            add_base(&out_p);
+            for (i, (cat, n)) in metas.iter().enumerate() {
+                let g = out_p.diff(i + 1, 0);
+                let worth = Measure { gain: -g.gain, ..g };
+                packages.push(Package {
+                    label: cat.label(),
+                    cards: *n,
+                    protected: worth.gain > 0.0 && worth.z() >= 2.0,
+                    worth,
+                });
+            }
+        }
+    }
+    // A package that measured clearly worth having keeps its cards: one of them is swapped
+    // only for a card of the same kind.
+    let pkg_ok = |s: &Swap| {
+        let cat = |n: &str| db.get(n).map(crate::cohesion::category);
+        match cat(&s.cut) {
+            Some(c) => {
+                !packages.iter().any(|p| p.protected && p.label == c.label())
+                    || cat(&s.add) == Some(c)
+            }
+            None => true,
+        }
+    };
+    let plan_ok = |s: &Swap| plan_ok(s) && pkg_ok(s);
 
     // ------------------------------------------------------------ 2. additions
     progress.set_stage("Trying additions from your pool");
@@ -921,6 +1000,7 @@ pub fn explore_with(
         worth,
         additions,
         lands,
+        packages,
         land_count: base_lands,
         land_goal,
         mana_note,
@@ -1125,6 +1205,20 @@ impl LabReport {
                     a.add,
                     a.cut,
                     a.heuristic
+                ));
+            }
+        }
+        if !self.packages.is_empty() {
+            o.push_str(
+                "\nPACKAGES (each measured as a whole: all its cards replaced at once by the best bench\ncards of another kind). A package clearly worth having keeps its cards: swapped like for like only.\n",
+            );
+            for p in &self.packages {
+                o.push_str(&format!(
+                    "  {:>12}  {:<16} {} cards{}\n",
+                    pts_se(&p.worth),
+                    p.label,
+                    p.cards,
+                    if p.protected { "  kept" } else { "" }
                 ));
             }
         }

@@ -1484,9 +1484,28 @@ fn is_trick(c: &SimCard) -> bool {
         })
 }
 
+/// A flash permanent that removes a creature as it enters (Stasis Snare, Super Villain
+/// Lockup): instant-speed removal in all but card type, so it can be held up and cast on
+/// an attacker. (Measured, every seat changed, 12,000 games against the peer field:
+/// +0.2 ± 0.7 win-rate points - no measurable change; the bot still casts most of them in
+/// its own main phase, which earlier tests found the better default.)
+fn is_flash_lock(c: &SimCard) -> bool {
+    c.kw & FLASH != 0 && !c.is(T_CREATURE | T_INSTANT | T_SORCERY)
+}
+
+/// The effects `c` has when cast as removal: a spell's own, or a flash lock's "when ~
+/// enters" ones.
+fn removal_effects(c: &SimCard) -> impl Iterator<Item = &Effect> {
+    let lock = is_flash_lock(c);
+    c.abilities
+        .iter()
+        .filter(move |a| a.trig == Trig::Spell || lock && a.trig == Trig::Enters)
+        .flat_map(|a| a.effects.iter())
+}
+
 fn is_instant_removal(c: &SimCard) -> bool {
-    c.is(T_INSTANT)
-        && effects_of(c, false).any(|e| match e {
+    (c.is(T_INSTANT) || is_flash_lock(c))
+        && removal_effects(c).any(|e| match e {
             Effect::Destroy(t) | Effect::Exile { target: t, .. } | Effect::Bounce(t) => {
                 t.hits_their_creatures() && !t.mass
             }
@@ -4570,7 +4589,7 @@ pub(crate) fn removal_kills(g: &Game, d: usize, c: &SimCard, i: usize) -> bool {
             return false;
         }
     }
-    effects_of(c, false).any(|e| match e {
+    removal_effects(c).any(|e| match e {
         Effect::Destroy(t) if !legal(t) => false,
         Effect::Exile { target: t, .. } | Effect::Bounce(t) if !legal(t) => false,
         Effect::Damage { to: t, .. } | Effect::Shrink { to: t, .. } if !legal(t) => false,
