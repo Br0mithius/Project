@@ -270,6 +270,30 @@ pub fn swap_keeps_plan(
     })
 }
 
+/// Does `candidate` keep the plan `current` has? In each of the plan's groups (`QUOTAS`) it
+/// holds at least the quota, or as many as `current` when that already has fewer. A
+/// whole-deck alternative for a control deck must pass: otherwise a build with three fewer
+/// locks could replace the deck in one step, past the like-for-like rule for single swaps.
+pub fn keeps_plan(
+    current: &crate::deck::Deck,
+    candidate: &crate::deck::Deck,
+    db: &crate::db::CardDb,
+) -> bool {
+    QUOTAS.iter().all(|(min, js)| {
+        let count = |d: &crate::deck::Deck| -> u32 {
+            d.cards
+                .iter()
+                .filter(|(n, _)| {
+                    db.get(n)
+                        .is_some_and(|c| jobs(c).iter().any(|x| js.contains(x)))
+                })
+                .map(|(_, k)| *k)
+                .sum()
+        };
+        count(candidate) >= (*min).min(count(current))
+    })
+}
+
 /// True when `card` does no job (lands never count as filler).
 pub fn is_filler(card: &Card) -> bool {
     !card.is_land() && jobs(card).is_empty()

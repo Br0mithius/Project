@@ -456,6 +456,8 @@ pub fn optimize(
     let cands: Vec<(String, Deck)> = candidates(cmd, db, coll, rules)
         .into_iter()
         .filter(|(_, d)| canon(d) != canon(deck))
+        // A control deck's alternatives keep its plan (locks, answers, card advantage, ramp).
+        .filter(|(_, d)| !cohesive || crate::cohesion::keeps_plan(deck, d, db))
         // Cards locked in (`lab_keep`) stay: a whole-deck alternative without them is out.
         .filter(|(_, d)| {
             rules
