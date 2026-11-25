@@ -117,6 +117,66 @@ impl GuiApp {
         ui.style_mut().wrap_mode = None;
     }
 
+    /// The colour packs the current commander can play: what each colour combination is
+    /// best at, how many of each kind the deck holds, and a button to build on the pack.
+    fn color_packs(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
+        let Some(cmd) = self
+            .deck
+            .commander
+            .as_ref()
+            .and_then(|c| self.db.get(c))
+            .cloned()
+        else {
+            return;
+        };
+        let packs = crate::colorpacks::for_commander(&cmd);
+        if packs.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(format!(
+            "Colour packs for {} ({})",
+            cmd.name,
+            packs.len()
+        ))
+        .default_open(packs.len() <= 3)
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(
+                    "What each colour combination is best at, as kinds of cards with a minimum count (in your deck / wanted). A pack is a way to build; Optimise on the Playtest page races every pack against your deck and only switches when one wins.",
+                )
+                .small()
+                .weak(),
+            );
+            egui::Grid::new("color_packs")
+                .striped(true)
+                .num_columns(3)
+                .show(ui, |ui| {
+                    for p in packs {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(format!("{} ({})", p.name, p.colors)).strong());
+                            ui.label(RichText::new(p.plan).small().weak());
+                        });
+                        let census = p
+                            .census(&self.deck, &self.db)
+                            .iter()
+                            .map(|(k, have, want)| format!("{} {}/{}", k.label(), have, want))
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        ui.label(RichText::new(census).small());
+                        if ui
+                            .button("Build")
+                            .on_hover_text("Rebuild your deck on this pack (Undo brings the old deck back)")
+                            .clicked()
+                        {
+                            acts.push(Action::BuildPack(p.colors.to_string()));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+        ui.add_space(6.0);
+    }
+
     pub(super) fn archetypes_tab(&mut self, ui: &mut Ui, acts: &mut Vec<Action>) {
         ui.heading("Archetypes");
         super::home::help(
@@ -124,6 +184,7 @@ impl GuiApp {
             "Deck plans the builder knows, and how close your pool and deck are to each.",
             "Broad Commander archetypes and the league sets' key traits. Pool fit: how close the cards and commanders you own are to a working deck of that kind (half enablers, 30% payoffs, 20% an owned commander). Deck fit: the same for your current deck.",
         );
+        self.color_packs(ui, acts);
         ui.horizontal_wrapped(|ui| {
             ui.label("Show:");
             let st = &mut self.arch;

@@ -1073,7 +1073,7 @@ fn additions_to_try(
 /// Colour sets worth comparing: every subset of the identity that keeps the commander's
 /// own cost colours (at most the six with the strongest pools). Just one when there's no
 /// choice.
-fn color_options(
+pub(crate) fn color_options(
     cmd: &Card,
     piper: Option<char>,
     db: &CardDb,

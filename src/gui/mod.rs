@@ -226,6 +226,8 @@ enum Action {
     SetPartner(Option<String>),
     PiperColor(char),
     AutoBuild(String, Option<char>),
+    /// Build the commander's deck on a colour pack (its colours, e.g. "GU").
+    BuildPack(String),
     Fill,
     ClearDeck,
     Undo,
@@ -874,6 +876,26 @@ impl GuiApp {
                             .map(|i| i.to_string())
                             .unwrap_or_default()
                     );
+                }
+                Action::BuildPack(colors) => {
+                    let cmd = self
+                        .deck
+                        .commander
+                        .as_ref()
+                        .and_then(|c| self.db.get(c))
+                        .cloned();
+                    let pack = crate::colorpacks::PACKS.iter().find(|p| p.colors == colors);
+                    if let (Some(cmd), Some(pack)) = (cmd, pack) {
+                        let mut d =
+                            crate::colorpacks::build(pack, &cmd, &self.db, &self.coll, &self.rules);
+                        d.name = self.deck.name.clone();
+                        self.deck = d;
+                        self.tab = Tab::Build;
+                        self.status = format!(
+                            "Built the {} pack. Press Undo to go back, or Optimise to race it against other builds.",
+                            pack.name
+                        );
+                    }
                 }
                 Action::AutoBuild(n, piper) => {
                     if let Some(c) = self.db.get(&n).cloned() {
@@ -3236,6 +3258,30 @@ impl GuiApp {
                                     ));
                                 }
                             }
+                            ui.end_row();
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+                if !r.packages.is_empty() {
+                    ui.label(RichText::new("Packages").strong());
+                    ui.label(
+                        RichText::new(
+                            "Each group measured as a whole: all its cards replaced at once by the best bench cards of another kind. One card at a time, a group's worth hides in the noise. A group clearly worth having keeps its cards: they are only swapped like for like.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                    egui::Grid::new("lab_packages").striped(true).show(ui, |ui| {
+                        for p in &r.packages {
+                            ui.label(p.label);
+                            ui.label(format!("{} cards", p.cards));
+                            ui.label(gain(&p.worth));
+                            ui.label(
+                                RichText::new(if p.protected { "kept together" } else { "" })
+                                    .small()
+                                    .weak(),
+                            );
                             ui.end_row();
                         }
                     });

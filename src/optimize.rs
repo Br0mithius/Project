@@ -411,6 +411,23 @@ fn candidates(cmd: &Card, db: &CardDb, coll: &Collection, rules: &Rules) -> Vec<
         let (d, _) = archetypes::autobuild_as(a, cmd, db, coll, rules);
         push(format!("auto-build as {}", a.name), d);
     }
+    // Three or more colours: the builds on fewer of them (the strongest pools first). A
+    // five-colour commander's all-colours build can be far weaker than its best three
+    // (Nick Fury: 2% against the peer field on five colours, 11-20% on three).
+    if cmd.identity().count() >= 3 {
+        for set in crate::lab::color_options(cmd, None, db, coll, rules)
+            .into_iter()
+            .filter(|s| s.count() < cmd.identity().count())
+            .take(3)
+        {
+            let letters: String = (0..5)
+                .filter(|&i| set.contains(i))
+                .map(|i| crate::card::COLORS[i])
+                .collect();
+            let (d, _) = crate::analysis::autobuild(cmd, db, coll, rules, Some(set), None);
+            push(format!("auto-build in {}", letters), d);
+        }
+    }
     // The colour packs the commander's colours allow (see `colorpacks`).
     for pack in crate::colorpacks::for_commander(cmd) {
         push(
@@ -521,40 +538,54 @@ pub fn optimize(
         }
     }
     // ------------------------------------------------ swap search, round after round
+    // Two paths, judged against each other at the end: single swaps from the deck as it
+    // is, and (when a whole-deck alternative led the race) single swaps from that. Taking
+    // only the alternative's path lost to three plain swaps of the original deck: a new
+    // build that beats the deck can still be worse than the deck with its best upgrades.
     let mixed = opp.mixed();
-    for r in 0..rounds {
-        progress.set_stage(&format!("Swap search, round {} of up to {}", r + 1, rounds));
-        let rep = explore_with(cmd, &cur, db, coll, rules, effort, &mixed, progress)?;
-        match rep.best {
-            Some(b) => {
-                let what = b
-                    .swaps
-                    .iter()
-                    .map(|(s, _)| format!("{} -> {}", s.cut, s.add))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                steps.push(Step { what, gain: b.gain });
-                cur = b.deck;
+    let mut starts: Vec<(Deck, Vec<Step>)> = vec![(deck.clone(), Vec::new())];
+    if canon(&cur) != canon(deck) {
+        starts.push((cur.clone(), std::mem::take(&mut steps)));
+    }
+    let mut paths: Vec<(Deck, Vec<Step>)> = Vec::new();
+    for (start, mut path_steps) in starts {
+        let mut d = start;
+        for r in 0..rounds {
+            progress.set_stage(&format!("Swap search, round {} of up to {}", r + 1, rounds));
+            let rep = explore_with(cmd, &d, db, coll, rules, effort, &mixed, progress)?;
+            match rep.best {
+                Some(b) => {
+                    let what = b
+                        .swaps
+                        .iter()
+                        .map(|(s, _)| format!("{} -> {}", s.cut, s.add))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    path_steps.push(Step { what, gain: b.gain });
+                    d = b.deck;
+                }
+                None => break,
             }
-            None => break,
+        }
+        // Basics re-chosen for castability (how often each spell is castable on curve).
+        crate::mana::rebalance_basics(&mut d, db);
+        if !paths.iter().any(|(p, _)| canon(p) == canon(&d)) {
+            paths.push((d, path_steps));
         }
     }
-    // ------------------------------------------------ the mana base
-    // Basics re-chosen for castability (how often each spell is castable on curve).
-    let (before, after) = crate::mana::rebalance_basics(&mut cur, db);
-    if after > before + 0.001 {
-        notes.push(format!(
-            "Basics re-chosen for castability: castable on curve {:.1}% -> {:.1}%.",
-            before * 100.0,
-            after * 100.0
-        ));
-    }
     // ------------------------------------------------ final check on games no stage saw
-    let final_gain = if canon(&cur) != canon(original) {
+    let contenders: Vec<&(Deck, Vec<Step>)> = paths
+        .iter()
+        .filter(|(d, _)| canon(d) != canon(original))
+        .collect();
+    let mut cur = original.clone();
+    let mut final_gain = None;
+    if !contenders.is_empty() {
         progress.set_stage("Final check against your deck on fresh games");
+        let decks: Vec<Deck> = contenders.iter().map(|(d, _)| d.clone()).collect();
         let g = compare(
             original,
-            std::slice::from_ref(&cur),
+            &decks,
             db,
             opp,
             rules,
@@ -565,10 +596,25 @@ pub fn optimize(
         if progress.cancelled() {
             return None;
         }
-        g.into_iter().next()
-    } else {
-        None
-    };
+        let best = (0..g.len())
+            .max_by(|&x, &y| g[x].score.gain.partial_cmp(&g[y].score.gain).unwrap())
+            .expect("a contender");
+        for (k, gain) in g.iter().enumerate() {
+            if k != best {
+                notes.push(format!(
+                    "The other path ({}) measured {} on the same fresh games: the better one is shown.",
+                    contenders[k]
+                        .1
+                        .first()
+                        .map_or("swaps from your deck".to_string(), |s| s.what.clone()),
+                    pts(&gain.score)
+                ));
+            }
+        }
+        cur = contenders[best].0.clone();
+        steps = contenders[best].1.clone();
+        final_gain = g.into_iter().nth(best);
+    }
     Some(OptReport {
         start: original.clone(),
         best: cur,
@@ -676,12 +722,27 @@ pub fn test_claims(
     let t0 = std::time::Instant::now();
     let id = deck.identity(db)?;
     let kept = |n: &str| rules.lab_keep.iter().any(|k| k == n);
-    let cuts: Vec<String> = crate::analysis::weakest(deck, db, rules)
+    // The cards a claim may replace: the weakest ones that aren't locked in. For a control
+    // deck each claim is tried in place of the weakest cards it may replace under the plan
+    // (`cohesion::swap_keeps_plan`): a creature isn't measured in a lock's slot.
+    let weakest: Vec<String> = crate::analysis::weakest(deck, db, rules)
         .into_iter()
         .filter(|w| !kept(&w.card.name))
-        .take(2)
         .map(|w| w.card.name.clone())
         .collect();
+    let guard = deck
+        .commander
+        .as_deref()
+        .and_then(|c| db.get(c))
+        .is_some_and(crate::analysis::cohesive_plan);
+    let cuts_for = |add: &str| -> Vec<String> {
+        weakest
+            .iter()
+            .filter(|cut| !guard || crate::cohesion::swap_keeps_plan(deck, db, cut, add, 1))
+            .take(2)
+            .cloned()
+            .collect()
+    };
     let mut seen = std::collections::BTreeSet::new();
     let mut cards: Vec<&Card> = Vec::new();
     let mut skipped = 0;
@@ -700,13 +761,13 @@ pub fn test_claims(
             _ => skipped += 1,
         }
     }
-    let variants: Vec<(usize, &String, Deck)> = cards
+    let variants: Vec<(usize, String, Deck)> = cards
         .iter()
         .enumerate()
         .flat_map(|(i, c)| {
-            cuts.iter().map(move |cut| {
+            cuts_for(&c.name).into_iter().map(move |cut| {
                 let mut d = deck.clone();
-                d.remove(cut, 1);
+                d.remove(&cut, 1);
                 d.add(&c.name, 1);
                 (i, cut, d)
             })
