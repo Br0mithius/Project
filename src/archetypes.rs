@@ -601,6 +601,9 @@ pub fn targets(arch: &SetArchetype) -> Targets {
 /// remaining cards (no more 6+ drops than `t.topend`), on `t.lands` lands.
 /// The builder score a package card needs (about a fair creature of its cost).
 pub const PACKAGE_FLOOR: f32 = 6.0;
+/// How much more a left-out card must score than the weakest card in for the build's
+/// upgrade pass to swap them (about one win-rate point on the measured scale).
+pub const UPGRADE_MARGIN: f32 = 2.0;
 
 pub fn build(
     arch: &SetArchetype,
@@ -799,6 +802,49 @@ pub fn build_with(
                 Some(s) => deck.add(&s.card.name, 1),
                 None => break,
             }
+        }
+        // Upgrade pass: the quotas are filled in order and never looked back on, so a
+        // strong card that fits no quota (Alien Invasion, the builder's top pick at 10.5)
+        // stayed out while 5-6 point quota fillers stayed in. Swap the weakest card in for
+        // the best one left out while it clearly scores higher, keeping the plan's groups
+        // (control decks), the land cap and the top-end cap.
+        for _ in 0..12 {
+            let top = topend(&deck);
+            let Some(add) = analysis::suggestions_within(&deck, db, coll, rules, Some(plays))
+                .into_iter()
+                .find(|s| {
+                    !crate::mana::is_land_equivalent(s.card)
+                        && !(cap.is_some_and(|m| top >= m) && s.card.mana_value() >= 6)
+                })
+            else {
+                break;
+            };
+            let Some(cut) = analysis::weakest(&deck, db, rules).into_iter().find(|w| {
+                w.card.name != add.card.name
+                    // A synergy deck's theme cards are worth more together than their own
+                    // scores say (Kykar's fliers lost 4.7 points when they were cut).
+                    && (cohesive || !arch.fit(w.card).fits())
+                    // A colour pack's slots (`extra`) keep their minimum counts too.
+                    && extra.iter().all(|(min, f)| {
+                        !f(w.card) || f(add.card) || count(&deck, f) > n(*min)
+                    })
+                    && (!cohesive
+                        || crate::cohesion::swap_keeps_plan(
+                            &deck,
+                            db,
+                            &w.card.name,
+                            &add.card.name,
+                            1,
+                        ))
+            }) else {
+                break;
+            };
+            if add.score < cut.score + UPGRADE_MARGIN {
+                break;
+            }
+            let (cut, add) = (cut.card.name.clone(), add.card.name.clone());
+            deck.remove(&cut, 1);
+            deck.add(&add, 1);
         }
         let short = slots.saturating_sub(spells(&deck));
         (deck, short)

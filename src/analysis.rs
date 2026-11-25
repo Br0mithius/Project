@@ -577,7 +577,12 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     let Some(p) = db.sim_values.power(&card.name) else {
         return (h, why);
     };
-    let sure = 1.0 / (1.0 + (p.se / 0.6).powi(2));
+    // How far apart cards really are, in win-rate points: the spread of measured powers
+    // with the measurement noise taken out (variance 1.78 across 1,183 measured cards,
+    // noise 1.05: true spread 0.85). The old 0.6 trusted the rules of thumb past that, so
+    // a card measured once - Alien Invasion, +4.8 ± 1.25 in the lock-out deck - kept its
+    // weak rule-of-thumb score and auto-build left it out.
+    let sure = 1.0 / (1.0 + (p.se / 0.85).powi(2));
     let w = 0.85 * sure;
     let measured = SIM_BASE + SIM_SCALE * p.value;
     why.insert(
