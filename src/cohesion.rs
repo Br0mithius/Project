@@ -157,7 +157,19 @@ pub fn jobs(card: &Card) -> Vec<Job> {
     {
         out.push(Job::Drain);
     }
-    if has("create two") || (has("create") && has("creature token") && has("flying")) {
+    // A token every turn or on a trigger that keeps happening is a board that rebuilds
+    // itself (Alien Invasion: a hasty token each combat, one counter bigger each time -
+    // measured +4.6 win-rate points in the lock-out deck, where it was being left out as
+    // filler).
+    let token_engine = t.lines().any(|l| {
+        l.contains("create")
+            && l.contains("creature token")
+            && (l.starts_with("at the beginning of") || l.starts_with("whenever"))
+    });
+    if has("create two")
+        || (has("create") && has("creature token") && has("flying"))
+        || token_engine
+    {
         out.push(Job::Board);
     }
     out.sort();
@@ -354,6 +366,7 @@ mod tests {
         assert!(j("Hero's Downfall").contains(&Job::Removal));
         assert!(j("Futurist Forge").contains(&Job::CardAdvantage));
         assert!(j("Sol Ring").contains(&Job::Ramp));
+        assert!(j("Alien Invasion").contains(&Job::Board));
         assert!(j("Essence Scatter").contains(&Job::Lock));
         assert!(j("Prime Speaker Zegana").contains(&Job::CardAdvantage));
         for n in ["Circuitous Route", "Springbloom Druid", "Burnished Hart"] {
