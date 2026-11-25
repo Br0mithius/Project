@@ -147,32 +147,30 @@ impl GuiApp {
                 .small()
                 .weak(),
             );
-            egui::Grid::new("color_packs")
-                .striped(true)
-                .num_columns(3)
-                .show(ui, |ui| {
-                    for p in packs {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("{} ({})", p.name, p.colors)).strong());
-                            ui.label(RichText::new(p.plan).small().weak());
-                        });
-                        let census = p
-                            .census(&self.deck, &self.db)
-                            .iter()
-                            .map(|(k, have, want)| format!("{} {}/{}", k.label(), have, want))
-                            .collect::<Vec<_>>()
-                            .join(" · ");
-                        ui.label(RichText::new(census).small());
-                        if ui
-                            .button("Build")
-                            .on_hover_text("Rebuild your deck on this pack (Undo brings the old deck back)")
-                            .clicked()
-                        {
-                            acts.push(Action::BuildPack(p.colors.to_string()));
-                        }
-                        ui.end_row();
+            // Rows, not a grid: a grid squeezed the name column to a few letters wide.
+            for p in packs {
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Build")
+                        .on_hover_text(
+                            "Rebuild your deck on this pack (Undo brings the old deck back)",
+                        )
+                        .clicked()
+                    {
+                        acts.push(Action::BuildPack(p.colors.to_string()));
                     }
+                    ui.label(RichText::new(format!("{} ({})", p.name, p.colors)).strong());
+                    ui.label(RichText::new(p.plan).small().weak());
                 });
+                let census = p
+                    .census(&self.deck, &self.db)
+                    .iter()
+                    .map(|(k, have, want)| format!("{} {}/{}", k.label(), have, want))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                ui.label(RichText::new(format!("        {}", census)).small());
+                ui.add_space(2.0);
+            }
         });
         ui.add_space(6.0);
     }
