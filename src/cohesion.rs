@@ -122,7 +122,9 @@ pub fn jobs(card: &Card) -> Vec<Job> {
         || has("draw cards equal")
         || has("draws cards equal")
         || has("connive")
-        || (has("draw a card") && repeatable)
+        // Looting ("discard a card: draw a card", Óin the Brave) trades one card for one:
+        // card filtering, not card advantage.
+        || (has("draw a card") && repeatable && !has("discard a card"))
         || (has("draw a card") && has("each opponent discards"))
     {
         out.push(Job::CardAdvantage);
@@ -367,6 +369,7 @@ mod tests {
         assert!(j("Futurist Forge").contains(&Job::CardAdvantage));
         assert!(j("Sol Ring").contains(&Job::Ramp));
         assert!(j("Alien Invasion").contains(&Job::Board));
+        assert!(!j("Óin the Brave").contains(&Job::CardAdvantage));
         assert!(j("Essence Scatter").contains(&Job::Lock));
         assert!(j("Prime Speaker Zegana").contains(&Job::CardAdvantage));
         for n in ["Circuitous Route", "Springbloom Druid", "Burnished Hart"] {

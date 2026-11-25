@@ -1,7 +1,7 @@
 //! Builds the shipped card-power table (`data/sim_card_values_default.tsv`): every spell of
 //! each given deck measured against a vanilla stand-in of its cost, on paired games against
-//! the simulated league, plus (with `--league`) every simulated league deck's own cards
-//! against the rest of the league. Progress is saved after each deck, and decks already in
+//! the peer field (`table::peer_field`), plus (with `--league`) every peer deck's own cards
+//! against the rest of the field. Progress is saved after each deck, and decks already in
 //! the output are skipped, so a stopped run picks up where it left off.
 //!
 //! `cargo run --release --example measure_all -- <data dir> <games> <out dir> [--league]
@@ -36,7 +36,7 @@ fn main() {
     let mut db = CardDb::load(&data.join("cards.json")).expect("cards.json");
     db.attach_ratings(&data);
     let rules = msh_deckbuilder::league::app_rules(&data, None);
-    let gauntlet = msh_deckbuilder::ranking::TestBed::new(&db, &rules).gauntlet;
+    let gauntlet = msh_deckbuilder::table::peer_field(&db, &rules);
     let mut table = SimValues::load_own(&out);
     let done_decks = table.decks();
     let (done, cancel) = (AtomicUsize::new(0), AtomicBool::new(false));

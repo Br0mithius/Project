@@ -25,7 +25,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 /// Bumped whenever the simulator changes how cards play: older measurements stop counting
 /// (they stay in the file, marked with their version).
 // 2: Vehicles - crew stays tapped through the opponents' turns, so the AI keeps blockers.
-pub const SIM_VERSION: u32 = 2;
+// 3: measured against the peer field (decks about as strong as a tuned deck) instead of
+//    the simulated league, whose weak decks undervalued answers; counterspell colour
+//    limits and return-on-death tricks played.
+pub const SIM_VERSION: u32 = 3;
 
 pub const FILE: &str = "sim_card_values.tsv";
 /// Measurements shipped with the app (across the league's decks and every archetype), so the
@@ -469,7 +472,7 @@ impl PoolJob {
                 .join(" + "),
             deck: Prepared::new(deck, db),
             extra,
-            opponents: crate::ranking::TestBed::new(db, rules).gauntlet,
+            opponents: crate::table::peer_field(db, rules),
             league,
             games,
         }
