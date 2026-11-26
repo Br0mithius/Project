@@ -52,11 +52,25 @@ fn main() {
         league: msh_deckbuilder::table::peer_field(&db, &rules),
         table_weight: DEFAULT_TABLE_WEIGHT,
     };
-    let mut tsv = String::from("card\trarity\tset\tkind\treplaces\tscreen\tscreen_se\tconfirmed\tconfirmed_se\n");
+    let mut tsv = String::from(
+        "card\trarity\tset\tkind\treplaces\tscreen\tscreen_se\tconfirmed\tconfirmed_se\n",
+    );
     let t0 = std::time::Instant::now();
-    let r = test_claims(&deck, &spells, &db, &rules, &opp, games, confirm, &Progress::new())
-        .expect("claims");
-    eprintln!("spells done in {:.0} min", t0.elapsed().as_secs_f32() / 60.0);
+    let r = test_claims(
+        &deck,
+        &spells,
+        &db,
+        &rules,
+        &opp,
+        games,
+        confirm,
+        &Progress::new(),
+    )
+    .expect("claims");
+    eprintln!(
+        "spells done in {:.0} min",
+        t0.elapsed().as_secs_f32() / 60.0
+    );
     for c in &r.claims {
         let card = db.get(&c.card).unwrap();
         let _ = writeln!(
@@ -68,8 +82,10 @@ fn main() {
             c.cut,
             c.screened.gain * 100.0,
             c.screened.stderr * 100.0,
-            c.confirmed.map_or(String::new(), |m| format!("{:.2}", m.gain * 100.0)),
-            c.confirmed.map_or(String::new(), |m| format!("{:.2}", m.stderr * 100.0)),
+            c.confirmed
+                .map_or(String::new(), |m| format!("{:.2}", m.gain * 100.0)),
+            c.confirmed
+                .map_or(String::new(), |m| format!("{:.2}", m.stderr * 100.0)),
         );
     }
     std::fs::write(out, &tsv).expect("write");
@@ -90,7 +106,16 @@ fn main() {
             d
         })
         .collect();
-    let g = compare(&deck, &decks, &db, &opp, &rules, games * 3, 0x1A9D, &Progress::new());
+    let g = compare(
+        &deck,
+        &decks,
+        &db,
+        &opp,
+        &rules,
+        games * 3,
+        0x1A9D,
+        &Progress::new(),
+    );
     for (l, m) in lands.iter().zip(g.iter()) {
         let card = db.get(l).unwrap();
         let _ = writeln!(
