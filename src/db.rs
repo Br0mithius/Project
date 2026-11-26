@@ -347,6 +347,8 @@ impl Collection {
 
 /// The never-use list's file name in the data folder.
 pub const AVOID_FILE: &str = "avoid.txt";
+/// The always-keep list: cards auto-build always includes and nothing ever cuts.
+pub const KEEP_FILE: &str = "keep.txt";
 
 /// House rules for the format; editable in-app with `rules <key> <value>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +399,9 @@ pub struct Rules {
     /// playtest change uses them, whatever the simulator thinks.
     #[serde(skip)]
     pub avoid: Vec<String>,
+    /// Cards the player always wants in (`keep.txt`): auto-build includes them when owned,
+    /// and no optimiser, lab or upgrade pass cuts them.
+    pub keep: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -427,6 +432,7 @@ impl Default for Rules {
             land_goal_override: None,
             lab_keep: Vec::new(),
             avoid: Vec::new(),
+            keep: Vec::new(),
         }
     }
 }
@@ -442,18 +448,58 @@ impl Rules {
         r
     }
 
-    /// Reads the never-use list from `<data dir>/avoid.txt` (one card per line).
+    /// Reads the never-use list from `<data dir>/avoid.txt` and the always-keep list from
+    /// `keep.txt` (one card per line each).
     pub fn load_avoid(&mut self) {
-        self.avoid = self
-            .data_dir
-            .as_ref()
-            .and_then(|d| fs::read_to_string(d.join(AVOID_FILE)).ok())
-            .unwrap_or_default()
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(String::from)
-            .collect();
+        let read = |file: &str| -> Vec<String> {
+            self.data_dir
+                .as_ref()
+                .and_then(|d| fs::read_to_string(d.join(file)).ok())
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(String::from)
+                .collect()
+        };
+        self.avoid = read(AVOID_FILE);
+        let keep = read(KEEP_FILE);
+        for k in &keep {
+            if !self.lab_keep.contains(k) {
+                self.lab_keep.push(k.clone());
+            }
+        }
+        self.keep = keep;
+    }
+
+    /// Adds `name` to the always-keep list (or takes it off) and saves the list. A kept
+    /// card comes off the never-use list.
+    pub fn set_keep(&mut self, name: &str, keep: bool) -> Result<(), String> {
+        let mut names = self.keep.clone();
+        names.retain(|n| !n.eq_ignore_ascii_case(name));
+        if keep {
+            names.push(name.to_string());
+            if self.avoids(name) {
+                self.set_avoid(name, false)?;
+            }
+        }
+        let dir = self.data_dir.clone().ok_or("no data folder")?;
+        let text = format!(
+            "# Cards always kept in the deck (one per line): auto-build includes them, nothing cuts them.\n{}\n",
+            names.join("\n")
+        );
+        fs::write(dir.join(KEEP_FILE), text).map_err(|e| e.to_string())?;
+        self.lab_keep.retain(|n| !n.eq_ignore_ascii_case(name));
+        if keep {
+            self.lab_keep.push(name.to_string());
+        }
+        self.keep = names;
+        Ok(())
+    }
+
+    /// True when the player always wants `name` in the deck.
+    pub fn keeps(&self, name: &str) -> bool {
+        self.keep.iter().any(|a| a.eq_ignore_ascii_case(name))
     }
 
     /// Adds `name` to the never-use list (or takes it off) and saves the list.
@@ -462,6 +508,9 @@ impl Rules {
         names.retain(|n| !n.eq_ignore_ascii_case(name));
         if avoid {
             names.push(name.to_string());
+            if self.keeps(name) {
+                self.set_keep(name, false)?;
+            }
         }
         let dir = self.data_dir.clone().ok_or("no data folder")?;
         let text = format!(

@@ -2237,8 +2237,49 @@ pub fn weakest<'a>(deck: &Deck, db: &'a CardDb, rules: &Rules) -> Vec<Scored<'a>
             reasons,
         });
     }
-    out.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
+    // Cards on the always-keep list come last, whatever they score: nothing cuts them.
+    out.sort_by(|a, b| {
+        rules
+            .keeps(&a.card.name)
+            .cmp(&rules.keeps(&b.card.name))
+            .then(a.score.partial_cmp(&b.score).unwrap())
+    });
     out
+}
+
+/// Puts every owned, legal card on the always-keep list into `deck`, each in place of the
+/// weakest spell that isn't kept (a land only for a kept land). Returns what went in.
+pub fn force_keeps(deck: &mut Deck, db: &CardDb, coll: &Collection, rules: &Rules) -> Vec<String> {
+    let Some(id) = deck.identity(db) else {
+        return Vec::new();
+    };
+    let mut added = Vec::new();
+    for name in rules.keep.clone() {
+        let Some(card) = db.get(&name) else { continue };
+        if deck.count_of(&card.name) > 0
+            || !card.identity().is_subset_of(id)
+            || available(card, deck, coll, rules) == 0
+        {
+            continue;
+        }
+        let cut = if card.is_land() {
+            resolved(deck, db)
+                .into_iter()
+                .filter(|(c, _)| c.is_basic())
+                .max_by_key(|(c, _)| deck.count_of(&c.name))
+                .map(|(c, _)| c.name.clone())
+        } else {
+            weakest(deck, db, rules)
+                .into_iter()
+                .find(|w| !rules.keeps(&w.card.name))
+                .map(|w| w.card.name.clone())
+        };
+        let Some(cut) = cut else { continue };
+        deck.remove(&cut, 1);
+        deck.add(&card.name, 1);
+        added.push(card.name.clone());
+    }
+    added
 }
 
 /// Builds a full legal deck around `commander` from what you own. Also returns how many
@@ -2309,6 +2350,7 @@ pub fn autobuild(
         lands = new_lands;
     }
     fill_basics(&mut deck, db, rules);
+    force_keeps(&mut deck, db, coll, rules);
     (deck, shortfall)
 }
 
@@ -2709,6 +2751,36 @@ mod tests {
         // "Return this card from your graveyard" brings itself back.
         assert_eq!(payoff("graveyard fillers", "Project Deathlok Soldier"), 0.0);
         assert_eq!(payoff("graveyard fillers", "Decoy Ploy"), 1.0);
+    }
+
+    #[test]
+    fn always_kept_cards_go_in_and_are_never_cut() {
+        let (db, coll) = setup();
+        let mut rules = Rules::default();
+        let boss = db.get("Boss").unwrap();
+        let (deck, _) = autobuild(boss, &db, &coll, &rules, None, None);
+        // The weakest spell auto-build chose: kept, it sorts last and survives a rebuild.
+        let weak = weakest(&deck, &db, &rules)[0].card.name.clone();
+        rules.keep = vec![weak.clone()];
+        assert_eq!(weakest(&deck, &db, &rules).last().unwrap().card.name, weak);
+        // An owned card auto-build left out: kept, the next build includes it.
+        let out = db
+            .cards
+            .iter()
+            .find(|c| {
+                !c.is_land()
+                    && deck.count_of(&c.name) == 0
+                    && available(c, &deck, &coll, &rules) > 0
+                    && c.identity().is_subset_of(deck.identity(&db).unwrap())
+            })
+            .expect("an owned card left out")
+            .name
+            .clone();
+        rules.keep.push(out.clone());
+        let (kept, _) = autobuild(boss, &db, &coll, &rules, None, None);
+        assert_eq!(kept.count_of(&out), 1, "kept card left out");
+        assert_eq!(kept.count_of(&weak), 1, "kept card cut");
+        assert_eq!(kept.total_count(&rules), deck.total_count(&rules));
     }
 
     #[test]

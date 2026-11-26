@@ -832,6 +832,7 @@ pub fn build_with(
             };
             let Some(cut) = analysis::weakest(&deck, db, rules).into_iter().find(|w| {
                 w.card.name != add.card.name
+                    && !rules.keeps(&w.card.name)
                     // A synergy deck's theme cards are worth more together than their own
                     // scores say (Kykar's fliers lost 4.7 points when they were cut).
                     && (cohesive || !arch.fit(w.card).fits())
@@ -880,6 +881,7 @@ pub fn build_with(
     };
     let (mut deck, short) = deck;
     analysis::fill_basics(&mut deck, db, rules);
+    analysis::force_keeps(&mut deck, db, coll, rules);
     (deck, short)
 }
 

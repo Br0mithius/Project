@@ -255,6 +255,8 @@ enum Action {
     ApplyDeck(Deck, String),
     /// Put a card on the never-use list (true) or take it off (false).
     Avoid(String, bool),
+    /// Put a card on the always-keep list (or take it off).
+    Keep(String, bool),
     RunLab(crate::lab::Effort),
     StopLab,
     /// Measure every card's power by playtests (`true`: every league deck too).
@@ -1015,6 +1017,33 @@ impl GuiApp {
                         self.sim = None;
                     }
                 }
+                Action::Keep(name, keep) => match self.rules.set_keep(&name, keep) {
+                    Ok(()) => {
+                        if keep {
+                            // In the open deck now, if it's owned and fits.
+                            let added = analysis::force_keeps(
+                                &mut self.deck,
+                                &self.db,
+                                &self.coll,
+                                &self.rules,
+                            );
+                            self.status = if added.iter().any(|a| *a == name) {
+                                format!(
+                                    "{} is always kept: added to this deck in place of its weakest card, and nothing will cut it.",
+                                    name
+                                )
+                            } else {
+                                format!(
+                                    "{} is always kept: every build it fits includes it, and nothing will cut it.",
+                                    name
+                                )
+                            };
+                        } else {
+                            self.status = format!("{} is no longer always kept.", name);
+                        }
+                    }
+                    Err(e) => self.status = format!("Couldn't save the always-keep list: {}", e),
+                },
                 Action::Avoid(name, avoid) => match self.rules.set_avoid(&name, avoid) {
                     Ok(()) => {
                         if avoid {
@@ -1806,6 +1835,8 @@ impl GuiApp {
                         let badge = if self.rules.avoids(&card.name) {
                             // On the never-use list: dimmed, and says so.
                             Some("never use".into())
+                        } else if self.rules.keeps(&card.name) {
+                            Some("always keep".into())
                         } else if card.is_basic() {
                             Some(format!("{} in deck", self.deck.count_of(&card.name)))
                         } else if owned == 0 {
@@ -1866,6 +1897,15 @@ impl GuiApp {
                 .clicked()
             {
                 acts.push(Action::Avoid(name.clone(), !avoided));
+                ui.close();
+            }
+            let kept = self.rules.keeps(&name);
+            if ui
+                .button(if kept { "Stop always keeping it" } else { "Always keep this card" })
+                .on_hover_text("Always-keep cards go into every auto-build of a deck they fit (when owned), and no optimiser, lab or upgrade suggestion cuts them.")
+                .clicked()
+            {
+                acts.push(Action::Keep(name.clone(), !kept));
                 ui.close();
             }
             if ui.button("Inspect").clicked() {
@@ -4513,6 +4553,17 @@ impl GuiApp {
                             if ui.link(&name).clicked() {
                                 acts.push(Action::Select(name.clone()));
                                 self.tab = Tab::Build;
+                            }
+                        }
+                    }
+                    if !self.rules.keep.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Always kept").strong()).on_hover_text(
+                            "Cards you locked in (right-click a card > Always keep this card). Click one to stop keeping it.",
+                        );
+                        for name in self.rules.keep.clone() {
+                            if ui.link(format!("{} (stop keeping)", name)).clicked() {
+                                acts.push(Action::Keep(name, false));
                             }
                         }
                     }
