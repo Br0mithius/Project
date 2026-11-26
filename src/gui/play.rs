@@ -9,6 +9,8 @@ use eframe::egui;
 use egui::{Color32, Panel, RichText, ScrollArea, Ui};
 use std::sync::mpsc::Receiver;
 
+mod table;
+
 const GOOD: Color32 = Color32::from_rgb(110, 220, 120);
 const WARN: Color32 = Color32::from_rgb(255, 190, 110);
 const BAD: Color32 = Color32::from_rgb(255, 120, 100);
@@ -52,6 +54,18 @@ pub(super) struct PlayState {
     report_wait: bool,
     report_status: String,
     log_filter: String,
+    // The table view.
+    /// Show the plain text view instead of the table.
+    classic: bool,
+    /// The card under the pointer this frame, and the one the preview shows.
+    hover: Option<String>,
+    hover_shown: Option<String>,
+    /// The defender new attackers go at (index into the attack question's defenders).
+    attack_target: usize,
+    /// The attacker picked first when declaring blocks.
+    block_sel: Option<u32>,
+    menu: Option<table::Menu>,
+    menu_age: u32,
 }
 
 impl PlayState {
@@ -73,6 +87,7 @@ impl PlayState {
                 suggested,
                 ..
             }) => {
+                self.attack_target = suggested.first().map(|s| s.1).unwrap_or(0);
                 self.attacks = attackers
                     .iter()
                     .map(|(id, _)| suggested.iter().find(|s| s.0 == *id).map(|s| s.1))
@@ -83,6 +98,7 @@ impl PlayState {
                 suggested,
                 ..
             }) => {
+                self.block_sel = None;
                 self.blocks = blockers
                     .iter()
                     .map(|(id, _, _)| suggested.iter().find(|s| s.0 == *id).map(|s| s.1))
@@ -185,6 +201,7 @@ impl GuiApp {
                     self.play.view = Some(*view);
                     self.play.ask = Some(ask);
                     self.play.edits_ok = edits_ok;
+                    self.play.menu = None;
                     self.play.reset_controls();
                 }
                 FromEngine::Dump { text, answers } => {
@@ -317,16 +334,29 @@ impl GuiApp {
             egui::CentralPanel::default().show(ui, |ui| self.play_setup(ui));
             return;
         }
-        Panel::right("play_side")
-            .resizable(true)
-            .default_size(440.0)
-            .show(ui, |ui| self.play_side(ui));
-        egui::CentralPanel::default().show(ui, |ui| {
-            ScrollArea::vertical()
-                .id_salt("play_board")
-                .auto_shrink([false, false])
-                .show(ui, |ui| self.play_board(ui));
-        });
+        if self.play.classic {
+            Panel::right("play_side")
+                .resizable(true)
+                .default_size(440.0)
+                .show(ui, |ui| {
+                    if ui
+                        .button(RichText::new("Table view").strong())
+                        .on_hover_text("The game drawn as a card table")
+                        .clicked()
+                    {
+                        self.play.classic = false;
+                    }
+                    self.play_side(ui)
+                });
+            egui::CentralPanel::default().show(ui, |ui| {
+                ScrollArea::vertical()
+                    .id_salt("play_board")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.play_board(ui));
+            });
+        } else {
+            self.play_table(ui);
+        }
         if self.play.report_open {
             let mut open = true;
             egui::Window::new("Report a bug")
@@ -366,7 +396,7 @@ impl GuiApp {
         ui.heading("Play a game by hand");
         super::home::help(
             ui,
-            "Play your deck by hand against three simulated opponents.",
+            "Play your deck by hand against your real table, peer-level decks or the simulated league.",
             "You play the deck from the Deck Builder (seat P0) against three simulated league opponents, with the same rules engine as the Playtest Lab. You tap your own mana; every other decision of yours is asked in the side panel, and the bot's suggestion is always shown. If something looks wrong, press \"Report bug\".",
         );
         ui.add_space(8.0);
@@ -385,9 +415,28 @@ impl GuiApp {
         }
         if self.play.opps.is_none() && self.play.opps_job.is_none() {
             let (db, rules) = (self.db.clone(), self.rules.clone());
+            let table = self.table.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let d = crate::opponents::decks(&db, &rules, crate::ranking::GAUNTLET_SEEDS[0]);
+                // Your real table first (the players you meet), then the peer-level decks,
+                // then the simulated league.
+                let mut d: Vec<Deck> = table
+                    .next_decks(&db)
+                    .into_iter()
+                    .map(|(who, mut deck)| {
+                        deck.name = format!("{} - your table", who);
+                        deck
+                    })
+                    .collect();
+                d.extend(crate::table::peer_decks(&db).into_iter().map(|mut deck| {
+                    deck.name = "peer-level deck".into();
+                    deck
+                }));
+                d.extend(crate::opponents::decks(
+                    &db,
+                    &rules,
+                    crate::ranking::GAUNTLET_SEEDS[0],
+                ));
                 let _ = tx.send(d);
             });
             self.play.opps_job = Some(rx);
