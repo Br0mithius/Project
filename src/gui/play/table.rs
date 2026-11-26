@@ -1215,6 +1215,20 @@ impl GuiApp {
                     });
                 }
             }
+            Some(Ask::Pick { options, .. }) => {
+                let tag = format!("(P{})", x.ctrl);
+                let k = options
+                    .iter()
+                    .position(|o| o.starts_with(&x.name) && o.contains(&tag))
+                    .or_else(|| options.iter().position(|o| o.starts_with(&x.name)));
+                if let Some(k) = k {
+                    outline = Some(if self.play.picks.get(k).copied().unwrap_or(false) {
+                        SELECT
+                    } else {
+                        Color32::from_rgb(235, 215, 130)
+                    });
+                }
+            }
             _ => {}
         }
         if outline.is_none() {
@@ -1767,8 +1781,21 @@ impl GuiApp {
             _ => return,
         };
         egui::Window::new(title)
-            .id(egui::Id::unique("table_overlay"))
-            .default_pos(pos2(ctx.content_rect().center().x - 330.0, 150.0))
+            // Its own id for the opening hand: a window keeps where it was last shown.
+            .id(egui::Id::unique(if matches!(ask, Ask::Mulligan { .. }) {
+                "table_overlay_hand"
+            } else {
+                "table_overlay"
+            }))
+            .default_pos({
+                // Over your hand (not needed while choosing), so the boards with the
+                // targets stay in view; the opening hand sits in the middle.
+                let r = ctx.content_rect();
+                match &ask {
+                    Ask::Mulligan { .. } => pos2(r.center().x - 330.0, 150.0),
+                    _ => pos2(r.center().x - 360.0, r.bottom() - 330.0),
+                }
+            })
             .movable(true)
             .collapsible(false)
             .resizable(false)
@@ -1869,6 +1896,15 @@ impl GuiApp {
                     }
                 }
                 // The rest: the same controls as the text view.
+                if let Ask::Pick { options, .. } = &ask {
+                    if options.iter().any(|o| o.contains("(P")) {
+                        ui.label(
+                            RichText::new("Or click the glowing cards on the table.")
+                                .small()
+                                .color(Color32::from_rgb(235, 215, 130)),
+                        );
+                    }
+                }
                 self.question(ui);
                 if matches!(ask, Ask::Pay { .. }) {
                     ui.separator();
@@ -1968,7 +2004,13 @@ impl GuiApp {
                             None
                         }
                     })
-                    .collect(),
+                    // Copies of a card offer the same action once each: one is enough.
+                    .fold(Vec::new(), |mut acc: Vec<(String, Answer)>, (l, a)| {
+                        if !acc.iter().any(|(m, _)| *m == l) {
+                            acc.push((l, a));
+                        }
+                        acc
+                    }),
                 _ => Vec::new(),
             }
         };
