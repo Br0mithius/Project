@@ -424,6 +424,10 @@ impl<'a> Game<'a> {
                 self.perms[bi].blocking = true;
             }
         }
+        self.ext.block_of = attacks
+            .iter()
+            .flat_map(|at| at.blockers.iter().map(move |&b| (b, at.attacker)))
+            .collect();
         for b in blockers {
             if let Some(bi) = self.idx(b) {
                 let snap = self.perms[bi].clone();
@@ -484,6 +488,7 @@ impl<'a> Game<'a> {
     /// Creatures stop attacking and blocking when combat ends.
     pub fn end_combat(&mut self) {
         self.ext.attack_def.clear();
+        self.ext.block_of.clear();
         for x in self.perms.iter_mut() {
             x.attacking = false;
             x.blocking = false;

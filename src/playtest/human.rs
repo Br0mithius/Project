@@ -247,6 +247,10 @@ pub struct PermView {
     pub attached: Option<u32>,
     pub attacking: bool,
     pub blocking: bool,
+    /// The player an attacker attacks (or whose planeswalker), and the attacker a blocker
+    /// blocks.
+    pub attack_target: Option<usize>,
+    pub blocks: Option<u32>,
     pub token: bool,
     pub commander: bool,
     pub keywords: String,
@@ -707,6 +711,13 @@ impl<'a> Game<'a> {
                 attached: x.attached,
                 attacking: x.attacking,
                 blocking: x.blocking,
+                attack_target: self
+                    .ext
+                    .attack_def
+                    .iter()
+                    .find(|a| a.0 == x.id)
+                    .map(|a| a.1 as usize),
+                blocks: self.ext.block_of.iter().find(|b| b.0 == x.id).map(|b| b.1),
                 token: x.is_token(),
                 commander: x.commander > 0,
                 keywords: super::probe::kw_names(x.eff_kw),

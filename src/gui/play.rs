@@ -87,6 +87,9 @@ pub(super) struct PlayState {
     show_keys: bool,
     /// The game-over window was closed (to look at the final board).
     over_closed: bool,
+    /// Where this frame drew each permanent and each player's mat (for combat arrows).
+    perm_rects: std::collections::HashMap<u32, egui::Rect>,
+    mat_rects: Vec<Option<egui::Rect>>,
 }
 
 /// The caster and card of a "P2 casts Name (MV 3) for ..." log line.

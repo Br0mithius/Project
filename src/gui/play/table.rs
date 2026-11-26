@@ -177,6 +177,8 @@ impl GuiApp {
             .frame(egui::Frame::new().fill(FELT).inner_margin(6.0))
             .show(ui, |ui| {
                 let full = ui.available_rect_before_wrap();
+                self.play.perm_rects.clear();
+                self.play.mat_rects = vec![None; v.players.len()];
                 let opps: Vec<usize> = (0..v.players.len()).filter(|&p| p != v.seat).collect();
                 if let Some(f) = self.play.focus_opp.filter(|f| opps.contains(f)) {
                     // One opponent's board fills the table.
@@ -195,6 +197,7 @@ impl GuiApp {
                     ui.add_space(4.0);
                     let r = ui.available_rect_before_wrap();
                     self.player_mat(ui, &v, ask.as_ref(), f, r.size(), false, &mut clicks);
+                    self.combat_arrows(ui, &v, ask.as_ref());
                     return;
                 }
                 // Top half: the opponents in equal boxes. Bottom half: the turn bar and you.
@@ -242,6 +245,7 @@ impl GuiApp {
                     false,
                     &mut clicks,
                 );
+                self.combat_arrows(ui, &v, ask.as_ref());
                 ui.allocate_rect(full, Sense::hover());
             });
         // Keyboard: Space does the main thing, Esc closes a menu.
@@ -341,6 +345,85 @@ impl GuiApp {
         self.table_menu(&ctx);
         for c in clicks {
             self.table_click(c, &v, ask.as_ref(), &ctx);
+        }
+    }
+
+    /// Combat as arrows: each attacker to the player it attacks, each blocker to the attacker
+    /// it blocks (including the attacks and blocks you are choosing now).
+    fn combat_arrows(&self, ui: &Ui, v: &GameView, ask: Option<&Ask>) {
+        let mut attacks: Vec<(u32, usize)> = v
+            .perms
+            .iter()
+            .filter_map(|x| x.attack_target.map(|d| (x.id, d)))
+            .collect();
+        let mut blocks: Vec<(u32, u32)> = v
+            .perms
+            .iter()
+            .filter_map(|x| x.blocks.map(|a| (x.id, a)))
+            .collect();
+        match ask {
+            Some(Ask::Attack {
+                attackers,
+                defenders,
+                ..
+            }) => {
+                for ((id, _), d) in attackers.iter().zip(&self.play.attacks) {
+                    let player = d.and_then(|d| {
+                        (0..v.players.len()).find(|&p| defender_of(defenders, p) == Some(d))
+                    });
+                    if let Some(p) = player {
+                        attacks.push((*id, p));
+                    }
+                }
+            }
+            Some(Ask::Block { blockers, .. }) => {
+                for ((id, _, _), a) in blockers.iter().zip(&self.play.blocks) {
+                    if let Some(a) = a {
+                        blocks.push((*id, *a));
+                    }
+                }
+            }
+            _ => {}
+        }
+        let painter = ui.painter();
+        let arrow = |from: Pos2, to: Pos2, col: Color32| {
+            let d = to - from;
+            if d.length() < 12.0 {
+                return;
+            }
+            let dir = d.normalized();
+            let end = to - dir * 4.0;
+            let shadow = Stroke::new(6.0, Color32::from_black_alpha(120));
+            painter.line_segment([from, end], shadow);
+            painter.line_segment([from, end], Stroke::new(3.0, col));
+            let side = vec2(-dir.y, dir.x) * 7.0;
+            let back = end - dir * 14.0;
+            painter.add(egui::Shape::convex_polygon(
+                vec![end, back + side, back - side],
+                col,
+                Stroke::NONE,
+            ));
+        };
+        for (id, p) in attacks {
+            let (Some(r), Some(Some(m))) =
+                (self.play.perm_rects.get(&id), self.play.mat_rects.get(p))
+            else {
+                continue;
+            };
+            let from = r.center();
+            let to = m.shrink(10.0).clamp(from);
+            arrow(from, to, ATTACK.gamma_multiply(0.85));
+        }
+        for (b, a) in blocks {
+            let (Some(rb), Some(ra)) = (self.play.perm_rects.get(&b), self.play.perm_rects.get(&a))
+            else {
+                continue;
+            };
+            arrow(
+                rb.center(),
+                ra.clamp(rb.center()),
+                BLOCK.gamma_multiply(0.9),
+            );
         }
     }
 
@@ -1002,6 +1085,9 @@ impl GuiApp {
                     });
             })
             .response;
+        if let Some(m) = self.play.mat_rects.get_mut(p) {
+            *m = Some(resp.rect);
+        }
         // Opponents' boards open full size from a button in the corner.
         if expandable {
             let r = Rect::from_min_size(resp.rect.right_top() + vec2(-66.0, 6.0), vec2(60.0, 20.0));
@@ -1071,6 +1157,7 @@ impl GuiApp {
         let badge = (count > 1).then(|| format!("x{}", count));
         let resp = self.table_card(ui, &card, w, badge, false);
         let rect = resp.rect;
+        self.play.perm_rects.insert(x.id, rect);
         self.note_hover(&resp, &x.name);
         let painter = ui.painter_at(rect.expand(3.0));
         let small = FontId::proportional((w * 0.17).clamp(9.0, 13.0));

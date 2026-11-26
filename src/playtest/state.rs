@@ -501,6 +501,8 @@ pub struct GameExtra {
     /// This combat's attackers and the player each attacks (or whose planeswalker): "target
     /// creature defending player controls".
     pub attack_def: Vec<(u32, u8)>,
+    /// This combat's blocks: (blocker, the attacker it blocks), for the Play tab's arrows.
+    pub block_of: Vec<(u32, u32)>,
     /// A spell cast for less because "it targets a tapped creature" (1) / "an attacking
     /// creature" (2) / "an attacking nontoken creature" (3) must target one.
     pub must_target: u8,
