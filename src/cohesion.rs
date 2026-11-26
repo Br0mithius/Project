@@ -246,9 +246,16 @@ pub const QUOTAS: [(u32, &[Job]); 4] = [
     (8, &[Job::Ramp]),
 ];
 
-/// The plan's minimums as they apply now: `QUOTAS`, unless a playtest experiment changed
-/// the counts (`set_quota_counts`).
+/// The plan's groups with the minimums the lab and optimiser hold a deck to when they
+/// swap single cards (`swap_keeps_plan`, `keeps_plan`): a lock goes out only for a lock
+/// unless the deck has locks to spare.
 pub fn quotas() -> [(u32, &'static [Job]); 4] {
+    QUOTAS
+}
+
+/// The minimums auto-build fills before anything else (`QUOTAS` unless an experiment set
+/// counts with `set_quota_counts`; see examples/quota_lab.rs).
+pub fn build_quotas() -> [(u32, &'static [Job]); 4] {
     use std::sync::atomic::Ordering;
     let mut q = QUOTAS;
     for (k, slot) in q.iter_mut().enumerate() {
@@ -268,9 +275,9 @@ static QUOTA_COUNTS: [std::sync::atomic::AtomicU32; 4] = [
 ];
 static QUOTA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Playtest experiments: the plan's minimum counts (locks, answers, card advantage, ramp),
-/// and whether a slot takes only cards above the builder's quality floor. `None` puts the
-/// shipped counts back.
+/// Playtest experiments: auto-build's minimum counts (locks, answers, card advantage,
+/// ramp), and whether a slot takes only cards above the builder's quality floor. `None`
+/// puts the shipped counts back.
 pub fn set_quota_counts(counts: Option<[u32; 4]>, floor: bool) {
     use std::sync::atomic::Ordering;
     for k in 0..4 {
@@ -302,12 +309,24 @@ pub fn swap_keeps_plan(
     add: &str,
     slack: u32,
 ) -> bool {
+    swap_keeps_quotas(&quotas(), deck, db, cut, add, slack)
+}
+
+/// `swap_keeps_plan` against the given minimums.
+pub fn swap_keeps_quotas(
+    q: &[(u32, &'static [Job])],
+    deck: &crate::deck::Deck,
+    db: &crate::db::CardDb,
+    cut: &str,
+    add: &str,
+    slack: u32,
+) -> bool {
     let Some(cut_card) = db.get(cut) else {
         return true;
     };
     let cut_jobs = jobs(cut_card);
     let add_jobs = db.get(add).map(jobs).unwrap_or_default();
-    quotas().iter().all(|(min, js)| {
+    q.iter().all(|(min, js)| {
         let in_group = |j: &[Job]| j.iter().any(|x| js.contains(x));
         if !in_group(&cut_jobs) || in_group(&add_jobs) {
             return true;

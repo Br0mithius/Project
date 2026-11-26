@@ -769,7 +769,7 @@ pub fn build_with(
             use crate::cohesion::{Job, jobs};
             let has_job = |c: &Card, js: &[Job]| jobs(c).iter().any(|j| js.contains(j));
             let floor = crate::cohesion::quota_floor();
-            for (min, js) in crate::cohesion::quotas() {
+            for (min, js) in crate::cohesion::build_quotas() {
                 let f = |c: &Card| has_job(c, js);
                 while count(&deck, &f) < n(min) && spells(&deck) < slots {
                     match pick(&deck, &f) {
@@ -838,7 +838,8 @@ pub fn build_with(
                         !f(w.card) || f(add.card) || count(&deck, f) > n(*min)
                     })
                     && (!cohesive
-                        || crate::cohesion::swap_keeps_plan(
+                        || crate::cohesion::swap_keeps_quotas(
+                            &crate::cohesion::build_quotas(),
                             &deck,
                             db,
                             &w.card.name,

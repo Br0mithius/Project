@@ -85,6 +85,16 @@ fn main() {
         floor: true,
         ..base
     });
+    // Only a lock minimum: the plan's identity kept, the rest left to the cards' scores.
+    for locks in [3, 5] {
+        push(Setting {
+            jobs: [locks, 0, 0, 0],
+            floor: false,
+            creatures: 0,
+            draw: 0,
+            ramp: 0,
+        });
+    }
     // No minimums at all: the cards' scores and the upgrade pass decide.
     push(Setting {
         jobs: [0; 4],
