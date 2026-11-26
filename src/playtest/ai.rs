@@ -4072,7 +4072,16 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
                 let held = plan_set(&opts, budget - n, &skip)
                     .map(|x| x.1)
                     .unwrap_or(0.0);
-                if held >= full - 1.5 {
+                // (Experiment: `MSH_HOLD_TOL` sets how much of the turn's plan the hold may
+                // cost, in card points; default 1.5.)
+                static TOL: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+                let tol = *TOL.get_or_init(|| {
+                    std::env::var("MSH_HOLD_TOL")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1.5)
+                });
+                if held >= full - tol {
                     hold = n;
                     held_slot = Some(h);
                     break;
