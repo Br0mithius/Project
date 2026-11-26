@@ -66,9 +66,42 @@ pub(super) struct PlayState {
     block_sel: Option<u32>,
     menu: Option<table::Menu>,
     menu_age: u32,
+    /// Permanents that arrived since the previous decision, and each player's life change
+    /// over the same stretch (what happened while the bots played).
+    new_ids: std::collections::HashSet<u32>,
+    life_delta: Vec<i32>,
+    /// Pass every response window until it's your turn again.
+    skip_to_mine: bool,
+    /// An opponent's board blown up to fill the table.
+    focus_opp: Option<usize>,
 }
 
 impl PlayState {
+    /// What changed since the previous view: new permanents, life totals.
+    fn note_changes(&mut self, v: &GameView) {
+        match &self.view {
+            Some(old) => {
+                let had: std::collections::HashSet<u32> = old.perms.iter().map(|x| x.id).collect();
+                self.new_ids = v
+                    .perms
+                    .iter()
+                    .map(|x| x.id)
+                    .filter(|id| !had.contains(id))
+                    .collect();
+                self.life_delta = v
+                    .players
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| p.life - old.players.get(k).map_or(p.life, |q| q.life))
+                    .collect();
+            }
+            None => {
+                self.new_ids.clear();
+                self.life_delta.clear();
+            }
+        }
+    }
+
     fn running(&self) -> bool {
         self.handle.is_some() && self.over.is_none() && self.failed.is_none()
     }
@@ -198,6 +231,27 @@ impl GuiApp {
                     edits_ok,
                 } => {
                     self.play.log.extend(view.new_log.iter().cloned());
+                    self.play.note_changes(&view);
+                    // "Skip to my turn": pass the opponents' windows and stops for you.
+                    if self.play.skip_to_mine {
+                        if view.active == view.seat {
+                            self.play.skip_to_mine = false;
+                        } else {
+                            let auto = match &ask {
+                                Ask::Act { window: true, .. } => Some(Answer::Pass),
+                                Ask::Continue { .. } => Some(Answer::Continue),
+                                _ => None,
+                            };
+                            if let Some(a) = auto {
+                                self.play.view = Some(*view);
+                                if let Some(h) = &self.play.handle {
+                                    let _ = h.tx.send(ToEngine::Answer(a.clone()));
+                                    self.play.sent.push(a);
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     self.play.view = Some(*view);
                     self.play.ask = Some(ask);
                     self.play.edits_ok = edits_ok;

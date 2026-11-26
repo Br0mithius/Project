@@ -15,11 +15,14 @@
 use super::*;
 use crate::card::Card;
 use crate::gui::cards::{CARD_RATIO, CardLook, card_widget, paint_card};
-use egui::{Align2, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 /// Something clicked on the table this frame (handled once drawing is done).
 enum Click {
-    Hand(String),
+    /// A card in hand: (slot, name).
+    Hand(usize, String),
+    /// Your commander in the command zone.
+    Command(String),
     Perm(u32),
     Mat(usize),
     Send(Answer),
@@ -104,6 +107,25 @@ fn is_debug(line: &str) -> bool {
         || line.contains("AI P")
 }
 
+/// The card name in a choice: "Gollum the Abandoned 2/2 (P3)" or "Chandra [4] (P2)" ->
+/// "Gollum the Abandoned" / "Chandra".
+fn option_card_name(o: &str) -> &str {
+    let mut s = o.split(" (P").next().unwrap_or(o).trim();
+    if let Some((head, last)) = s.rsplit_once(' ') {
+        let stat = last.split('/').count() == 2
+            && last.split('/').all(|x| {
+                !x.is_empty()
+                    && x.chars()
+                        .all(|c| c.is_ascii_digit() || c == '-' || c == '*')
+            });
+        let loyalty = last.starts_with('[') && last.ends_with(']');
+        if stat || loyalty {
+            s = head.trim();
+        }
+    }
+    s.split(" (").next().unwrap_or(s).trim()
+}
+
 fn hand_card(db: &crate::db::CardDb, name: &str) -> Card {
     db.get(name).cloned().unwrap_or_else(|| Card {
         name: name.to_string(),
@@ -143,7 +165,7 @@ impl GuiApp {
             .show(ui, |ui| self.table_side(ui, &v));
         Panel::bottom("table_hand")
             .resizable(false)
-            .exact_size(250.0)
+            .exact_size(225.0)
             .show(ui, |ui| {
                 egui::Frame::new().fill(FELT).show(ui, |ui| {
                     self.prompt_bar(ui, &v, ask.as_ref(), &mut clicks);
@@ -154,49 +176,117 @@ impl GuiApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(FELT).inner_margin(6.0))
             .show(ui, |ui| {
-                ScrollArea::vertical()
-                    .id_salt("table_board")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        // Cards shrink as boards fill up, so both fit above your hand.
-                        let busiest = (0..v.players.len())
-                            .filter(|&p| p != v.seat)
-                            .map(|p| v.perms.iter().filter(|x| x.ctrl == p).count())
-                            .max()
-                            .unwrap_or(0);
-                        let mine = v.perms.iter().filter(|x| x.ctrl == v.seat).count();
-                        let opp_w = match busiest {
-                            0..=6 => 58.0,
-                            7..=11 => 50.0,
-                            _ => 42.0,
-                        };
-                        let my_w = match mine {
-                            0..=8 => 80.0,
-                            9..=14 => 68.0,
-                            _ => 58.0,
-                        };
-                        let opps: Vec<usize> =
-                            (0..v.players.len()).filter(|&p| p != v.seat).collect();
-                        let n = opps.len().max(1) as f32;
-                        let w = (ui.available_width() - 8.0 * (n - 1.0)) / n;
-                        ui.horizontal_top(|ui| {
-                            for &p in &opps {
-                                ui.allocate_ui_with_layout(
-                                    vec2(w, 10.0),
-                                    egui::Layout::top_down(egui::Align::Min),
-                                    |ui| {
-                                        ui.set_width(w);
-                                        self.player_mat(ui, &v, ask.as_ref(), p, opp_w, &mut clicks);
-                                    },
-                                );
+                let full = ui.available_rect_before_wrap();
+                let opps: Vec<usize> = (0..v.players.len()).filter(|&p| p != v.seat).collect();
+                if let Some(f) = self.play.focus_opp.filter(|f| opps.contains(f)) {
+                    // One opponent's board fills the table.
+                    ui.horizontal(|ui| {
+                        if ui.button("< Back to the table (Esc)").clicked() {
+                            self.play.focus_opp = None;
+                        }
+                        for &p in &opps {
+                            if p != f
+                                && ui.button(format!("P{} {}", p, v.players[p].name)).clicked()
+                            {
+                                self.play.focus_opp = Some(p);
                             }
-                        });
-                        ui.add_space(6.0);
-                        self.turn_bar(ui, &v);
-                        ui.add_space(6.0);
-                        self.player_mat(ui, &v, ask.as_ref(), v.seat, my_w, &mut clicks);
+                        }
                     });
+                    ui.add_space(4.0);
+                    let r = ui.available_rect_before_wrap();
+                    self.player_mat(ui, &v, ask.as_ref(), f, r.size(), false, &mut clicks);
+                    return;
+                }
+                // Top half: the opponents in equal boxes. Bottom half: the turn bar and you.
+                let gap = 6.0;
+                let half = (full.height() - gap) / 2.0;
+                let n = opps.len().max(1) as f32;
+                let bw = (full.width() - gap * (n - 1.0)) / n;
+                for (k, &p) in opps.iter().enumerate() {
+                    let rect = Rect::from_min_size(
+                        full.min + vec2(k as f32 * (bw + gap), 0.0),
+                        vec2(bw, half),
+                    );
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    child.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    self.player_mat(
+                        &mut child,
+                        &v,
+                        ask.as_ref(),
+                        p,
+                        rect.size(),
+                        true,
+                        &mut clicks,
+                    );
+                }
+                let bottom =
+                    Rect::from_min_max(egui::pos2(full.min.x, full.min.y + half + gap), full.max);
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(bottom)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                self.turn_bar(&mut child, &v);
+                child.add_space(4.0);
+                let r = child.available_rect_before_wrap();
+                self.player_mat(
+                    &mut child,
+                    &v,
+                    ask.as_ref(),
+                    v.seat,
+                    r.size(),
+                    false,
+                    &mut clicks,
+                );
+                ui.allocate_rect(full, Sense::hover());
             });
+        // Keyboard: Space does the main thing, Esc closes a menu.
+        let typing = ctx.memory(|m| m.focused().is_some());
+        if !typing && self.play.menu.is_none() {
+            if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
+                let main = match ask.as_ref() {
+                    Some(Ask::Act { .. }) => Some(Answer::Pass),
+                    Some(Ask::Continue { .. }) => Some(Answer::Continue),
+                    Some(Ask::Attack { attackers, .. }) => Some(Answer::Attacks(
+                        attackers
+                            .iter()
+                            .zip(&self.play.attacks)
+                            .filter_map(|((id, _), d)| d.map(|d| (*id, d)))
+                            .collect(),
+                    )),
+                    Some(Ask::Block { blockers, .. }) => Some(Answer::Blocks(
+                        blockers
+                            .iter()
+                            .zip(&self.play.blocks)
+                            .filter_map(|((id, _, _), a)| a.map(|a| (*id, a)))
+                            .collect(),
+                    )),
+                    // Choices: Space accepts the bot's suggestion; mulligans keep.
+                    Some(Ask::Pick { .. }) | Some(Ask::YesNo { .. }) | Some(Ask::Number { .. }) => {
+                        Some(Answer::Auto)
+                    }
+                    Some(Ask::Mulligan { .. }) => Some(Answer::Yes(true)),
+                    _ => None,
+                };
+                if let Some(a) = main {
+                    clicks.push(Click::Send(a));
+                }
+            }
+            // B: let the bot decide this one (plays your phase, attacks, blocks, picks).
+            if ctx.input(|i| i.key_pressed(egui::Key::B)) && ask.is_some() {
+                clicks.push(Click::Send(Answer::Auto));
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // Esc closes a menu first, then leaves an expanded board.
+            if self.play.menu.take().is_none() {
+                self.play.focus_opp = None;
+            }
+        }
         self.table_overlay(&ctx, &v, ask.as_ref());
         self.table_menu(&ctx);
         for c in clicks {
@@ -334,20 +424,20 @@ impl GuiApp {
                     }
                     ui.separator();
                     ui.label(RichText::new(&v.phase).small().italics());
+                    // The latest event, so the bots' plays are easy to follow (the log on
+                    // the right has the rest).
+                    let players = v.players.len();
+                    if let Some(l) = self
+                        .play
+                        .log
+                        .iter()
+                        .rev()
+                        .find(|l| !private_to_a_bot(l, v.seat, players) && !is_debug(l))
+                    {
+                        ui.separator();
+                        ui.add(egui::Label::new(RichText::new(l).small().weak()).truncate());
+                    }
                 });
-                // The latest events, so the bots' plays are easy to follow.
-                let players = v.players.len();
-                let recent: Vec<&String> = self
-                    .play
-                    .log
-                    .iter()
-                    .rev()
-                    .filter(|l| !private_to_a_bot(l, v.seat, players) && !is_debug(l))
-                    .take(2)
-                    .collect();
-                for l in recent.into_iter().rev() {
-                    ui.label(RichText::new(l).small().weak());
-                }
             });
     }
 
@@ -358,7 +448,8 @@ impl GuiApp {
         v: &GameView,
         ask: Option<&Ask>,
         p: usize,
-        card_w: f32,
+        size: Vec2,
+        expandable: bool,
         clicks: &mut Vec<Click>,
     ) {
         let Some(pl) = v.players.get(p).cloned() else {
@@ -383,9 +474,12 @@ impl GuiApp {
             .stroke(stroke)
             .corner_radius(8.0)
             .inner_margin(6.0);
+        let inner = size - vec2(12.0, 12.0);
         let resp = frame
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
+                ui.set_min_size(inner);
+                ui.set_max_size(inner);
+                let top = ui.cursor().min.y;
                 // Header: name, life, zones.
                 ui.horizontal_wrapped(|ui| {
                     let life_col = if !pl.alive {
@@ -401,6 +495,15 @@ impl GuiApp {
                             .strong()
                             .color(life_col),
                     );
+                    // How much it moved since your last decision.
+                    let d = self.play.life_delta.get(p).copied().unwrap_or(0);
+                    if d != 0 {
+                        ui.label(RichText::new(format!("{:+}", d)).strong().color(if d < 0 {
+                            BAD
+                        } else {
+                            GOOD
+                        }));
+                    }
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new(if me {
@@ -425,6 +528,31 @@ impl GuiApp {
                             bits.push(format!("{} floating", pl.floating));
                         }
                         ui.label(RichText::new(bits.join(" · ")).small().weak());
+                        // Opponents' hands as card backs.
+                        if !me && pl.hand_count > 0 {
+                            let n = pl.hand_count.min(12);
+                            let (r, _) = ui.allocate_exact_size(
+                                vec2(8.0 * n as f32 + 10.0, 14.0),
+                                Sense::hover(),
+                            );
+                            for k in 0..n {
+                                let c = Rect::from_min_size(
+                                    r.min + vec2(8.0 * k as f32, 0.0),
+                                    vec2(10.0, 14.0),
+                                );
+                                ui.painter().rect_filled(
+                                    c,
+                                    CornerRadius::from(2.0),
+                                    Color32::from_rgb(70, 50, 40),
+                                );
+                                ui.painter().rect_stroke(
+                                    c,
+                                    CornerRadius::from(2.0),
+                                    Stroke::new(1.0, Color32::from_rgb(150, 120, 80)),
+                                    StrokeKind::Inside,
+                                );
+                            }
+                        }
                         if !pl.commander_damage.is_empty() {
                             ui.label(
                                 RichText::new(format!(
@@ -442,9 +570,36 @@ impl GuiApp {
                     // Command zone and graveyard as small cards.
                     for (name, tax) in &pl.command {
                         let card = hand_card(&self.db, name);
-                        let r = self.table_card(ui, &card, 34.0, None, false);
+                        let r =
+                            self.table_card(ui, &card, if me { 46.0 } else { 34.0 }, None, false);
                         self.note_hover(&r, name);
-                        r.on_hover_text(format!("Command zone (tax {})", tax));
+                        // Castable from here: glow like a playable hand card.
+                        if me {
+                            if let Some(Ask::Act { actions, .. }) = ask {
+                                if let Some(a) = actions.iter().find(|a| {
+                                    a.card.as_deref() == Some(name.as_str())
+                                        && a.label.contains("command zone")
+                                }) {
+                                    let c = if a.payable {
+                                        GLOW_PAY
+                                    } else if a.auto_ok {
+                                        GLOW_AUTO
+                                    } else {
+                                        Color32::GRAY
+                                    };
+                                    ui.painter().rect_stroke(
+                                        r.rect,
+                                        CornerRadius::from(3.0),
+                                        Stroke::new(2.5, c),
+                                        StrokeKind::Outside,
+                                    );
+                                }
+                            }
+                        }
+                        let r = r.on_hover_text(format!("Command zone (commander tax {})", tax));
+                        if me && r.clicked() {
+                            clicks.push(Click::Command(name.clone()));
+                        }
                     }
                     if !pl.graveyard.is_empty() || !pl.exile.is_empty() {
                         ui.menu_button(RichText::new("zones").small(), |ui| {
@@ -462,8 +617,24 @@ impl GuiApp {
                             }
                         });
                     }
-                    if aimed {
-                        ui.label(RichText::new("target").color(ATTACK).strong());
+                    // Aiming attacks: a button on the mat (the whole frame being clickable
+                    // took clicks meant for the cards on it).
+                    if let Some(Ask::Attack { .. }) = ask {
+                        if !me && pl.alive {
+                            let b = egui::Button::new(
+                                RichText::new(if aimed { "Target" } else { "Aim here" })
+                                    .strong()
+                                    .color(if aimed { Color32::WHITE } else { ATTACK }),
+                            )
+                            .fill(if aimed {
+                                ATTACK
+                            } else {
+                                Color32::TRANSPARENT
+                            });
+                            if ui.add(b).clicked() {
+                                clicks.push(Click::Mat(p));
+                            }
+                        }
                     }
                 });
                 // Battlefield: creatures and planeswalkers, other permanents, lands.
@@ -477,34 +648,66 @@ impl GuiApp {
                     .filter(|x| !x.creature && !x.planeswalker && !x.land)
                     .collect();
                 let lands: Vec<&PermView> = mine.iter().filter(|x| x.land && !x.creature).collect();
-                if !front.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        for x in front {
-                            self.perm_card_ui(ui, v, ask, x, card_w, 1, clicks);
+                let mut land_groups: Vec<(&str, bool)> = Vec::new();
+                for x in &lands {
+                    if !land_groups.contains(&(x.name.as_str(), x.tapped)) {
+                        land_groups.push((x.name.as_str(), x.tapped));
+                    }
+                }
+                let room = vec2(inner.x, (inner.y - (ui.cursor().min.y - top)).max(40.0));
+                let sp = ui.spacing().item_spacing;
+                let (card_w, one_row) = fit_card_w(
+                    room - vec2(14.0, 0.0),
+                    sp,
+                    front.len(),
+                    back.len(),
+                    land_groups.len(),
+                );
+                ScrollArea::vertical()
+                    .id_salt(("mat", p))
+                    .auto_shrink([false, false])
+                    .max_height(room.y)
+                    .show(ui, |ui| {
+                        // Creatures and planeswalkers first, then other permanents and land
+                        // stacks: on one shared row when that gives bigger cards.
+                        let mut groups: Vec<(String, bool, Vec<&PermView>)> = Vec::new();
+                        for x in lands {
+                            match groups.iter_mut().find(|g| g.0 == x.name && g.1 == x.tapped) {
+                                Some(g) => g.2.push(x),
+                                None => groups.push((x.name.clone(), x.tapped, vec![x])),
+                            }
+                        }
+                        groups.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+                        let mut rest: Vec<(&PermView, f32, usize)> =
+                            back.iter().map(|x| (*x, 0.8, 1)).collect();
+                        rest.extend(groups.iter().map(|g| (g.2[0], 0.7, g.2.len())));
+                        let lead: Vec<(&PermView, f32, usize)> =
+                            front.iter().map(|x| (*x, 1.0, 1)).collect();
+                        let rows: Vec<Vec<(&PermView, f32, usize)>> = if one_row {
+                            vec![lead.into_iter().chain(rest).collect()]
+                        } else {
+                            vec![lead, rest]
+                        };
+                        for row in rows.into_iter().filter(|r| !r.is_empty()) {
+                            ui.horizontal_wrapped(|ui| {
+                                for (x, k, n) in row {
+                                    self.perm_card_ui(ui, v, ask, x, card_w * k, n, clicks);
+                                }
+                            });
                         }
                     });
-                }
-                ui.horizontal_wrapped(|ui| {
-                    for x in back {
-                        self.perm_card_ui(ui, v, ask, x, card_w * 0.8, 1, clicks);
-                    }
-                    // Lands grouped by name and tapped state.
-                    let mut groups: Vec<(String, bool, Vec<&PermView>)> = Vec::new();
-                    for x in lands {
-                        match groups.iter_mut().find(|g| g.0 == x.name && g.1 == x.tapped) {
-                            Some(g) => g.2.push(x),
-                            None => groups.push((x.name.clone(), x.tapped, vec![x])),
-                        }
-                    }
-                    groups.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
-                    for (_, _, g) in groups {
-                        self.perm_card_ui(ui, v, ask, g[0], card_w * 0.7, g.len(), clicks);
-                    }
-                });
             })
             .response;
-        if !me && resp.interact(Sense::click()).clicked() {
-            clicks.push(Click::Mat(p));
+        // Opponents' boards open full size from a button in the corner.
+        if expandable {
+            let r = Rect::from_min_size(resp.rect.right_top() + vec2(-66.0, 6.0), vec2(60.0, 20.0));
+            if ui
+                .put(r, egui::Button::new(RichText::new("Expand").small()))
+                .on_hover_text("Fill the table with this board")
+                .clicked()
+            {
+                self.play.focus_opp = Some(p);
+            }
         }
     }
 
@@ -636,6 +839,50 @@ impl GuiApp {
         if outline.is_none() && tappable && x.ctrl == v.seat {
             outline = Some(Color32::from_rgb(150, 170, 120));
         }
+        // Which attacker each blocker is set to block.
+        if let Some(Ask::Block {
+            attackers,
+            blockers,
+            ..
+        }) = ask
+        {
+            if let Some(k) = blockers.iter().position(|b| b.0 == x.id) {
+                if let Some(a) = self.play.blocks.get(k).copied().flatten() {
+                    let who = attackers
+                        .iter()
+                        .find(|t| t.0 == a)
+                        .map(|t| {
+                            option_card_name(&t.1)
+                                .split(',')
+                                .next()
+                                .unwrap_or("")
+                                .to_string()
+                        })
+                        .unwrap_or_default();
+                    // As much of the name as fits the card.
+                    let room = (((w * 0.96) / (small.size * 0.55)) as usize)
+                        .saturating_sub(4)
+                        .max(4);
+                    let who = if who.chars().count() > room {
+                        format!("{}.", who.chars().take(room - 1).collect::<String>())
+                    } else {
+                        who
+                    };
+                    let r = Rect::from_min_size(
+                        rect.left_top() + vec2(2.0, 2.0),
+                        vec2(w * 0.96, w * 0.22),
+                    );
+                    painter.rect_filled(r, CornerRadius::from(3.0), BLOCK);
+                    painter.text(
+                        r.center(),
+                        Align2::CENTER_CENTER,
+                        format!("x {}", who),
+                        small.clone(),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
         // Whom each attacker is set to attack.
         if let Some(Ask::Attack {
             attackers,
@@ -663,6 +910,10 @@ impl GuiApp {
                     );
                 }
             }
+        }
+        // Arrived since your last decision (what the bots just played).
+        if outline.is_none() && self.play.new_ids.contains(&x.id) {
+            outline = Some(Color32::from_rgb(80, 210, 230));
         }
         if let Some(c) = outline {
             painter.rect_stroke(
@@ -725,7 +976,7 @@ impl GuiApp {
                 painter.text(
                     rect.left_bottom() + vec2(3.0, -3.0),
                     Align2::LEFT_BOTTOM,
-                    "new",
+                    "sick",
                     small.clone(),
                     Color32::from_gray(180),
                 );
@@ -813,7 +1064,11 @@ impl GuiApp {
                         .small()
                         .weak(),
                     );
-                    let pass = if *window { "Pass" } else { "End phase" };
+                    let pass = if *window {
+                        "Pass (Space)"
+                    } else {
+                        "End phase (Space)"
+                    };
                     if ui.button(RichText::new(pass).size(16.0).strong()).clicked() {
                         clicks.push(Click::Send(Answer::Pass));
                     }
@@ -826,6 +1081,16 @@ impl GuiApp {
                         .clicked()
                     {
                         clicks.push(Click::Send(Answer::Auto));
+                    }
+                    if v.active != v.seat {
+                        if ui
+                            .button("Skip to my turn")
+                            .on_hover_text("Pass every chance to respond until your next turn")
+                            .clicked()
+                        {
+                            self.play.skip_to_mine = true;
+                            clicks.push(Click::Send(Answer::Pass));
+                        }
                     }
                     // Everything, as a list (for actions that aren't on a card).
                     ui.menu_button("All actions", |ui| {
@@ -1085,7 +1350,7 @@ impl GuiApp {
             }
             let resp = ui.interact(hit, ui.scope_id().with(("hand", k)), Sense::click());
             if resp.clicked() {
-                clicks.push(Click::Hand(hand[k].clone()));
+                clicks.push(Click::Hand(k, hand[k].clone()));
             }
         }
         if let Some(k) = hovered {
@@ -1093,7 +1358,7 @@ impl GuiApp {
             let hit = Rect::from_min_max(r.min - vec2(0.0, 14.0), r.max);
             let resp = ui.interact(hit, ui.scope_id().with(("hand", k)), Sense::click());
             if resp.clicked() {
-                clicks.push(Click::Hand(hand[k].clone()));
+                clicks.push(Click::Hand(k, hand[k].clone()));
             }
         }
     }
@@ -1112,7 +1377,8 @@ impl GuiApp {
         };
         egui::Window::new(title)
             .id(egui::Id::unique("table_overlay"))
-            .anchor(Align2::CENTER_CENTER, [0.0, -60.0])
+            .default_pos(pos2(ctx.content_rect().center().x - 330.0, 150.0))
+            .movable(true)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
@@ -1142,7 +1408,7 @@ impl GuiApp {
                     let names: Vec<Option<String>> = options
                         .iter()
                         .map(|o| {
-                            let base = o.split(" (").next().unwrap_or(o).trim();
+                            let base = option_card_name(o);
                             self.db.get(base).map(|c| c.name.clone())
                         })
                         .collect();
@@ -1166,7 +1432,17 @@ impl GuiApp {
                             ui.set_max_width(9.0 * (w + 8.0));
                             for (k, name) in names.iter().enumerate() {
                                 let card = hand_card(&self.db, name.as_deref().unwrap_or(""));
-                                let badge = suggested.contains(&k).then(|| "bot".to_string());
+                                // Whose it is (a permanent on the table) and the bot's pick.
+                                let owner = options[k]
+                                    .rsplit_once("(P")
+                                    .and_then(|(_, r)| r.split(')').next())
+                                    .map(|p| format!("P{}", p));
+                                let badge = match (owner, suggested.contains(&k)) {
+                                    (Some(o), true) => Some(format!("{} bot", o)),
+                                    (Some(o), false) => Some(o),
+                                    (None, true) => Some("bot".to_string()),
+                                    (None, false) => None,
+                                };
                                 let r = self.table_card(ui, &card, w, badge, false);
                                 self.note_hover(&r, &card.name);
                                 if self.play.picks.get(k).copied().unwrap_or(false) {
@@ -1267,12 +1543,26 @@ impl GuiApp {
         }
         let Some(ask) = ask else { return };
         // Actions on a card, by name.
-        let card_actions = |name: &str| -> Vec<(String, Answer)> {
+        // Actions on a card, by name and by where it is: a hand card's are casts and land
+        // plays, the command zone's the commander cast, a permanent's its abilities.
+        #[derive(PartialEq)]
+        enum From {
+            Hand,
+            Command,
+            Field,
+        }
+        let card_actions = |name: &str, from: From| -> Vec<(String, Answer)> {
+            let cast = |l: &str| l.starts_with("Cast ") || l.starts_with("Play land");
             match ask {
                 Ask::Act { actions, .. } => actions
                     .iter()
                     .enumerate()
                     .filter(|(_, a)| a.card.as_deref() == Some(name))
+                    .filter(|(_, a)| match from {
+                        From::Hand => cast(&a.label) && !a.label.contains("command zone"),
+                        From::Command => a.label.contains("command zone"),
+                        From::Field => !cast(&a.label),
+                    })
                     .filter_map(|(k, a)| {
                         let label = if a.cost.is_empty() {
                             a.label.clone()
@@ -1292,16 +1582,43 @@ impl GuiApp {
             }
         };
         match c {
-            Click::Hand(name) => {
+            Click::Hand(slot, name) => {
                 if let Ask::Pick { options, max, .. } = ask {
-                    if let Some(k) = options.iter().position(|o| o.starts_with(&name)) {
+                    // The k-th copy in hand is the k-th matching option.
+                    let hand: Vec<String> = v
+                        .players
+                        .get(v.seat)
+                        .map(|p| p.hand.clone())
+                        .unwrap_or_default();
+                    let nth = hand[..slot.min(hand.len())]
+                        .iter()
+                        .filter(|h| **h == name)
+                        .count();
+                    let matching: Vec<usize> = options
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, o)| o.split(" (").next().unwrap_or(o).trim() == name)
+                        .map(|(k, _)| k)
+                        .collect();
+                    if let Some(&k) = matching.get(nth).or(matching.first()) {
                         self.toggle_pick(k, *max);
                     }
                     return;
                 }
-                let items = card_actions(&name);
+                if !matches!(ask, Ask::Act { .. }) {
+                    return;
+                }
+                let items = card_actions(&name, From::Hand);
                 match items.len() {
                     0 => self.status = format!("{} can't be played right now.", name),
+                    1 => self.play_send(items[0].1.clone()),
+                    _ => self.open_menu(ctx, name, items),
+                }
+            }
+            Click::Command(name) => {
+                let items = card_actions(&name, From::Command);
+                match items.len() {
+                    0 => self.status = format!("{} can't be cast right now.", name),
                     1 => self.play_send(items[0].1.clone()),
                     _ => self.open_menu(ctx, name, items),
                 }
@@ -1348,12 +1665,17 @@ impl GuiApp {
                         }
                     }
                     Ask::Pick { options, max, .. } => {
-                        if let Some(k) = options.iter().position(|o| o.starts_with(&x.name)) {
+                        let tag = format!("(P{})", x.ctrl);
+                        let k = options
+                            .iter()
+                            .position(|o| o.starts_with(&x.name) && o.contains(&tag))
+                            .or_else(|| options.iter().position(|o| o.starts_with(&x.name)));
+                        if let Some(k) = k {
                             self.toggle_pick(k, *max);
                         }
                     }
                     _ => {
-                        let mut items = card_actions(&x.name);
+                        let mut items = card_actions(&x.name, From::Field);
                         // Tapping for mana.
                         if self.play.edits_ok {
                             if let Some(s) = v.sources.iter().find(|s| s.id == id) {
@@ -1398,4 +1720,61 @@ impl GuiApp {
         }
         self.play.picks[k] = !was;
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choice_options_name_their_cards() {
+        assert_eq!(
+            option_card_name("Gollum the Abandoned 2/2 (P3)"),
+            "Gollum the Abandoned"
+        );
+        assert_eq!(
+            option_card_name("Chandra, Torch of Defiance [4] (P2)"),
+            "Chandra, Torch of Defiance"
+        );
+        assert_eq!(option_card_name("Stasis Snare"), "Stasis Snare");
+        assert_eq!(option_card_name("Stasis Snare (bot)"), "Stasis Snare");
+        assert_eq!(step_index("After blockers (combat tricks)"), Some(5));
+        assert_eq!(step_index("Main phase 2"), Some(6));
+        assert_eq!(step_index("Declare attackers"), Some(4));
+    }
+}
+
+/// The biggest card width at which a board fits its box, and whether to lay it out as one
+/// flow (small boards) rather than creatures above the rest. Creatures and planeswalkers
+/// are full size, other permanents 0.8 and land stacks 0.7.
+fn fit_card_w(room: Vec2, sp: Vec2, front: usize, back: usize, lands: usize) -> (f32, bool) {
+    // Rows needed for `units` cards of width `w` (a mixed row measured in land widths).
+    let rows = |units: f32, w: f32| -> f32 {
+        if units <= 0.0 {
+            0.0
+        } else {
+            let per = ((room.x + sp.x) / (w + sp.x)).max(1.0);
+            (units / per).ceil()
+        }
+    };
+    let rest = back as f32 * 0.8 / 0.7 + lands as f32;
+    let fit = |one: bool| -> f32 {
+        let mut w: f32 = 130.0;
+        while w > 30.0 {
+            let h = if one {
+                let r = rows(front as f32 / 0.7 + rest, w * 0.7);
+                r * (w * CARD_RATIO + sp.y)
+            } else {
+                rows(front as f32, w) * (w * CARD_RATIO + sp.y)
+                    + rows(rest, w * 0.7) * (w * 0.8 * CARD_RATIO + sp.y)
+            };
+            if h + 4.0 <= room.y {
+                break;
+            }
+            w -= 2.0;
+        }
+        w
+    };
+    let (two, one) = (fit(false), fit(true));
+    if one > two { (one, true) } else { (two, false) }
 }
