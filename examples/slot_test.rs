@@ -6,7 +6,8 @@
 //! <candidate>...`
 //!
 //! A candidate is a card name (it takes the slot card's place) or a list of swaps,
-//! `Out>In|Out>In`, for changes to several slots at once.
+//! `Out>In|Out>In`, for changes to several slots at once. `SEED=<n>` plays another set of
+//! games (default 77123).
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::lab::Progress;
@@ -55,7 +56,10 @@ fn main() {
         &opp,
         &rules,
         games,
-        77_123,
+        std::env::var("SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(77_123),
         &Progress::new(),
     );
     println!(
@@ -63,11 +67,18 @@ fn main() {
         slot, games, slot
     );
     for (c, g) in cands.iter().zip(&r) {
+        let part = |m: Option<msh_deckbuilder::playtest::lab::Measure>| {
+            m.map_or("-".to_string(), |m| {
+                format!("{:+.2} ± {:.2}", m.gain * 100.0, m.stderr * 100.0)
+            })
+        };
         println!(
-            "{:<34} {:+.2} ± {:.2}",
+            "{:<34} {:+.2} ± {:.2}  (table {}, peer field {})",
             c,
             g.score.gain * 100.0,
-            g.score.stderr * 100.0
+            g.score.stderr * 100.0,
+            part(g.table),
+            part(g.league)
         );
     }
 }

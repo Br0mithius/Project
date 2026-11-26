@@ -1204,6 +1204,36 @@ impl<'a> Game<'a> {
             (self.casting, self.cur_x) = outer;
             return true;
         }
+        // A spell aimed at the caster's own creature (an Aura, a trick or protection):
+        // opponents may remove the creature in response, and the spell fizzles.
+        let aimed = if !back && c.is(T_AURA) {
+            ai::aura_target(self, p, (list as u8, idx)).map(|t| self.perms[t].id)
+        } else if spell_types & (T_INSTANT | T_SORCERY) != 0 {
+            self.focus
+        } else {
+            None
+        };
+        if let Some(tid) = aimed.filter(|&t| {
+            self.idx(t)
+                .is_some_and(|i| self.perms[i].ctrl as usize == p && self.perms[i].is_creature())
+        }) {
+            if ai::respond_kill_target(self, p, tid, c.value) {
+                let to = if commander_slot > 0 {
+                    "command zone"
+                } else {
+                    "graveyard"
+                };
+                self.note(|| format!("  {} fizzles: its target is gone (-> {})", c.name, to));
+                match src {
+                    Src::Prepared(_) => {}
+                    _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
+                    _ => self.players[list].graveyard.push(idx),
+                }
+                self.run_pending();
+                (self.casting, self.cur_x) = outer;
+                return true;
+            }
+        }
         let permanent = !back && c.is_permanent();
         if permanent {
             self.entering_x = x_paid;
@@ -2159,6 +2189,15 @@ impl<'a> Game<'a> {
             self.lose_life(p, life);
         }
         self.players[p].equips_turn = self.players[p].equips_turn.saturating_add(1);
+        // Opponents may remove the creature in response: the equip does nothing.
+        if self
+            .idx(target_id)
+            .is_some_and(|i| self.perms[i].ctrl as usize == p)
+            && ai::respond_kill_target(self, p, target_id, 1.0 + cost.total() as f32 * 0.5)
+        {
+            self.note(|| format!("  P{}'s equip fizzles: the creature is gone", p));
+            return true;
+        }
         if let Some(e) = self.idx(equip_id) {
             self.perms[e].attached = Some(target_id);
         }

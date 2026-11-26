@@ -1436,6 +1436,91 @@ pub mod exp {
     /// table): the threat gets three turns to act first, which costs more than the better
     /// target and the ambushes win. Off.
     pub const HOLD_SPARE: u32 = 2;
+    /// Kill a creature in response to an Aura, an equip or a trick aimed at it by its
+    /// controller: the spell fizzles (or the equip is wasted), two for one.
+    pub const RESPOND_KILL: u32 = 4;
+    /// Keep instant-speed removal's mana open through the opponents' turns when a response
+    /// window is likely (an opponent has an Equipment to move onto a creature the removal
+    /// kills) and the rest of the turn doesn't need that mana (within 1.5 card points).
+    pub const HOLD_FOR_RESPONSE: u32 = 8;
+}
+
+/// A response window is likely on the opponents' turns: some opponent controls an
+/// Equipment and a creature removal card `c` kills (visible information only).
+fn response_likely(g: &Game, p: usize, c: &SimCard) -> bool {
+    g.opponents(p).iter().any(|&o| {
+        g.perms
+            .iter()
+            .any(|x| x.ctrl as usize == o && x.is(T_EQUIPMENT))
+            && (0..g.perms.len()).any(|i| {
+                g.perms[i].ctrl as usize == o
+                    && g.perms[i].is_creature()
+                    && removal_kills(g, p, c, i)
+            })
+    })
+}
+
+/// Opponents of `caster` may answer a spell or ability aimed at `caster`'s creature
+/// `target` (worth `waste` card points to them) by removing the creature in response
+/// (`exp::RESPOND_KILL`). True if the creature is gone: the spell fizzles.
+pub fn respond_kill_target(g: &mut Game, caster: usize, target: u32, waste: f32) -> bool {
+    let n = g.players.len();
+    for k in 1..n {
+        let o = (caster + k) % n;
+        if !g.players[o].alive || g.is_human(o) || !exp_on(g, o, exp::RESPOND_KILL) {
+            continue;
+        }
+        let Some(t) = g.idx(target) else {
+            return true;
+        };
+        if g.perms[t].ctrl as usize == o {
+            continue;
+        }
+        let cards = removal_in_hand(g, o);
+        let pick = cards.iter().copied().find(|&h| {
+            let pl = &g.players[o];
+            removal_kills(g, o, &pl.cards[pl.hand[h] as usize], t)
+        });
+        let debug = g.log.is_some() && std::env::var("MSH_SIM_DEBUG").is_ok();
+        let Some(h) = pick else {
+            if debug {
+                let held: usize = g.players[o]
+                    .hand
+                    .iter()
+                    .filter(|&&c| is_instant_removal(&g.players[o].cards[c as usize]))
+                    .count();
+                let mana = g.mana_available(o);
+                g.note(|| format!("   respond P{}: no castable removal that kills it ({} instant removal in hand, {} mana)", o, held, mana));
+            }
+            continue;
+        };
+        let gain = perm_value(g, t) * removal_discount(g, o, t) + waste;
+        let c = &g.players[o].cards[g.players[o].hand[h] as usize];
+        let elsewhere = removal_elsewhere(g, o, c, t);
+        let worth = worth_removing(g, o, t);
+        if debug {
+            g.note(|| {
+                format!(
+                    "   respond P{}: gain {:.1} (worth {}) vs elsewhere {:.1}",
+                    o, gain, worth, elsewhere
+                )
+            });
+        }
+        if !(worth || gain >= 6.0) || gain < elsewhere {
+            continue;
+        }
+        if cast_instant(
+            g,
+            o,
+            h,
+            Some(target),
+            "in response: the spell aimed at it fizzles",
+        ) && g.idx(target).is_none()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn exp_on(g: &Game, p: usize, bit: u32) -> bool {
@@ -3965,6 +4050,35 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
         let (mut hold, mut held_slot) = holdup(g, p, &opts, avail);
         // (Experiment) instant-speed removal whose mana would go unused is held for an
         // attacker or the end of the turn before ours.
+        if held_slot.is_none() && !post && exp_on(g, p, exp::HOLD_FOR_RESPONSE) {
+            let budget = avail.saturating_sub(tax_keep);
+            let full = plan_set(&opts, budget, &[]).map(|x| x.1).unwrap_or(0.0);
+            let pl = &g.players[p];
+            for h in 0..pl.hand.len() {
+                let c = &pl.cards[pl.hand[h] as usize];
+                if !is_instant_removal(c) || !response_likely(g, p, c) {
+                    continue;
+                }
+                let Some(cost) = g.cast_cost(p, Src::Hand(h), CastOpts::default()) else {
+                    continue;
+                };
+                let n = cost.total();
+                if n > budget {
+                    continue;
+                }
+                let skip: Vec<usize> = (0..opts.len())
+                    .filter(|&k| matches!(opts[k].2, Act::Cast(Src::Hand(x), _) if x == h))
+                    .collect();
+                let held = plan_set(&opts, budget - n, &skip)
+                    .map(|x| x.1)
+                    .unwrap_or(0.0);
+                if held >= full - 1.5 {
+                    hold = n;
+                    held_slot = Some(h);
+                    break;
+                }
+            }
+        }
         if held_slot.is_none() && !post && exp_on(g, p, exp::HOLD_SPARE) {
             let budget = avail.saturating_sub(tax_keep);
             let full = plan_set(&opts, budget, &[]).map(|x| x.1).unwrap_or(0.0);
