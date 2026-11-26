@@ -6192,3 +6192,27 @@ fn ai_casts_a_rock_first_when_its_mana_pays_for_the_rest() {
         g.players[0].hand
     );
 }
+
+#[test]
+fn red_hulk_enrage_damage_grows_with_his_counters() {
+    let db = db();
+    let d = deck(&db, &["Red Hulk", "Island"]);
+    let mut g = game(&[&d, &d]);
+    let hulk = put(&mut g, 0, 0);
+    let life0 = g.players[1].life;
+    // Two separate hits: the first leaves one counter (1 damage), the second two (2 damage).
+    for _ in 0..2 {
+        let i = g.idx(hulk).unwrap();
+        g.perms[i].damage = 0;
+        g.emit(Ev::Damaged, 0, Some(hulk));
+        g.run_pending();
+    }
+    assert_eq!(perm(&g, hulk).counters, 2);
+    let dealt: i32 = (life0 - g.players[1].life)
+        + g.perms
+            .iter()
+            .filter(|x| x.ctrl == 1)
+            .map(|x| x.damage as i32)
+            .sum::<i32>();
+    assert_eq!(dealt, 3, "1 damage, then 2");
+}
