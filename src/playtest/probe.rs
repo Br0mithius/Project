@@ -74,6 +74,7 @@ fn deck(card: &Card) -> Prepared {
         cards: cards.iter().map(compile).collect(),
         library: Vec::new(),
         commanders: Vec::new(),
+        ai_flags: 0,
     }
 }
 

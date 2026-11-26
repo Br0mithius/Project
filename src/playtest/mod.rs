@@ -43,6 +43,10 @@ pub struct Prepared {
     library: Vec<u16>,
     /// Command zone: (card, slot) - the commander, and The Prismatic Piper or a partner.
     commanders: Vec<(u16, u8)>,
+    /// Experimental AI behaviours this deck's seat plays with (`ai::exp`): bit flags, 0 =
+    /// the standard AI. A deck and its copy with a flag set, compared on the same games,
+    /// measure the behaviour with one seat changed.
+    pub ai_flags: u32,
 }
 
 impl Prepared {
@@ -81,6 +85,7 @@ impl Prepared {
             cards,
             library,
             commanders,
+            ai_flags: 0,
         }
     }
 }
@@ -199,6 +204,7 @@ impl<'a> Game<'a> {
                 adventure: Vec::new(),
                 recast: Vec::new(),
                 command: d.commanders.clone(),
+                ai_flags: d.ai_flags,
                 casts: [0; 3],
                 cmd_damage: [[0; 3]; 8],
                 alive: true,

@@ -192,6 +192,7 @@ impl Prepared {
             cards: self.cards.clone(),
             library: self.library.clone(),
             commanders: self.commanders.clone(),
+            ai_flags: self.ai_flags,
         };
         let cmd: Vec<u16> = self.commanders.iter().map(|c| c.0).collect();
         let mut moved = vec![false; out.library.len()];

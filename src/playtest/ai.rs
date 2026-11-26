@@ -1421,6 +1421,46 @@ fn is_fog(c: &SimCard) -> bool {
 
 /// Can `p` cast card `c` at instant speed right now: flash, or a rule that gives it (High
 /// Fae Trickster, Captain Mar-Vell after an opponent's spell, Radagast's first creature).
+/// Experimental behaviours (bit flags), off in the standard AI: a seat plays one when its
+/// deck's `Prepared::ai_flags` has it, or every seat when `MSH_AI_EXP` (a number) does.
+pub mod exp {
+    /// Instant-speed removal (instants, flash locks) is only spent on a target worth a
+    /// removal card: one that isn't waits for a better target, an attacker or the end of
+    /// a turn, which a sorcery can't. Measured (`policy_ab`, the Session 5 Thanos lock-out
+    /// deck, our seat changed, 40,000 paired games against the peer field and the table):
+    /// +0.01 ± 0.03 win-rate points - the bot almost never spends it on a lesser target.
+    pub const WAIT_FOR_TARGET: u32 = 1;
+    /// Instant-speed removal with a worthy target, whose mana the rest of the turn leaves
+    /// unused, is held: cast on an attacker or at the end of the turn before ours, on the
+    /// best target by then. Measured as above: -0.24 ± 0.14 (-0.68 ± 0.18 against the
+    /// table): the threat gets three turns to act first, which costs more than the better
+    /// target and the ambushes win. Off.
+    pub const HOLD_SPARE: u32 = 2;
+}
+
+pub fn exp_on(g: &Game, p: usize, bit: u32) -> bool {
+    static ALL: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    let all = *ALL.get_or_init(|| {
+        std::env::var("MSH_AI_EXP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    });
+    (g.players[p].ai_flags | all) & bit != 0
+}
+
+/// An opponent's permanent removal card `c` removes and that's worth a removal card.
+fn worthy_target(g: &Game, p: usize, c: &SimCard) -> bool {
+    (0..g.perms.len()).any(|i| {
+        let x = &g.perms[i];
+        x.ctrl as usize != p
+            && g.players[x.ctrl as usize].alive
+            && !x.is(T_LAND)
+            && removal_kills(g, p, c, i)
+            && worth_removing(g, p, i)
+    })
+}
+
 pub fn has_flash(g: &Game, p: usize, c: &SimCard) -> bool {
     if c.kw & FLASH != 0 {
         return true;
@@ -3906,9 +3946,48 @@ fn main_phase_inner(g: &mut Game, p: usize, post: bool) {
             return;
         }
         let avail = g.mana_available(p);
+        // (Experiment) instant-speed removal without a worthy target waits.
+        if exp_on(g, p, exp::WAIT_FOR_TARGET) {
+            opts.retain(|o| match o.2 {
+                Act::Cast(Src::Hand(h), _) => {
+                    let pl = &g.players[p];
+                    let c = &pl.cards[pl.hand[h] as usize];
+                    !is_instant_removal(c) || worthy_target(g, p, c)
+                }
+                _ => true,
+            });
+            if opts.is_empty() {
+                return;
+            }
+        }
         // (Combat AI: mana for the attack taxes our planned swing pays.)
         let tax_keep = if post { 0 } else { attack_tax_reserve(g, p) };
-        let (hold, held_slot) = holdup(g, p, &opts, avail);
+        let (mut hold, mut held_slot) = holdup(g, p, &opts, avail);
+        // (Experiment) instant-speed removal whose mana would go unused is held for an
+        // attacker or the end of the turn before ours.
+        if held_slot.is_none() && !post && exp_on(g, p, exp::HOLD_SPARE) {
+            let budget = avail.saturating_sub(tax_keep);
+            let full = plan_set(&opts, budget, &[]).map(|x| x.1).unwrap_or(0.0);
+            for k in 0..opts.len() {
+                let Act::Cast(Src::Hand(h), _) = opts[k].2 else {
+                    continue;
+                };
+                let pl = &g.players[p];
+                let c = &pl.cards[pl.hand[h] as usize];
+                let n = opts[k].1;
+                if !is_instant_removal(c) || n > budget {
+                    continue;
+                }
+                let held = plan_set(&opts, budget - n, &[k])
+                    .map(|x| x.1)
+                    .unwrap_or(0.0);
+                if held + opts[k].0 >= full - 0.01 {
+                    hold = n;
+                    held_slot = Some(h);
+                    break;
+                }
+            }
+        }
         if let Some(slot) = held_slot {
             opts.retain(|o| !matches!(o.2, Act::Cast(Src::Hand(h), _) if h == slot));
             if opts.is_empty() {
@@ -4691,6 +4770,12 @@ pub fn end_of_turn(g: &mut Game, p: usize, next: bool) {
                 continue;
             }
             if !g.can_cast(p, Src::Hand(h), CastOpts::default()) {
+                continue;
+            }
+            if is_instant_removal(c)
+                && (exp_on(g, p, exp::WAIT_FOR_TARGET) || exp_on(g, p, exp::HOLD_SPARE))
+                && !worthy_target(g, p, c)
+            {
                 continue;
             }
             let v = spell_value(g, p, pl.hand[h], false, false);

@@ -164,6 +164,8 @@ impl Perm {
 #[derive(Debug, Clone)]
 pub struct Player<'a> {
     pub cards: &'a [SimCard],
+    /// The seat's experimental AI behaviours (`Prepared::ai_flags`).
+    pub ai_flags: u32,
     pub life: i32,
     pub poison: u8,
     pub library: Vec<u16>,

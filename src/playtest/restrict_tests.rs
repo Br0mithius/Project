@@ -322,6 +322,7 @@ fn prepared(db: &CardDb, names: &[&str]) -> super::Prepared {
             .collect(),
         library: Vec::new(),
         commanders: Vec::new(),
+        ai_flags: 0,
     }
 }
 

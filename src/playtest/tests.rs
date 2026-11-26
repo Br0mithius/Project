@@ -32,6 +32,7 @@ fn prep(cards: &[Card]) -> Prepared {
         cards: cards.iter().map(compile).collect(),
         library: Vec::new(),
         commanders: Vec::new(),
+        ai_flags: 0,
     }
 }
 
@@ -1689,6 +1690,7 @@ fn mirror_matches_are_even_and_better_decks_win_more() {
         cards: me.cards.clone(),
         library: me.library.clone(),
         commanders: me.commanders.clone(),
+        ai_flags: 0,
     };
     let land = weak.cards.iter().position(|c| c.is(T_LAND)).unwrap() as u16;
     for (k, c) in weak.library.iter_mut().enumerate() {
