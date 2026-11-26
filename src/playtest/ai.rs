@@ -1437,11 +1437,17 @@ pub mod exp {
     /// target and the ambushes win. Off.
     pub const HOLD_SPARE: u32 = 2;
     /// Kill a creature in response to an Aura, an equip or a trick aimed at it by its
-    /// controller: the spell fizzles (or the equip is wasted), two for one.
+    /// controller: the spell fizzles (or the equip is wasted), two for one. Measured (as
+    /// above, 40,000 paired games): -0.01 ± 0.01. In 200 logged games the seat never had
+    /// removal and the mana for it when an equip or Aura came (no removal in hand 260
+    /// times, under 3 mana 143, removal that couldn't kill the target 18).
     pub const RESPOND_KILL: u32 = 4;
     /// Keep instant-speed removal's mana open through the opponents' turns when a response
     /// window is likely (an opponent has an Equipment to move onto a creature the removal
     /// kills) and the rest of the turn doesn't need that mana (within 1.5 card points).
+    /// Measured with RESPOND_KILL: +0.01 ± 0.01 at 1.5, -0.02 ± 0.02 at 4, and holding
+    /// whenever a window is possible -0.65 ± 0.06 (-2.17 ± 0.20 against the table, whose
+    /// Equipment deck opens it every turn; the peer field has none). Off.
     pub const HOLD_FOR_RESPONSE: u32 = 8;
 }
 
