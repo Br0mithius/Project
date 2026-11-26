@@ -246,6 +246,44 @@ pub const QUOTAS: [(u32, &[Job]); 4] = [
     (8, &[Job::Ramp]),
 ];
 
+/// The plan's minimums as they apply now: `QUOTAS`, unless a playtest experiment changed
+/// the counts (`set_quota_counts`).
+pub fn quotas() -> [(u32, &'static [Job]); 4] {
+    use std::sync::atomic::Ordering;
+    let mut q = QUOTAS;
+    for (k, slot) in q.iter_mut().enumerate() {
+        let v = QUOTA_COUNTS[k].load(Ordering::Relaxed);
+        if v != u32::MAX {
+            slot.0 = v;
+        }
+    }
+    q
+}
+
+static QUOTA_COUNTS: [std::sync::atomic::AtomicU32; 4] = [
+    std::sync::atomic::AtomicU32::new(u32::MAX),
+    std::sync::atomic::AtomicU32::new(u32::MAX),
+    std::sync::atomic::AtomicU32::new(u32::MAX),
+    std::sync::atomic::AtomicU32::new(u32::MAX),
+];
+static QUOTA_FLOOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Playtest experiments: the plan's minimum counts (locks, answers, card advantage, ramp),
+/// and whether a slot takes only cards above the builder's quality floor. `None` puts the
+/// shipped counts back.
+pub fn set_quota_counts(counts: Option<[u32; 4]>, floor: bool) {
+    use std::sync::atomic::Ordering;
+    for k in 0..4 {
+        QUOTA_COUNTS[k].store(counts.map_or(u32::MAX, |c| c[k]), Ordering::Relaxed);
+    }
+    QUOTA_FLOOR.store(floor, Ordering::Relaxed);
+}
+
+/// Whether the plan's slots take only cards above the builder's quality floor.
+pub fn quota_floor() -> bool {
+    QUOTA_FLOOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Does swapping `cut` for `add` keep `deck`'s plan? A card that fills one of the plan's
 /// quotas (`QUOTAS`) is only swapped for a card doing that same job, unless the deck holds
 /// `slack` more of them than the quota asks (room for that many swaps at once). So a lock
@@ -269,7 +307,7 @@ pub fn swap_keeps_plan(
     };
     let cut_jobs = jobs(cut_card);
     let add_jobs = db.get(add).map(jobs).unwrap_or_default();
-    QUOTAS.iter().all(|(min, js)| {
+    quotas().iter().all(|(min, js)| {
         let in_group = |j: &[Job]| j.iter().any(|x| js.contains(x));
         if !in_group(&cut_jobs) || in_group(&add_jobs) {
             return true;
@@ -293,7 +331,7 @@ pub fn keeps_plan(
     candidate: &crate::deck::Deck,
     db: &crate::db::CardDb,
 ) -> bool {
-    QUOTAS.iter().all(|(min, js)| {
+    quotas().iter().all(|(min, js)| {
         let count = |d: &crate::deck::Deck| -> u32 {
             d.cards
                 .iter()

@@ -768,12 +768,21 @@ pub fn build_with(
         if cohesive {
             use crate::cohesion::{Job, jobs};
             let has_job = |c: &Card, js: &[Job]| jobs(c).iter().any(|j| js.contains(j));
-            for (min, js) in crate::cohesion::QUOTAS {
+            let floor = crate::cohesion::quota_floor();
+            for (min, js) in crate::cohesion::quotas() {
                 let f = |c: &Card| has_job(c, js);
                 while count(&deck, &f) < n(min) && spells(&deck) < slots {
                     match pick(&deck, &f) {
-                        Some(name) => deck.add(&name, 1),
-                        None => break,
+                        // With the floor, a slot stays short rather than take a weak card.
+                        Some(name)
+                            if !floor
+                                || db.get(&name).is_some_and(|c| {
+                                    analysis::score_card(c, &deck, db, rules).0 >= PACKAGE_FLOOR
+                                }) =>
+                        {
+                            deck.add(&name, 1)
+                        }
+                        _ => break,
                     }
                 }
             }
