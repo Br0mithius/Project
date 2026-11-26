@@ -39,6 +39,6 @@ fn main() {
     let r = compare(&deck, &decks, &db, &opp, &rules, games, 77_123, &Progress::new());
     println!("in place of {} ({} games each; points of win rate, + = better than {}):", slot, games, slot);
     for (c, g) in cands.iter().zip(&r) {
-        println!("{:<34} {:+.2} ± {:.2}", c, g.score.gain, g.score.stderr);
+        println!("{:<34} {:+.2} ± {:.2}", c, g.score.gain * 100.0, g.score.stderr * 100.0);
     }
 }
