@@ -4,6 +4,9 @@
 //!
 //! `cargo run --release --example slot_test -- <data dir> <deck file> <slot card> <games>
 //! <candidate>...`
+//!
+//! A candidate is a card name (it takes the slot card's place) or a list of swaps,
+//! `Out>In|Out>In`, for changes to several slots at once.
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::lab::Progress;
@@ -29,10 +32,19 @@ fn main() {
     let decks: Vec<Deck> = cands
         .iter()
         .map(|c| {
-            assert!(db.get(c).is_some(), "unknown card {}", c);
+            let swaps: Vec<(&str, &str)> = if c.contains('>') {
+                c.split('|')
+                    .map(|s| s.split_once('>').expect("Out>In"))
+                    .collect()
+            } else {
+                vec![(slot.as_str(), c.as_str())]
+            };
             let mut d = deck.clone();
-            d.remove(slot, 1);
-            d.add(c, 1);
+            for (out, inn) in swaps {
+                assert!(db.get(inn).is_some(), "unknown card {}", inn);
+                assert_eq!(d.remove(out, 1), 1, "{} is not in the deck", out);
+                d.add(inn, 1);
+            }
             d
         })
         .collect();
