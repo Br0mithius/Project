@@ -143,6 +143,8 @@ struct Settings {
     high_contrast: bool,
     /// Deck columns grouped by what the cards do (locks, answers...) instead of mana value.
     group_by_job: bool,
+    /// The play-by-hand options last used (stops, auto-pay), kept between sessions.
+    play_opts: crate::playtest::human::PlayOptions,
 }
 
 /// The opponents the playtest lab plays against.
@@ -213,6 +215,7 @@ impl Default for Settings {
             text_scale: 1.0,
             high_contrast: false,
             group_by_job: false,
+            play_opts: Default::default(),
         }
     }
 }
@@ -667,6 +670,7 @@ impl GuiApp {
                 .collect();
             app.images.prefetch(owned.iter());
         }
+        app.play.opts = app.settings.play_opts.clone();
         app
     }
 

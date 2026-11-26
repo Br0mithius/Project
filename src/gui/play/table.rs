@@ -280,6 +280,50 @@ impl GuiApp {
             if ctx.input(|i| i.key_pressed(egui::Key::B)) && ask.is_some() {
                 clicks.push(Click::Send(Answer::Auto));
             }
+            // 1-9: the nth card in your hand, as if clicked.
+            const NUMS: [egui::Key; 9] = [
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+                egui::Key::Num8,
+                egui::Key::Num9,
+            ];
+            if let Some(Ask::Act { .. }) = ask.as_ref() {
+                let hand = v
+                    .players
+                    .get(v.seat)
+                    .map(|p| p.hand.clone())
+                    .unwrap_or_default();
+                for (k, key) in NUMS.iter().enumerate() {
+                    if ctx.input(|i| i.key_pressed(*key)) {
+                        if let Some(name) = hand.get(k) {
+                            clicks.push(Click::Hand(k, name.clone()));
+                        }
+                    }
+                }
+            }
+            // S: pass everything until your turn.
+            if ctx.input(|i| i.key_pressed(egui::Key::S))
+                && v.active != v.seat
+                && matches!(
+                    ask.as_ref(),
+                    Some(Ask::Act { window: true, .. }) | Some(Ask::Continue { .. })
+                )
+            {
+                self.play.skip_to_mine = true;
+                clicks.push(Click::Send(match ask.as_ref() {
+                    Some(Ask::Continue { .. }) => Answer::Continue,
+                    _ => Answer::Pass,
+                }));
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::F1) || i.key_pressed(egui::Key::Questionmark))
+            {
+                self.play.show_keys = !self.play.show_keys;
+            }
         }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // Esc closes a menu first, then leaves an expanded board.
@@ -287,10 +331,260 @@ impl GuiApp {
                 self.play.focus_opp = None;
             }
         }
+        self.table_banner(&ctx);
+        self.zone_window(&ctx, &v);
+        self.keys_window(&ctx);
+        if self.play.over.is_some() && !self.play.over_closed {
+            self.game_over_window(&ctx, &v);
+        }
         self.table_overlay(&ctx, &v, ask.as_ref());
         self.table_menu(&ctx);
         for c in clicks {
             self.table_click(c, &v, ask.as_ref(), &ctx);
+        }
+    }
+
+    /// "Your turn" across the table for a moment when your turn starts.
+    fn table_banner(&mut self, ctx: &egui::Context) {
+        let Some(text) = self.play.banner.clone() else {
+            return;
+        };
+        let mine = text.starts_with("Your turn");
+        if !mine || self.play.over.is_some() {
+            self.play.banner = None;
+            return;
+        }
+        let now = ctx.input(|i| i.time);
+        let at = *self.play.banner_at.get_or_insert(now);
+        let age = (now - at) as f32;
+        const SHOW: f32 = 1.4;
+        if age > SHOW {
+            self.play.banner = None;
+            return;
+        }
+        let alpha = if age < SHOW - 0.4 {
+            1.0
+        } else {
+            (SHOW - age) / 0.4
+        };
+        let screen = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::unique("turn_banner"),
+        ));
+        let r = Rect::from_center_size(
+            pos2(screen.center().x - 160.0, screen.center().y - 80.0),
+            vec2(420.0, 70.0),
+        );
+        painter.rect_filled(
+            r,
+            CornerRadius::from(12.0),
+            Color32::from_black_alpha((200.0 * alpha) as u8),
+        );
+        painter.rect_stroke(
+            r,
+            CornerRadius::from(12.0),
+            Stroke::new(2.0, GOOD.gamma_multiply(alpha)),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            &text,
+            FontId::proportional(30.0),
+            Color32::WHITE.gamma_multiply(alpha),
+        );
+        ctx.request_repaint();
+    }
+
+    /// A player's graveyard and exile, as cards.
+    fn zone_window(&mut self, ctx: &egui::Context, v: &GameView) {
+        let Some(p) = self.play.zone_view else {
+            return;
+        };
+        let Some(pl) = v.players.get(p).cloned() else {
+            self.play.zone_view = None;
+            return;
+        };
+        let mut open = true;
+        let title = if p == v.seat {
+            "Your graveyard and exile".to_string()
+        } else {
+            format!("P{} {} - graveyard and exile", p, pl.name)
+        };
+        egui::Window::new(title)
+            .id(egui::Id::unique("zone_view"))
+            .open(&mut open)
+            .collapsible(false)
+            .default_size(vec2(640.0, 420.0))
+            .default_pos(ctx.content_rect().center() - vec2(420.0, 260.0))
+            .show(ctx, |ui| {
+                ScrollArea::vertical().show(ui, |ui| {
+                    for (label, cards) in [("Graveyard", &pl.graveyard), ("Exile", &pl.exile)] {
+                        ui.label(RichText::new(format!("{} ({})", label, cards.len())).strong());
+                        if cards.is_empty() {
+                            ui.label(RichText::new("empty").weak());
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            // Newest first.
+                            for name in cards.iter().rev() {
+                                let card = hand_card(&self.db, name);
+                                let r = self.table_card(ui, &card, 92.0, None, false);
+                                self.note_hover(&r, name);
+                            }
+                        });
+                        ui.add_space(6.0);
+                    }
+                    ui.label(
+                        RichText::new(format!("Library {} · hand {}", pl.library, pl.hand_count))
+                            .weak(),
+                    );
+                });
+            });
+        if !open {
+            self.play.zone_view = None;
+        }
+    }
+
+    /// The keyboard shortcuts (F1 or ?).
+    fn keys_window(&mut self, ctx: &egui::Context) {
+        if !self.play.show_keys {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("keys").striped(true).show(ui, |ui| {
+                    for (k, what) in [
+                        ("Space", "Pass / end the phase, confirm attacks and blocks, keep a hand, accept the suggested choice"),
+                        ("B", "Let the bot decide this one"),
+                        ("1 - 9", "Play the nth card in your hand"),
+                        ("S", "Skip to your turn (pass every chance to respond)"),
+                        ("Esc", "Close a menu, then leave an expanded board"),
+                        ("F1 or ?", "Show or hide this list"),
+                    ] {
+                        ui.label(RichText::new(k).strong().monospace());
+                        ui.label(what);
+                        ui.end_row();
+                    }
+                });
+            });
+        if !open {
+            self.play.show_keys = false;
+        }
+    }
+
+    /// The result, how each player finished, and what next.
+    fn game_over_window(&mut self, ctx: &egui::Context, v: &GameView) {
+        let Some(w) = self.play.over else { return };
+        let (text, col) = if w == v.seat {
+            ("You win!".to_string(), GOOD)
+        } else if w == crate::playtest::NO_WINNER {
+            ("Draw".to_string(), WARN)
+        } else {
+            let who = v.players.get(w).map_or("", |p| p.name.as_str());
+            (format!("P{} wins - {}", w, who), WARN)
+        };
+        let mut action = None;
+        egui::Window::new("Game over")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(-160.0, -60.0))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new(text).size(30.0).strong().color(col));
+                    ui.label(RichText::new(format!("after {} rounds", v.round)).weak());
+                });
+                ui.add_space(6.0);
+                egui::Grid::new("standings").striped(true).show(ui, |ui| {
+                    ui.label(RichText::new("Player").strong());
+                    ui.label(RichText::new("Life").strong());
+                    ui.label(RichText::new("Finish").strong());
+                    ui.end_row();
+                    // Winner first, then the latest to go out.
+                    let mut order: Vec<usize> = (0..v.players.len()).collect();
+                    order.sort_by_key(|&k| {
+                        (
+                            k != w,
+                            std::cmp::Reverse(
+                                self.play
+                                    .out_round
+                                    .get(k)
+                                    .copied()
+                                    .flatten()
+                                    .unwrap_or(u32::MAX),
+                            ),
+                        )
+                    });
+                    for k in order {
+                        let pl = &v.players[k];
+                        let name = if k == v.seat {
+                            format!("You - {}", pl.name)
+                        } else {
+                            format!("P{} {}", k, pl.name)
+                        };
+                        ui.label(RichText::new(name).color(if k == w {
+                            col
+                        } else {
+                            Color32::LIGHT_GRAY
+                        }));
+                        ui.label(format!("{}", pl.life));
+                        ui.label(if k == w {
+                            "winner".to_string()
+                        } else {
+                            match self.play.out_round.get(k).copied().flatten() {
+                                Some(r) => format!("out in round {}", r),
+                                None => "still in".to_string(),
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(RichText::new("Rematch").strong())
+                        .on_hover_text("Same decks, a new shuffle")
+                        .clicked()
+                    {
+                        action = Some(0);
+                    }
+                    if ui
+                        .button("Replay this game")
+                        .on_hover_text("Same decks and the same shuffle (seed)")
+                        .clicked()
+                    {
+                        action = Some(1);
+                    }
+                    if ui.button("Change decks").clicked() {
+                        action = Some(2);
+                    }
+                    if ui.button("Look at the board").clicked() {
+                        action = Some(3);
+                    }
+                });
+            });
+        match action {
+            Some(0) => {
+                self.play.seed = now_secs() % 1_000_000;
+                self.start_game();
+            }
+            Some(1) => {
+                if let Some(s) = &self.play.setup {
+                    self.play.seed = s.seed;
+                }
+                self.start_game();
+            }
+            Some(2) => {
+                self.play.handle = None;
+                self.play.view = None;
+                self.play.ask = None;
+            }
+            Some(3) => self.play.over_closed = true,
+            _ => {}
         }
     }
 
@@ -424,18 +718,35 @@ impl GuiApp {
                     }
                     ui.separator();
                     ui.label(RichText::new(&v.phase).small().italics());
-                    // The latest event, so the bots' plays are easy to follow (the log on
-                    // the right has the rest).
-                    let players = v.players.len();
-                    if let Some(l) = self
-                        .play
-                        .log
-                        .iter()
-                        .rev()
-                        .find(|l| !private_to_a_bot(l, v.seat, players) && !is_debug(l))
-                    {
+                    // What the others cast since your last decision, as cards; otherwise
+                    // the latest event (the log on the right has the rest).
+                    let casts = self.play.fresh_casts.clone();
+                    if !casts.is_empty() {
                         ui.separator();
-                        ui.add(egui::Label::new(RichText::new(l).small().weak()).truncate());
+                        ui.label(RichText::new("Cast since your last move:").small().weak());
+                        let shown = casts.len().saturating_sub(8);
+                        if shown > 0 {
+                            ui.label(RichText::new(format!("+{} more", shown)).small().weak());
+                        }
+                        for (p, name) in casts.iter().skip(shown) {
+                            ui.label(RichText::new(format!("P{}", p)).small().strong());
+                            let card = hand_card(&self.db, name);
+                            let r = self.table_card(ui, &card, 24.0, None, false);
+                            self.note_hover(&r, name);
+                            r.on_hover_text(format!("P{} cast {}", p, name));
+                        }
+                    } else {
+                        let players = v.players.len();
+                        if let Some(l) = self
+                            .play
+                            .log
+                            .iter()
+                            .rev()
+                            .find(|l| !private_to_a_bot(l, v.seat, players) && !is_debug(l))
+                        {
+                            ui.separator();
+                            ui.add(egui::Label::new(RichText::new(l).small().weak()).truncate());
+                        }
                     }
                 });
             });
@@ -602,20 +913,13 @@ impl GuiApp {
                         }
                     }
                     if !pl.graveyard.is_empty() || !pl.exile.is_empty() {
-                        ui.menu_button(RichText::new("zones").small(), |ui| {
-                            ui.label(RichText::new("Graveyard").strong());
-                            for c in pl.graveyard.iter().rev() {
-                                let r = ui.label(RichText::new(c).small());
-                                self.note_hover(&r, c);
-                            }
-                            if !pl.exile.is_empty() {
-                                ui.label(RichText::new("Exile").strong());
-                                for c in &pl.exile {
-                                    let r = ui.label(RichText::new(c).small());
-                                    self.note_hover(&r, c);
-                                }
-                            }
-                        });
+                        if ui
+                            .small_button("zones")
+                            .on_hover_text("Graveyard and exile, as cards")
+                            .clicked()
+                        {
+                            self.play.zone_view = Some(p);
+                        }
                     }
                     // Aiming attacks: a button on the mat (the whole frame being clickable
                     // took clicks meant for the cards on it).

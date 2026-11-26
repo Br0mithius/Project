@@ -39,7 +39,7 @@ pub(super) struct PlayState {
     failed: Option<String>,
     // Setting up a game.
     seed: u64,
-    opts: PlayOptions,
+    pub(super) opts: PlayOptions,
     opps: Option<Vec<Deck>>,
     opps_job: Option<Receiver<Vec<Deck>>>,
     pick: [usize; 3],
@@ -74,6 +74,34 @@ pub(super) struct PlayState {
     skip_to_mine: bool,
     /// An opponent's board blown up to fill the table.
     focus_opp: Option<usize>,
+    /// Spells the other players cast since your last decision (caster, card).
+    fresh_casts: Vec<(usize, String)>,
+    /// A big notice across the table ("Your turn"), and when it was first shown.
+    banner: Option<String>,
+    banner_at: Option<f64>,
+    /// The round each player went out in.
+    out_round: Vec<Option<u32>>,
+    /// A player's graveyard and exile shown as cards.
+    zone_view: Option<usize>,
+    /// The keyboard shortcuts window.
+    show_keys: bool,
+    /// The game-over window was closed (to look at the final board).
+    over_closed: bool,
+}
+
+/// The caster and card of a "P2 casts Name (MV 3) for ..." log line.
+pub(super) fn cast_of(line: &str) -> Option<(usize, String)> {
+    let at = line.find(" casts ")?;
+    let who = line[..at].rsplit(' ').next()?;
+    let p: usize = who.strip_prefix('P')?.parse().ok()?;
+    let rest = &line[at + 7..];
+    let end = [" (MV", " for free", " to counter", ". Counter it"]
+        .iter()
+        .filter_map(|m| rest.find(m))
+        .min()
+        .unwrap_or(rest.len());
+    let name = rest[..end].trim();
+    (!name.is_empty()).then(|| (p, name.to_string()))
 }
 
 impl PlayState {
@@ -94,10 +122,33 @@ impl PlayState {
                     .enumerate()
                     .map(|(k, p)| p.life - old.players.get(k).map_or(p.life, |q| q.life))
                     .collect();
+                if v.active != old.active || v.round != old.round {
+                    self.banner = Some(if v.active == v.seat {
+                        format!("Your turn - round {}", v.round)
+                    } else {
+                        let who = v.players.get(v.active).map_or("", |p| p.name.as_str());
+                        format!("P{}'s turn - {}", v.active, who)
+                    });
+                    self.banner_at = None;
+                }
             }
             None => {
                 self.new_ids.clear();
                 self.life_delta.clear();
+            }
+        }
+        self.out_round.resize(v.players.len(), None);
+        for (k, p) in v.players.iter().enumerate() {
+            if !p.alive && self.out_round[k].is_none() {
+                self.out_round[k] = Some(v.round);
+            }
+        }
+        // What the others cast, for the "since your last decision" strip.
+        for l in &v.new_log {
+            if let Some((p, name)) = cast_of(l) {
+                if p != v.seat && !l.contains("[manual edit]") {
+                    self.fresh_casts.push((p, name));
+                }
             }
         }
     }
@@ -270,6 +321,7 @@ impl GuiApp {
                     transcript,
                 } => {
                     self.play.log.extend(view.new_log.iter().cloned());
+                    self.play.note_changes(&view);
                     self.play.view = Some(*view);
                     self.play.over = Some(winner);
                     self.play.transcript = transcript;
@@ -291,6 +343,7 @@ impl GuiApp {
             let _ = h.tx.send(ToEngine::Answer(a.clone()));
             self.play.sent.push(a);
             self.play.ask = None;
+            self.play.fresh_casts.clear();
         }
     }
 
@@ -312,6 +365,10 @@ impl GuiApp {
             decks,
         };
         let handle = start(setup.clone(), self.db.clone());
+        if self.settings.play_opts != self.play.opts {
+            self.settings.play_opts = self.play.opts.clone();
+            self.save_settings();
+        }
         let opps_keep = self.play.opps.take();
         let job = self.play.opps_job.take();
         let (seed, opts, pick) = (self.play.seed, self.play.opts.clone(), self.play.pick);
