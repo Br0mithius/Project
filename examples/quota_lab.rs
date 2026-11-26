@@ -57,6 +57,7 @@ fn main() {
         ramp: t0.ramp,
     };
     let mut settings = vec![base];
+    #[allow(unused_mut)]
     let mut push = |s: Setting| {
         if !settings.contains(&s) {
             settings.push(s);
@@ -110,6 +111,25 @@ fn main() {
         ramp: 0,
         ..base
     });
+    // QUOTA_SETS="5,0,0,8;5,0,7,8": test only these job minimums (no creature, draw or ramp
+    // targets) against the default.
+    if let Ok(sets) = std::env::var("QUOTA_SETS") {
+        settings.truncate(1);
+        for set in sets.split(';') {
+            // A fifth field "f": with the quality floor.
+            let floor = set.split(',').any(|x| x.trim() == "f");
+            let v: Vec<u32> = set.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if v.len() == 4 {
+                settings.push(Setting {
+                    jobs: [v[0], v[1], v[2], v[3]],
+                    floor,
+                    creatures: 0,
+                    draw: 0,
+                    ramp: 0,
+                });
+            }
+        }
+    }
     let build = |s: &Setting| -> Deck {
         set_quota_counts(Some(s.jobs), s.floor);
         let t = msh_deckbuilder::archetypes::Targets {
