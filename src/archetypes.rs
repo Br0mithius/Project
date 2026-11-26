@@ -580,7 +580,9 @@ pub const TARGETS: &[(&str, Targets)] = &[
     // Package 16, not 24: a 24-card package filled the deck with on-theme but weak cards
     // (Rapid Rescue, HULK SMASH!) and left out Captain Marvel; the sweep that chose 24
     // compared against an illegal 121-card build.
-    ("Stax-lite control", rules(27, 16, 18, 11, 10, 0, 0)),
+    // No creature, draw or ramp targets: playtests preferred letting the cards' scores
+    // decide past the plan's own minimums (see `cohesion::build_quotas`).
+    ("Stax-lite control", rules(27, 16, 0, 0, 0, 0, 0)),
     ("Voltron", rules(27, 16, 24, 11, 0, 0, 0)),
     ("Dinosaurs", DEFAULT_TARGETS),
     ("Plans", DEFAULT_TARGETS),

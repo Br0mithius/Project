@@ -118,7 +118,10 @@ fn main() {
         for set in sets.split(';') {
             // A fifth field "f": with the quality floor.
             let floor = set.split(',').any(|x| x.trim() == "f");
-            let v: Vec<u32> = set.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            let v: Vec<u32> = set
+                .split(',')
+                .filter_map(|x| x.trim().parse().ok())
+                .collect();
             if v.len() == 4 {
                 settings.push(Setting {
                     jobs: [v[0], v[1], v[2], v[3]],

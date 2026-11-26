@@ -253,19 +253,28 @@ pub fn quotas() -> [(u32, &'static [Job]); 4] {
     QUOTAS
 }
 
-/// The minimums auto-build fills before anything else (`QUOTAS` unless an experiment set
-/// counts with `set_quota_counts`; see examples/quota_lab.rs).
+/// The minimums auto-build fills before anything else: 5 locks and 8 ramp, nothing else.
+/// Playtests set this (examples/quota_lab.rs: the lock-out deck built under many settings,
+/// played against the peer field and the real table, leaders confirmed on 12,000 fresh
+/// games, three pools). Against the old 5 locks / 9 answers / 7 card advantage / 8 ramp
+/// plus the archetype's creature, draw and ramp targets: +1.9 ± 0.3 on the user's pool,
+/// +1.5 ± 0.2 on it with three Quinjets and no never-use list, +2.6 ± 0.2 from every
+/// league card. No minimums at all lost 3.3 points from every card (no locks get in: they
+/// score low one at a time), so the lock minimum is what keeps the plan a lock-out deck. A
+/// quality floor on the slots measured worse (+0.7). Experiments can set counts
+/// (`set_quota_counts`).
 pub fn build_quotas() -> [(u32, &'static [Job]); 4] {
     use std::sync::atomic::Ordering;
     let mut q = QUOTAS;
     for (k, slot) in q.iter_mut().enumerate() {
         let v = QUOTA_COUNTS[k].load(Ordering::Relaxed);
-        if v != u32::MAX {
-            slot.0 = v;
-        }
+        slot.0 = if v == u32::MAX { BUILD_MINIMUMS[k] } else { v };
     }
     q
 }
+
+/// Auto-build's minimums, in `QUOTAS` order (locks, answers, card advantage, ramp).
+pub const BUILD_MINIMUMS: [u32; 4] = [5, 0, 0, 8];
 
 static QUOTA_COUNTS: [std::sync::atomic::AtomicU32; 4] = [
     std::sync::atomic::AtomicU32::new(u32::MAX),
