@@ -15,6 +15,8 @@
 //! `cargo run --release --example synergy_research -- <data dir> <out dir> synergy <games> [archetype part]`
 //! `cargo run --release --example synergy_research -- <data dir> <out dir> deck <games> <deck file> <card|card|...>...`
 //! (`deck`: each package's cards in that deck, alone and together.)
+//! `cargo run --release --example synergy_research -- <data dir> <out dir> copies <games> <deck file> <card>...`
+//! (`copies`: the value of each copy of a card the deck plays more than once.)
 use msh_deckbuilder::archetypes::ARCHETYPES;
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
@@ -228,6 +230,46 @@ fn main() {
                 }
             }
         }
-        _ => panic!("mode: strength, synergy or deck"),
+        "copies" => {
+            // `copies <games> <deck file> <card>...`: what each copy adds - the deck with
+            // k of its copies replaced by neutral stand-ins, k = 0..n, on the same games.
+            let deck = Deck::load(std::path::Path::new(&a[4]), &db).expect("deck file");
+            let base = Prepared::new(&deck, &db);
+            println!(
+                "copies in {}: {} games per variant against the table and the peer field",
+                a[4], games
+            );
+            for name in &a[5..] {
+                let n = deck.count_of(name) as usize;
+                let (Some(idx), Some(card)) = (base.card_index(name), db.get(name)) else {
+                    println!("{}: not in the deck", name);
+                    continue;
+                };
+                let stand = msh_deckbuilder::playtest::synergy::stand_in(card);
+                // variants[k]: k copies replaced (0 = the deck as it is).
+                let variants: Vec<Prepared> = (0..=n)
+                    .map(|k| base.with_swaps(&vec![(idx, stand.clone()); k]))
+                    .collect();
+                let refs: Vec<&Prepared> = variants.iter().collect();
+                let o = play_all(&refs, &gauntlet, &rules, games, 0xC0B1E5, &done, &cancel);
+                println!(
+                    "{} ({} copies): win rate with all {:.2}%",
+                    name,
+                    n,
+                    o.win_rate(0) * 100.0
+                );
+                for m in 1..=n {
+                    // The m-th copy: n-m+1 copies kept against n-m.
+                    let d = o.diff(n - m, n - m + 1);
+                    println!(
+                        "    copy {}: {:+.2} ± {:.2} win-rate pts",
+                        m,
+                        d.gain * 100.0,
+                        d.stderr * 100.0
+                    );
+                }
+            }
+        }
+        _ => panic!("mode: strength, synergy, deck or copies"),
     }
 }
