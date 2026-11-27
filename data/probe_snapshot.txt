@@ -366,7 +366,7 @@ On entering:
       itself: 
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: Combat, any_player: true, opponents_only: false }: "at the beginning of combat on your turn, create a 1/1 red alien creature token with haste and "~ attacks each combat if able." put a +1/+1 counter on it for each invasion counter on ~, then put an invasion counter on ~."
+  Phase { phase: Combat, any_player: false, opponents_only: false }: "at the beginning of combat on your turn, create a 1/1 red alien creature token with haste and "~ attacks each combat if able." put a +1/+1 counter on it for each invasion counter on ~, then put an invasion counter on ~."
       -> Your Alien Invasion: other counters +1
       -> You gets 1/1 alien token 1/1 with haste
 
