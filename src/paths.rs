@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_CARDS: &str = include_str!("../data/cards.json");
 const DEFAULT_COLLECTION: &str = include_str!("../data/collection.txt");
+/// The league's real opponents (decks rebuilt from the trade log) shipped with the app,
+/// and the date they were made: a newer set replaces the data folder's `table.json` once
+/// (the old one is kept as a backup).
+const LEAGUE_TABLE: &str = include_str!("../league_data/table.json");
+pub const LEAGUE_DATA_VERSION: &str = "2026-11-27 round 4";
 
 /// Finds the folder holding cards.json: `--data <dir>`, `./data`, `data` next to the
 /// program, or the source tree's `data` (debug builds). If none exist, creates `data`
@@ -18,6 +23,7 @@ pub fn data_dir(args: &[String]) -> PathBuf {
     let local = PathBuf::from("data");
     if local.join("cards.json").exists() {
         ensure_collection(&local);
+        seed_league_data(&local);
         return local;
     }
     let beside_exe = std::env::current_exe()
@@ -27,6 +33,7 @@ pub fn data_dir(args: &[String]) -> PathBuf {
         if d.join("cards.json").exists() {
             refresh_card_database(d);
             ensure_collection(d);
+            seed_league_data(d);
             return d.clone();
         }
     }
@@ -94,4 +101,49 @@ pub fn images_dir(data_dir: &Path) -> PathBuf {
         .parent()
         .map(|p| p.join("images"))
         .unwrap_or_else(|| PathBuf::from("images"))
+}
+
+/// Installs the shipped league opponents into `dir/table.json` when they are newer than
+/// the ones installed before (a stamp file records the version). The table it replaces is
+/// kept as `table.before-update.json`. Returns true when it installed them.
+pub fn seed_league_data(dir: &Path) -> bool {
+    let stamp = dir.join(".league_data_version");
+    if std::fs::read_to_string(&stamp).is_ok_and(|v| v.trim() == LEAGUE_DATA_VERSION) {
+        return false;
+    }
+    let table = dir.join("table.json");
+    if table.exists() {
+        let _ = std::fs::copy(&table, dir.join("table.before-update.json"));
+    }
+    if std::fs::write(&table, LEAGUE_TABLE).is_err() {
+        return false;
+    }
+    let _ = std::fs::write(&stamp, LEAGUE_DATA_VERSION);
+    true
+}
+
+#[cfg(test)]
+mod league_data_tests {
+    use super::*;
+
+    #[test]
+    fn league_table_installs_once_and_keeps_a_backup() {
+        let dir = std::env::temp_dir().join(format!("msh_league_seed_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("table.json"), "{\"opponents\":[]}").unwrap();
+        assert!(seed_league_data(&dir));
+        let t: crate::table::Table =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("table.json")).unwrap())
+                .unwrap();
+        assert!(
+            t.opponents.len() >= 8,
+            "the shipped table has every league opponent"
+        );
+        assert!(dir.join("table.before-update.json").exists());
+        // A second start leaves the user's edits alone.
+        std::fs::write(dir.join("table.json"), "{\"opponents\":[]}").unwrap();
+        assert!(!seed_league_data(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

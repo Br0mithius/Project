@@ -1,0 +1,1107 @@
+{
+  "opponents": [
+    {
+      "player": "Drake",
+      "commander": "Tatyova, Benthic Druid",
+      "decklist": "Commander\n1 Tatyova, Benthic Druid\n\nDeck\n1 Absorbing Man\n1 Avengers Tower\n1 Baxter Building\n1 Beorn's Hospitality\n1 Bite Down\n1 Burnished Hart\n1 Castle Doom\n1 Circuitous Route\n1 Command Tower\n1 Down in the Valley\n1 Dwynen's Elite\n1 Elvenking's Halls\n1 Essence Scatter\n1 Evolving Wilds\n1 Exotic Orchard\n1 Fierce Empath\n1 Flashfreeze\n7 Forest\n1 Garruk's Uprising\n1 Grow from the Ashes\n1 Imperious Perfect\n4 Island\n1 Ka-Zar of the Savage Land\n1 Llanowar Elves\n1 Mischievous Mystic\n1 Mole Man, Moloid Master\n1 Overrun\n1 Path of Ancestry\n1 Pelakka Wurm\n1 Primal Might\n1 Prime Speaker Zegana\n1 Primeval Bounty\n1 Pym Technologies\n1 Radagast of Rhosgobel\n1 Rampaging Baloths\n1 Reclamation Sage\n1 Refute\n1 Secluded Courtyard\n1 Silvan Reveler\n1 Simic Guildgate\n1 Sire of Seven Deaths\n1 Snakeskin Veil\n1 Sol Ring\n1 Springbloom Druid\n1 Surveillance Room\n1 Temple of Mystery\n1 Thornweald Archer\n1 Thornwood Falls\n1 Trygon Predator\n1 Villainous Hideout\n",
+      "at_next_table": true
+    },
+    {
+      "player": "Will",
+      "commander": "Smaug, Wicked Worm",
+      "decklist": "Commander\n1 Smaug, Wicked Worm\n\nDeck\n1 Arbiter of Woe\n1 Avengers Tower\n1 Avengers: Under Siege\n1 Baxter Building\n1 Bloodfell Caves\n1 Bojuka Bog\n1 Bolg of the North\n1 Bolt Bend\n1 Captain America's Shield\n1 Castle Doom\n1 Chaos Warp\n1 Command Tower\n1 Crash Through\n1 Dark Fortress\n1 Darksteel Colossus\n1 Desecration Demon\n1 Drakuseth, Maw of Flames\n1 Exotic Orchard\n1 Fake Your Own Death\n1 Goblin-town\n1 Goldvein Pick\n1 Hell's Kitchen\n1 Hex Magic\n1 High-Society Hunter\n1 Impact Tremors\n1 Lathliss, Dragon Queen\n1 Liliana, Dreadhorde General\n1 Massacre Wurm\n1 Mjölnir, Hammer of Thor\n8 Mountain\n1 My Precious\n1 Orcrist, Goblin-cleaver\n1 Path of Ancestry\n1 Ragged Short Spear\n1 Rakdos Guildgate\n1 Red Hulk\n1 Ronin, Shadow Stalker\n1 Secluded Courtyard\n1 Sire of Seven Deaths\n1 Smaug the Magnificent\n1 Sol Ring\n1 Stolen Stark Tech\n1 Stone-Giant of High Pass\n1 Surveillance Room\n1 Swamp\n1 Swiftfoot Boots\n1 Temple of Malice\n1 The Lonely Mountain\n1 Thor, God of Thunder\n1 Undying Malice\n1 Villainous Hideout\n1 Whiplash, Vengeful Engineer\n",
+      "at_next_table": true
+    },
+    {
+      "player": "JD",
+      "commander": "Nick Fury, Agent of S.H.I.E.L.D.",
+      "decklist": "Commander\n1 Nick Fury, Agent of S.H.I.E.L.D.\n\nDeck\n1 Arcane Signet\n1 Asgardian Citadel\n1 Avengers Hangar\n1 Azorius Guildgate\n1 Basilisk Collar\n1 Baxter Building\n1 Birnin Zana Plaza\n1 Black Panther, Vanguard\n1 Bloodfell Caves\n1 Blossoming Sands\n1 Boros Guildgate\n1 Captain Mar-Vell, Space-Born\n1 Captain Marvel, Earth's Protector\n1 Castle Doom\n1 Celebrate the Mountain-king\n1 Charming Prince\n1 Chromatic Lantern\n1 Command Tower\n1 Daredevil, Man Without Fear\n1 Dark Fortress\n1 Dimir Guildgate\n1 Disenchant\n1 Dismal Backwater\n1 Drakuseth, Maw of Flames\n1 Elvenking's Halls\n1 Exotic Orchard\n1 Fellwar Stone\n1 Fireshrieker\n1 Garruk, Veiled Butcher\n1 Gathering Place\n1 Gleaming Bastion\n1 Goldvein Pick\n1 Hidden Lair\n1 Hinterland Sanctifier\n1 Hulk, Gamma Goliath\n1 Inspiring Overseer\n1 Koma, World-Eater\n1 Kwia Vigorbloom\n1 Mjölnir, Hammer of Thor\n1 My Precious\n1 Opt\n1 Orcrist, Goblin-cleaver\n1 Ovika, Enigma Goliath\n1 Path of Ancestry\n1 Propaganda\n1 Ragged Short Spear\n1 Roll-Roll-Roll-Roll\n1 Secluded Courtyard\n1 Sire of Seven Deaths\n1 Sol Ring\n1 Surveillance Room\n1 Take Up the Shield\n1 The Sentry, Golden Guardian\n1 The Theorist, Jace Beleren\n1 Think Twice\n1 Thor, God of Thunder\n1 Training Compound\n1 Ultron, Artificial Malevolence\n1 Zetalpa, Primal Dawn\n",
+      "at_next_table": true
+    },
+    {
+      "player": "Andrew",
+      "commander": "Balmor, Battlemage Captain",
+      "decklist": "Commander\n1 Balmor, Battlemage Captain\n\nDeck\n1 Arcane Signet\n1 Arcanis the Omnipotent\n1 Attuma, Atlantean Warlord\n1 Avengers Tower\n1 Baxter Building\n1 Blasphemous Act\n1 Castle Doom\n1 Chandra, Torch of Defiance\n1 Chart a Course\n1 Chromatic Lantern\n1 Command Tower\n1 Confusticate and Bebother\n1 Curse-Marred Demon\n1 Dragon Mage\n1 Drake Hatcher\n1 Enigma Drake\n1 Etali, Primal Storm\n1 Exotic Orchard\n1 Fellwar Stone\n1 Futurist Forge\n1 Gandalf, Wandering Wizard\n1 Gate Colossus\n1 Hedron Archive\n1 Hoarding Dragon\n1 I Am Iron Man\n1 Innovative Commons\n1 Into the Roil\n6 Island\n1 Izzet Guildgate\n1 Jiang Yanggu, Alone\n1 Kang the Conqueror\n1 Kiora, the Rising Tide\n1 Mischievous Mystic\n5 Mountain\n1 Path of Ancestry\n1 Propaganda\n1 Red Hulk\n1 Ruric Thar, Biomagus\n1 Secluded Courtyard\n1 Sire of Seven Deaths\n1 Skyship Buccaneer\n1 Sol Ring\n1 Stark Industries\n1 Surveillance Room\n1 Swiftwater Cliffs\n1 The Lonely Mountain\n1 The Vision\n1 Theorist's Sanctum\n1 Thought Vessel\n1 Villainous Hideout\n",
+      "at_next_table": false
+    },
+    {
+      "player": "John",
+      "commander": "Ant-Man, Colony Commander",
+      "decklist": "Commander\n1 Ant-Man, Colony Commander\n\nDeck\n1 Arcane Signet\n1 Attuma, Atlantean Warlord\n1 Avatar of Burgeoning Echoes\n1 Avengers Tower\n1 Baxter Building\n1 Beast Within\n1 Bejeweled Warg\n1 Beorn, Reluctant Host\n1 Chromatic Lantern\n1 Command Tower\n1 Curator of Destinies\n1 Darksteel Colossus\n1 Elvenking's Halls\n1 Emrakul, the Exigent Doom\n1 Exotic Orchard\n1 Falcon, Winged Wonder\n1 Fellwar Stone\n11 Forest\n1 Futurist Forge\n1 Gandalf, Wandering Wizard\n1 Gate Colossus\n1 Ghalta the Unstoppable\n1 Ghalta, Primal Hunger\n1 Gigantosaurus\n1 Hedron Archive\n1 Heraldic Banner\n1 Island\n1 Knight of Wundagore\n1 Koma, World-Eater\n1 Path of Ancestry\n1 Propaganda\n1 Pym Technologies\n1 Rampaging Baloths\n1 Rapid Rescue\n1 Roiling Canopy\n1 Ruric Thar, Biomagus\n1 Secluded Courtyard\n1 Simic Guildgate\n1 Sire of Seven Deaths\n1 Skyship Buccaneer\n1 Sol Ring\n1 Surveillance Room\n1 The Theorist, Jace Beleren\n1 The Thing, Ben Grimm\n1 The Unbeatable Squirrel Girl\n1 Thornwood Falls\n1 Thought Vessel\n1 Transformative Commons\n1 Villainous Hideout\n",
+      "at_next_table": false
+    },
+    {
+      "player": "Javi",
+      "commander": "Fynn, the Fangbearer",
+      "decklist": "Commander\n1 Fynn, the Fangbearer\n\nDeck\n1 Aggressive Mammoth\n1 Arcane Signet\n1 Avengers Tower\n1 Baxter Building\n1 Beast Within\n1 Beorn's Hospitality\n1 Beorn, Reluctant Host\n1 Boughside Wanderers\n1 Captain America's Shield\n1 Carnivorous Cultivator\n1 Castle Doom\n1 Chromatic Lantern\n1 Command Tower\n1 Commander's Sphere\n1 Elfsworn Giant\n1 Emrakul, the Exigent Doom\n1 Exotic Orchard\n1 Fellwar Stone\n16 Forest\n1 Garruk, Curse Breaker\n1 Gate Colossus\n1 Ghalta the Unstoppable\n1 Ghalta, Primal Hunger\n1 Gigantosaurus\n1 Hedron Archive\n1 Heraldic Banner\n1 Hungering Puppetbeast\n1 Path of Ancestry\n1 Quakestrider Ceratops\n1 Quilled Greatwurm\n1 Rampaging Baloths\n1 Rapid Rescue\n1 Roiling Canopy\n1 Secluded Courtyard\n1 Simulacrum Shaper\n1 Sire of Seven Deaths\n1 Sol Ring\n1 Spinner of Souls\n1 Super-Adaptoid\n1 Surveillance Room\n1 The Unbeatable Squirrel Girl\n1 The Vision\n1 Thought Vessel\n1 Villainous Hideout\n",
+      "at_next_table": false
+    },
+    {
+      "player": "Spencer",
+      "commander": "Ramos, Dragon Engine",
+      "decklist": "Commander\n1 Ramos, Dragon Engine\n\nDeck\n1 Arcane Signet\n1 Asgardian Citadel\n1 Avengers Tower\n1 Baxter Building\n1 Beast Within\n1 Birnin Zana Plaza\n1 Bloodfell Caves\n1 Bloodtithe Collector\n1 Blossoming Sands\n1 Boros Guildgate\n1 Boughside Wanderers\n1 Captain Mar-Vell, Space-Born\n1 Castle Doom\n1 Celebrate the Mountain-king\n1 Chromatic Lantern\n1 Command Tower\n1 Crossway Troublemakers\n1 Darksteel Colossus\n1 Dawnwing Marshal\n1 Dedicated Commons\n1 Dragon Mage\n1 Dáin, Lord of the Iron Hills\n1 Eaten Alive\n1 Etali, Primal Storm\n1 Exotic Orchard\n1 Extended Absence\n1 Fellwar Stone\n1 Fisk Tower\n1 Formidable Commons\n1 Fumigate\n1 Gate Colossus\n1 Ghalta the Unstoppable\n1 Ghalta, Primal Hunger\n1 Goblin-town\n1 Golgari Guildgate\n1 Gruul Guildgate\n1 Hapatra, the Desert Fang\n1 Hedron Archive\n1 Hoarding Dragon\n1 Hulk, Gamma Goliath\n1 Konstrari Annex\n1 Meticulous Commons\n1 Murdock's Crusade\n1 Path of Ancestry\n1 Political Triumph\n1 Quakestrider Ceratops\n1 Red Hulk\n1 Secluded Courtyard\n1 Sol Ring\n1 Spinner of Souls\n1 Stingerquill Annex\n1 Surveillance Room\n1 Swamp\n1 The Mind Stone\n1 The Sentry, Golden Guardian\n1 Training Compound\n1 Vigorbloom Annex\n1 Villainous Hideout\n1 Web Up\n",
+      "at_next_table": false
+    },
+    {
+      "player": "Thomas",
+      "commander": "Dwalin, Weaponmaster",
+      "decklist": "Commander\n1 Dwalin, Weaponmaster\n\nDeck\n1 Ancestor Dragon\n1 Arcane Signet\n1 Asgardian Citadel\n1 Avengers Tower\n1 Baxter Building\n1 Boros Guildgate\n1 Captain America's Shield\n1 Captain America, Super-Soldier\n1 Captain Mar-Vell, Space-Born\n1 Celebrate the Mountain-king\n1 Celestial Armor\n1 Chandra, Torch of Defiance\n1 Command Tower\n1 Daredevil, Man Without Fear\n1 Darksteel Colossus\n1 Dedicated Commons\n1 Drakuseth, Maw of Flames\n1 Dáin, Lord of the Iron Hills\n1 Emrakul, the Exigent Doom\n1 Etali, Primal Storm\n1 Exotic Orchard\n1 Fateshaper Aspirant\n1 Fireshrieker\n1 Fumigate\n1 Hedron Archive\n1 Herald of Eternal Dawn\n1 Hoarding Dragon\n1 Iron Hills\n1 Iron Hills Stalwart\n1 Leyline Axe\n2 Mountain\n1 Path of Ancestry\n9 Plains\n1 Political Triumph\n1 Ragged Short Spear\n1 Secluded Courtyard\n1 Sire of Seven Deaths\n1 Sol Ring\n1 Super-Adaptoid\n1 Surveillance Room\n1 Swiftfoot Boots\n1 Temple of Triumph\n1 The Black Arrow\n1 The Lonely Mountain\n1 The Sentry, Golden Guardian\n1 The Vision\n1 Thor, God of Thunder\n1 Villainous Hideout\n1 Wind-Scarred Crag\n1 Zetalpa, Primal Dawn\n",
+      "at_next_table": false
+    }
+  ],
+  "picks": {
+    "Andrew": [
+      {
+        "card": "Dictate of Kruphix",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Enigma Drake",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Clinquant Skymage",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Burst Lightning",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Fog Bank",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Gratuitous Violence",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Feldon's Cane",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Teach by Example",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Heartfire Immolator",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Opt",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Negate",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Balmor, Battlemage Captain",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Refute",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Abrade",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Archmage of Runes",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Sure Strike",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Scrawling Crawler",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Glamdring, Foe-hammer // Gleam of Death",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Pym Particles",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Sphinx of the Final Word",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Death to Our Enemies",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Hawkeye, Young Avenger",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Witness Protection",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Arcanis the Omnipotent",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Mischievous Mystic",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Super Intelligence",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Echo, Perceptive Prodigy",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Dragon Mage",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Photon Blast Barrage",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Halana and Alena, Partners",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 2,
+        "how": "skill tree"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 2,
+        "how": "skill tree"
+      },
+      {
+        "card": "Thought Vessel",
+        "round": 2,
+        "how": "skill tree"
+      },
+      {
+        "card": "Blasphemous Act",
+        "round": 4,
+        "how": "shop"
+      }
+    ],
+    "Brom": [
+      {
+        "card": "Scoured Barrens",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Bloodfell Caves",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Wind-Scarred Crag",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Jungle Hollow",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Dismal Backwater",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Tranquil Cove",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Swiftwater Cliffs",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Blossoming Sands",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Rugged Highlands",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Massacre Wurm",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Doctor Doom",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Arbiter of Woe",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Crossbones, Malicious Mercenary",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Vampire Nighthawk",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Hero's Downfall",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Captain Marvel, Earth's Protector",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Cloudblazer",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Celebrate the Mountain-king",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Kang, Temporal Tyrant",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Mortify",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Avengers: Under Siege",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Fumigate",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Storm, Windrider",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Stasis Snare",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Zetalpa, Primal Dawn",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Alien Invasion",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Dáin, Lord of the Iron Hills",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Command Tower",
+        "round": 1,
+        "how": "skill tree"
+      },
+      {
+        "card": "Thought Vessel",
+        "round": 3,
+        "how": "skill tree"
+      }
+    ],
+    "Drake": [
+      {
+        "card": "Llanowar Elves",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Thornweald Archer",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Springbloom Druid",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Evolving Wilds",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Dwynen's Elite",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Tatyova, Benthic Druid",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Garruk's Uprising",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Imperious Perfect",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Burnished Hart",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Prime Speaker Zegana",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Primeval Bounty",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Rampaging Baloths",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Pelakka Wurm",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Quakestrider Ceratops",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Essence Scatter",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Circuitous Route",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Bite Down",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Mischievous Mystic",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Primal Might",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Overrun",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Reclamation Sage",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Flashfreeze",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Fierce Empath",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Snakeskin Veil",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Silvan Reveler",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Refute",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Llanowar Elves",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Grow from the Ashes",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Absorbing Man",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Mole Man, Moloid Master",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Down in the Valley",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Radagast of Rhosgobel",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Beorn's Hospitality",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Trygon Predator",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Ka-Zar of the Savage Land",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Broken Wings",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Into the Roil",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Warg Tactics",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Voracious Greatshark",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "We Say Thee Nay!",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 1,
+        "how": "skill tree"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 1,
+        "how": "skill tree"
+      }
+    ],
+    "JD": [
+      {
+        "card": "Ovika, Enigma Goliath",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Basilisk Collar",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Fireshrieker",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Opt",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Think Twice",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Disenchant",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Hinterland Sanctifier",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Inspiring Overseer",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Charming Prince",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Take Up the Shield",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Roll-Roll-Roll-Roll",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Ultron, Artificial Malevolence",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Nick Fury, Agent of S.H.I.E.L.D.",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Thorin Oakenshield",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Make a Stand",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Divine Resilience",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Stolen Stark Tech",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Old Fat Spider Can't See Me",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Shuri, Wakandan Inventor",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "HYDRA Assault Robot",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Viv Vision, Teen Synthezoid",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Valorous Stance",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Chromatic Lantern",
+        "round": 1,
+        "how": "shop"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 1,
+        "how": "skill tree"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 1,
+        "how": "skill tree"
+      },
+      {
+        "card": "Propaganda",
+        "round": 2,
+        "how": "shop"
+      },
+      {
+        "card": "Command Tower",
+        "round": 3,
+        "how": "skill tree"
+      }
+    ],
+    "Javi": [
+      {
+        "card": "Elvish Regrower",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Imperious Perfect",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Circuitous Route",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Fynn, the Fangbearer",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Felidar Retreat",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Mister Hyde, Monster Within",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "The Thing, Ben Grimm",
+        "round": 4,
+        "how": "pick"
+      }
+    ],
+    "John": [
+      {
+        "card": "Dread Summons",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Obliterating Bolt",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Smaug, the Great Calamity // Spew Flame",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Rite of Replication",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Ant-Man, Colony Commander",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Restorative Technique",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Dwynen's Elite",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Ant-Man's Army",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Hellcat, Undying Vigilante",
+        "round": 4,
+        "how": "pick"
+      }
+    ],
+    "Spencer": [
+      {
+        "card": "Garna, Bloodfist of Keld",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Vampiric Rites",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Zombify",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Sower of Chaos",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Evolving Wilds",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Exsanguinate",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Thrill of Possibility",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Ultron Drone",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Stark Industries Executive",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Immersturm Predator",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Ghost, Spectral Saboteur",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Widow's Bite",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Ramos, Dragon Engine",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Boros Charm",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Spider-Man, To the Rescue",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Hawkeye's Bow",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Powerful Broker",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Take Up the Shield",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Wood Elves",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Llanowar Elves",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Ruby, Daring Tracker",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Hero's Downfall",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Marauding Blight-Priest",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Healer's Hawk",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Command Tower",
+        "round": 2,
+        "how": "skill tree"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 2,
+        "how": "skill tree"
+      }
+    ],
+    "Thomas": [
+      {
+        "card": "Aurelia, the Warleader",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "An Unexpected Party // At the Door",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "The Black Arrow",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Dwarven Shortsword",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Ragged Short Spear",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Balin, Loremaster",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Fíli the Pathfinder",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Desert Were-Worm",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 1,
+        "how": "skill tree"
+      }
+    ],
+    "Will": [
+      {
+        "card": "Impact Tremors",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Fake Your Own Death",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Bolt Bend",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Undying Malice",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Crash Through",
+        "round": 1,
+        "how": "pick"
+      },
+      {
+        "card": "Ronin, Shadow Stalker",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Bolg of the North",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Hex Magic",
+        "round": 2,
+        "how": "pick"
+      },
+      {
+        "card": "Whiplash, Vengeful Engineer",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Stolen Stark Tech",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Darksteel Colossus",
+        "round": 3,
+        "how": "pick"
+      },
+      {
+        "card": "Machinesmith Automaton",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Vibranium Energy Daggers",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Red Hulk",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Goblin Plate Mail",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Getaway Barrel",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "H.E.R.B.I.E. Scout Unit",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Heraldic Banner",
+        "round": 4,
+        "how": "pick"
+      },
+      {
+        "card": "Sol Ring",
+        "round": 1,
+        "how": "skill tree"
+      },
+      {
+        "card": "Chaos Warp",
+        "round": 1,
+        "how": "shop"
+      },
+      {
+        "card": "Swiftfoot Boots",
+        "round": 2,
+        "how": "shop"
+      },
+      {
+        "card": "Arcane Signet",
+        "round": 4,
+        "how": "skill tree"
+      }
+    ]
+  }
+}

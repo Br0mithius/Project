@@ -436,6 +436,9 @@ pub struct PoolJob {
     pub deck: Prepared,
     pub extra: Vec<Card>,
     pub opponents: Vec<Prepared>,
+    /// The real next-table decks (30% of each value, as the optimiser scores decks);
+    /// empty when no table is set up.
+    pub table: Vec<Prepared>,
     pub league: bool,
     pub games: u32,
 }
@@ -473,6 +476,11 @@ impl PoolJob {
             deck: Prepared::new(deck, db),
             extra,
             opponents: crate::table::peer_field(db, rules),
+            table: rules
+                .data_dir
+                .as_ref()
+                .map(|d| crate::table::gauntlet(&crate::table::Table::load(d), db))
+                .unwrap_or_default(),
             league,
             games,
         }
@@ -480,7 +488,8 @@ impl PoolJob {
 
     /// Deck-games the whole job plays (for a progress bar).
     pub fn size(&self) -> usize {
-        let mut n = measure_size(&self.deck, self.extra.len(), self.games);
+        let mut n = measure_size(&self.deck, self.extra.len(), self.games)
+            * if self.table.is_empty() { 1 } else { 2 };
         if self.league {
             let g = (self.games / 2).max(500);
             n += self
@@ -505,6 +514,28 @@ impl PoolJob {
             done,
             cancel,
         );
+        // The same referee as every deck test: the real table 30%, the peer field 70%.
+        if !self.table.is_empty() && !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let t = measure(
+                &self.deck_name,
+                &self.deck,
+                &extra,
+                &self.table,
+                rules,
+                self.games,
+                0x7AB1_E5ED,
+                done,
+                cancel,
+            );
+            let w = crate::optimize::DEFAULT_TABLE_WEIGHT;
+            for m in out.iter_mut() {
+                if let Some(x) = t.iter().find(|x| x.card == m.card) {
+                    m.value = w * x.value + (1.0 - w) * m.value;
+                    m.se = ((w * x.se).powi(2) + ((1.0 - w) * m.se).powi(2)).sqrt();
+                    m.games += x.games;
+                }
+            }
+        }
         if self.league && !cancel.load(std::sync::atomic::Ordering::Relaxed) {
             let g = (self.games / 2).max(500);
             out.extend(measure_league(

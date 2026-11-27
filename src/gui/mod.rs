@@ -2760,7 +2760,8 @@ impl GuiApp {
             self.rules.clone(),
             self.deck.clone(),
         );
-        let job = crate::playtest::simvalues::PoolJob::new(&deck, &db, &coll, &rules, 3000, league);
+        // Enough games to rank cards half a point apart (about +/-0.35 a card).
+        let job = crate::playtest::simvalues::PoolJob::new(&deck, &db, &coll, &rules, 8000, league);
         let total = job.size();
         let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

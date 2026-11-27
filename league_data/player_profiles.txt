@@ -1,0 +1,156 @@
+LEAGUE TRADE LOG - every player's trade-ins, picks and purchases, rounds 1-4 (season trades, finalized Nov 27 2026)
+
+=== Thomas: 8 picks, 30 trade-ins
+  colours picked: R4 W4 | colours traded away: U13 B9 G8 W5 R5
+  pick types: Creature 4, Equipment 3, ? 1
+  round 1:
+    picked:     Aurelia, the Warleader (M)
+    bought:     Arcane Signet [skill_tree, 5 VP]
+    traded in:  Bilbo's Deadly Slice (C); Glamdring, Foe-hammer // Gleam of Death (R); Ordinary Bear (C); Roll-Roll-Roll-Roll (R); Beorn, Reluctant Host // Till and Tend (C); Nighthowl Pursuer (U); Lake-town (C); Troll Negotiations (U)
+  round 2:
+    picked:     An Unexpected Party // At the Door (R); The Black Arrow (U); Dwarven Shortsword (C); Ragged Short Spear (C)
+    bought:     Pack Reroll [reroll, 10 VP]
+    traded in:  The Great Goblin (R); Great Gilded Boat (R); Down in the Valley (R); Down in the Valley (R); Most Decrepit Old Bird // Speak Secrets (R); Riddles in the Dark (R); Old Fat Spider Can't See Me (U); Getaway Barrel (R)
+  round 3:
+    picked:     Balin, Loremaster (R); Fíli the Pathfinder (R)
+    bought:     Pack Reroll [reroll, 10 VP]
+    traded in:  Thranduil, the Elvenking (R); Master's Councillors (U); Lake-town Toymaker (U); Master's Councillors (U); Ravenhill Flock (U); Large Bear (U); Gollum the Abandoned (U); Bard the Bowman (U); Dáin's Company (R); Dáin's Company (R)
+  round 4:
+    picked:     Desert Were-Worm (R)
+    traded in:  Tom, Bert, and William (R); Fearsome Goblin Pair (U); Master's Councillors (U); Dreaded Bat-Cloud (U)
+
+=== Brom: 30 picks, 90 trade-ins
+  colours picked: B14 W14 R7 G6 U6 | colours traded away: B24 R24 U23 W19 G17
+  pick types: Creature 11, Land 9, Enchantment 4, Artifact 3, Instant 2, Sorcery 1
+  round 1:
+    picked:     Scoured Barrens (C); Bloodfell Caves (C); Wind-Scarred Crag (C); Jungle Hollow (C); Dismal Backwater (C); Tranquil Cove (C); Swiftwater Cliffs (C); Blossoming Sands (C); Rugged Highlands (C); Ramos, Dragon Engine (M)
+    bought:     Command Tower [skill_tree, 5 VP]
+    traded in:  Scientist Supreme of A.I.M. (R); Vision Quest (R); Storm, Windrider (R); Alien Invasion (R); Ghost, Spectral Saboteur (U); Super Intelligence (U); Pym Particles (U); Rewrite History (U); Hex Magic (U); Absorbing Man (R); Stature, Size Shifter (U); Giant Growth (C); Powerful Broker (C); Super Speed (C); Call Damage Control (C); Atlantean Cavalry (C); We Say Thee Nay! (C); Trickster's Stratagem (C)
+  round 2:
+    picked:     Massacre Wurm (M); Doctor Doom (M); Sol Ring (U); Arcane Signet (U); Arbiter of Woe (U); Crossbones, Malicious Mercenary (U); Vampire Nighthawk (U); Hero's Downfall (U)
+    traded in:  Ultron, Artificial Malevolence (M); Nick Fury, Agent of S.H.I.E.L.D. (R); Construct a Cosmic Cube (R); Arnim Zola, Bio-Fanatic (U); Black Panther, Vanguard (U); Bullseye, Death Dealer (U); Hawkeye, Young Avenger (U); Ka-Zar of the Savage Land (U); Misty Knight, Hero for Hire (U); Quake, Agent of S.H.I.E.L.D. (U); Robot Domination (U); Ronin, Shadow Stalker (U); The Mountain-king's Return (U); U.S.Agent, John Walker (U); War Machine, Legacy of Iron (U); Whiplash, Vengeful Engineer (U); White Tiger, Ava Ayala (U); White Widow, Free Agent (U); A.I.M. Scientists (C); Atlantis Attacks (C); Agent of Atlas (C); Bilbo Baggins, Burglar // Take a Glance (C); Brave Brawler (C)
+  round 3:
+    picked:     Captain Marvel, Earth's Protector (M); Cloudblazer (U); Celebrate the Mountain-king (U); Kang, Temporal Tyrant (U); Mortify (U); Avengers: Under Siege (R); Fumigate (R); Storm, Windrider (R); Stasis Snare (U)
+    bought:     Thought Vessel [skill_tree, 7 VP]
+    traded in:  Belladonna Took (R); Ms. Marvel, Kamala Khan (R); Truck Toss (U); Mister Hyde, Monster Within (U); Mister Hyde, Monster Within (U); Great Ugly-Looking Goblin // Clap! Snap! (U); Go Nuts! (C); Giant-Sized Flying Ant (C); Raft Security Officer (C); We Say Thee Nay! (C); Powerful Broker (C); Stolen Stark Tech (C); Cruel Alliance (C); Thorin's Last Stand (C); Hawkeye's Bow (C); Take Up the Shield (C); Helicarrier Strike (C); Blazing Crescendo (C); Knight of Wundagore (C); Hire a Crew (C); Machinesmith Automaton (C); Machinesmith Automaton (C); K'un-Lun Warrior (C); Decoy Ploy (C); Decoy Ploy (C); Depower (C); Repulsor Blast (C); Vision of Love (C); I Am Iron Man (C); I Am Iron Man (C); Iron Hills (C); Avengers Hangar (C); Duskwatch Hunter (C); HYDRA Infiltration (C); Ramos, Dragon Engine (M); Hawkeye, Master Marksman (R); Photon Blast Barrage (U); Madame Masque (U); Ultron Drone (C); The Masters of Evil (U); Thorin Oakenshield (U); Madame Masque (U)
+  round 4:
+    picked:     Zetalpa, Primal Dawn (R); Alien Invasion (R); Dáin, Lord of the Iron Hills (U)
+    traded in:  My Precious // Allure of Power (R); The Sackville-Bagginses (R); Dependable Quinjet (C); Dependable Quinjet (C); Crimson Operative (C); Sound the Trumpets (U); Down, Down to Goblin-town (U)
+
+=== Andrew: 33 picks, 127 trade-ins
+  colours picked: U19 R15 G1 | colours traded away: W32 U32 B29 R25 G24
+  pick types: Creature 13, Instant 7, Enchantment 5, Aura 3, Artifact 2, Sorcery 2, ? 1
+  round 1:
+    picked:     Dictate of Kruphix (R); Thousand-Year Storm (R); Enigma Drake (U); Clinquant Skymage (U); Burst Lightning (C); Fog Bank (U); Gratuitous Violence (R); Feldon's Cane (U); Teach by Example (U); Heartfire Immolator (U); Opt (C); Negate (C); Balmor, Battlemage Captain (U); Refute (C); Abrade (U); Archmage of Runes (R); Sure Strike (C); Scrawling Crawler (R)
+    traded in:  Iron Hills (C); Key to the Side-Door (U); The Lonely Mountain (R); Lake-town (C); Elvenking's Halls (C); Celebrate the Mountain-king (U); Thorin's Last Stand (C); Thorin's Last Stand (C); Lake-town Lookout (C); Magnificent End (C); Iron Hills Blacksmith (U); Esgaroth Garrison (C); Dwarven Shortsword (C); Lake-town Toymaker (U); Velvetwing Butterflies // Gaze in Wonder (C); Ori, Keeper of Songs (C); Ori, Keeper of Songs (C); Bifur, Melodic Rider (U); Thorin Oakenshield (U); Dáin's Company (R); Giant's Boulder (C); Well-Worn Spatula (C); Giant's Boulder (C); Bolg of the North (U); Well-Worn Spatula (C); Fearsome Goblin Pair (U); Eagle's Rescue (U); Bard's Company (R); Silvan Reveler (U); Bard's Company (R); Silvan Reveler (U); Mirkwood Nurturer (C); Vow to Erebor (C); The Mountain-king's Return (U); The Mountain-king's Return (U); Nori, Teller of Tales (C); Vow to Erebor (C); Mirkwood Nurturer (C); Thranduil's Decree (U); Ravenhill Flock (U); Old Fat Spider (U); Great Ugly-Looking Goblin // Clap! Snap! (U); Head of the Hunt (R); Troll Negotiations (U)
+  round 2:
+    picked:     Glamdring, Foe-hammer // Gleam of Death (R); Pym Particles (U); Rewrite History (U); Super Speed (C); Sphinx of the Final Word (M)
+    bought:     Sol Ring [skill_tree, 5 VP]; Arcane Signet [skill_tree, 7 VP]; Thought Vessel [skill_tree, 9 VP]
+    traded in:  Elrond, Moon-Reader (M); Vow to Erebor (C); Nori, Teller of Tales (C); Nori, Teller of Tales (C); Elvenking's Harper (C); Smaug, the Great Calamity // Spew Flame (C); Mirkwood Meditator (C); Ragged Short Spear (C); Elvenking's Harper (C); Gandalf, Wandering Wizard (C); Mirkwood Meditator (C); Uneasy Partings (C); Thranduil's Decree (U); Gundabad Opportunist (C); Plunder the Trollshaws (C); Tom, Bert, and William (R); Ravening Warg (C); Bilbo's Deadly Slice (C); Mirkwood Pathmaker (U); Wakandan Royal Guard (C); Boughside Wanderers (C); Galion, Elvenking's Butler (U); Beorn's Hospitality (U); Galion, Elvenking's Butler (U); Desolation Prowler (U); Desolation Prowler (U); Cantankerous Keepers (R); Nighthowl Pursuer (U); Desolation Prowler (U); Old Fat Spider (U); The Chief Warg (U)
+  round 3:
+    picked:     Death to Our Enemies (U); Hawkeye, Young Avenger (U); Witness Protection (C); Arcanis the Omnipotent (R); Mischievous Mystic (U); Super Intelligence (U)
+    traded in:  Wilderland Scrounger (U); Burn, Burn, Tree and Fern (U); White Widow, Free Agent (U); Elvenking's Harper (C); Plunder the Trollshaws (C); Plunder the Trollshaws (C); Dwarven Shortsword (C); Confusticate and Bebother (C); Glóin the Mighty // Easy Pickings (U); The Lord of the Eagles (R); Smaug, the Great Calamity // Spew Flame (C); Enchanted River's Grasp (C); Goblin-town Flunkies (C); Crude Bent Blade (C); Bilbo's Deadly Slice (C); HYDRA Infiltration (C); Smaug's Fury (C); Smaug's Fury (C); Long Lake Nuisance (C); Stir Up Trouble (C); Ravening Warg (C); Ravening Warg (C); Great Fierce Bee (C); Rage into the Valley (C); Gollum, Silent Slinker // Meager Meal (C); Belladonna Took (R)
+  round 4:
+    picked:     Echo, Perceptive Prodigy (U); Dragon Mage (U); Photon Blast Barrage (U); Halana and Alena, Partners (R)
+    bought:     Blasphemous Act [shop, 30 VP]
+    traded in:  Thousand-Year Storm (R); Old Fat Spider Can't See Me (U); Desert Were-Worm (R); Down in the Valley (R); Iron Hills Stalwart (C); Rage into the Valley (C); Front Porch Sentries (C); Front Porch Sentries (C); Reverent Howl (C); Gollum, Silent Slinker // Meager Meal (C); Stir Up Trouble (C); Attercop (C); Boughside Wanderers (C); Ordinary Bear (C); Quarrel (C); Large Bear (U); Stone by Sunlight (U); Bilbo's Deadly Slice (C); Rewrite History (U); Master's Councillors (U); Most Decrepit Old Bird // Speak Secrets (R); Old Thrush (C); Super Speed (C); The Black Arrow (U); Speed, Young Avenger (U); Óin the Brave (C)
+
+=== John: 9 picks, 18 trade-ins
+  colours picked: G5 R2 U2 B1 | colours traded away: U6 R6 W6 G4 B3
+  pick types: Sorcery 4, Creature 4, ? 1
+  round 3:
+    picked:     Dread Summons (R); Obliterating Bolt (U); Smaug, the Great Calamity // Spew Flame (C)
+    traded in:  Supper for Spiders (R); Thranduil's Company (R); Dwarven Mauler (U); Elven Raft-Steerer (U); Wood Elves (C); Duskwatch Hunter (C)
+  round 4:
+    picked:     Rite of Replication (R); Ant-Man, Colony Commander (U); Restorative Technique (C); Dwynen's Elite (C); Ant-Man's Army (C); Hellcat, Undying Vigilante (U)
+    traded in:  Bard's Company (R); Last Light of Durin's Day (R); Old Thrush (C); Long-Bodied Grey Dog (C); Patient Instructor (C); Patient Instructor (C); Nori, Teller of Tales (C); Duskwatch Hunter (C); Snowslope Hunter (U); Dwarven Mauler (U); Eagle's Rescue (U); Thorin Oakenshield (U)
+
+=== Javi: 9 picks, 14 trade-ins
+  colours picked: G6 B2 W2 | colours traded away: B6 W4 G3 R1 U1
+  pick types: Creature 7, Sorcery 1, Enchantment 1
+  round 1:
+    picked:     Elvish Regrower (U); Imperious Perfect (U)
+    traded in:  Jessica Jones, Private Eye (U); Rhovanion Rampager (R); Chief Warg's Company (R)
+  round 2:
+    picked:     Head of the Hunt (R); Circuitous Route (U); Fynn, the Fangbearer (U)
+    traded in:  Captain Marvel, Earth's Protector (M); Captain America, Wings of Freedom (R); Great Gilded Boat (R)
+  round 3:
+    picked:     Ayli, Eternal Pilgrim (R)
+    traded in:  Head of the Hunt (R); Viv Vision, Teen Synthezoid (U); Gathering of Darkness (U); Troll Negotiations (U)
+  round 4:
+    picked:     Felidar Retreat (R); Mister Hyde, Monster Within (U); The Thing, Ben Grimm (U)
+    traded in:  The Notary Hobbits (R); Iron Hills Blacksmith (U); Ayli, Eternal Pilgrim (R); Too Evil to Stay Dead (U)
+
+=== JD: 33 picks, 186 trade-ins
+  colours picked: W14 U10 R7 B2 G1 | colours traded away: W41 B40 U40 R38 G35
+  pick types: Creature 14, Instant 10, Equipment 4, Artifact 3, Enchantment 2
+  round 1:
+    picked:     Ovika, Enigma Goliath (R); Basilisk Collar (R); Fireshrieker (U); Opt (C); Refute (C); Think Twice (C); Unsummon (C); Crackling Cyclops (C); Guttersnipe (U); Mindsparker (U)
+    bought:     Chromatic Lantern [shop, 30 VP]; Sol Ring [skill_tree, 5 VP]; Arcane Signet [skill_tree, 7 VP]; Pack Reroll [reroll, 10 VP]
+    traded in:  Doctor Doom (M); Taskmaster, Mercenary Mimic (R); Mole Man, Moloid Master (R); Thunderbolts Conspiracy (R); Baron Helmut Zemo (R); Winter Soldier, Icy Assassin (R); Quake, Agent of S.H.I.E.L.D. (U); Dark Deed (U); Widow's Bite (C); Cruel Alliance (C); Stolen Stark Tech (C); Stolen Stark Tech (C); Murdock's Crusade (C); Justice, Vance Astrovik (U); Falcon, Winged Wonder (U); Reptil, Dinomorpher (U); Tigra, Feline Fury (U); Titania, Rugged Rumbler (U); Robot Domination (U); Klaw, Sonic Subjugator (U); Crossbones, Malicious Mercenary (U); Killmonger, Scourge of Wakanda (U); Unliving Legionnaire (C); Bold Biochemist (C); Atlantean Cavalry (C); Atlantis Attacks (C); Atlantis Attacks (C); Panther Pounce (C); Helicarrier Strike (C); Take Up the Shield (C); Crowd of True Believers (C); Hero in Training (C); Hero in Training (C); Raft Security Officer (C); Raft Security Officer (C); Brave Brawler (C); Agents of S.H.I.E.L.D. (C); Roxxon Brutes (C); Decoy Ploy (C); HYDRA Troopers (C); Agents of HYDRA (C); HYDRA Infiltration (C); Kingpin's Enforcers (C); Call Damage Control (C); Ant-Man's Army (C); Knight of Wundagore (C); Powerful Broker (C); Guerrilla Gorilla (C); A.I.M. Scientists (C); Unliving Legionnaire (C); Rapid Rescue (C); Ninja of the Hand (C); Savage Land Dinosaur (C); Human Torch, Johnny Storm (U); Spider-Man, To the Rescue (U); Serpent Specialist (C); The Masters of Evil (U); Hellcat, Undying Vigilante (R); Invisible Woman, Sue Storm (U); Invisible Woman, Sue Storm (U); Luke Cage, Power Man (U); White Widow, Free Agent (U); Night Nurse, Healer of Heroes (U); Beast, Erudite Aerialist (U); Ant-Man, Colony Commander (U); Kang, Temporal Tyrant (U); Ronin, Shadow Stalker (U); Agent 13, Sharon Carter (U); S.H.I.E.L.D. Helicarrier (U); Colleen Wing, Street Samurai (U)
+  round 2:
+    picked:     Disenchant (C); Hinterland Sanctifier (C); Inspiring Overseer (C); Cat Collector (U); Angel of Finality (U); Charming Prince (R); Well-Worn Spatula (C); Thorin's Last Stand (C); Take Up the Shield (C); Roll-Roll-Roll-Roll (R); Angel of Vitality (U); Harbinger of the Tides (R)
+    bought:     Propaganda [shop, 30 VP]; Pack Reroll [reroll, 10 VP]
+    traded in:  Avengers: Under Siege (R); Truck Toss (U); Agent Maria Hill (U); War Machine, Legacy of Iron (U); Snowslope Hunter (U); Stark Industries Executive (C); A.I.M. Synthoids (C); Guerrilla Gorilla (C); Gandalf, Wandering Wizard (C); Gundabad Opportunist (C); Atlantis Attacks (C); Agents of S.H.I.E.L.D. (C); Bold Biochemist (C); A.I.M. Synthoids (C); Dependable Quinjet (C); Hell's Kitchen (C); Fisk Tower (C); Los Diablos Missile Base (C); Pym Technologies (C); A.I.M. Labs (C); Hell's Kitchen (C); Hell's Kitchen (C); Volcanic Villain (C); Volcanic Villain (C); Vibranium Energy Daggers (C); Undercover Skrull (C); Wolverine, Fierce Fighter (R); The Lonely Mountain (R); Earth's Mightiest Heroes (M); Punishing Punch (U); Hydraulic Helper (C); Ultron Drone (C); Kree Sentinel (C); K'un-Lun Warrior (C); Aerial Doombot (C); HYDRA Assault Robot (C); Volcanic Villain (C); S.H.I.E.L.D. Deployment Drone (C); S.H.I.E.L.D. Deployment Drone (C); Super Strength (C); Super Strength (C); Giant Growth (C); Warg Tactics (C); Goblin Plate Mail (C); Widow's Bite (C); Restorative Technique (C); Restorative Technique (C); Restorative Technique (C); Shuri, Wakandan Inventor (U); Villainous Hideout (U); Avengers Tower (U); Hellcat, Undying Vigilante (U); Death to Our Enemies (U); Super Speed (C)
+  round 3:
+    picked:     Ultron, Artificial Malevolence (M); Nick Fury, Agent of S.H.I.E.L.D. (R)
+    bought:     Command Tower [skill_tree, 9 VP]
+    traded in:  Lord of Atlantis (M); Wolverine, Fierce Fighter (R); Too Evil to Stay Dead (U); Patriot, Shield Wielder (U); Glóin the Mighty // Easy Pickings (U); Loki Laufeyson (U); Savage Land Dinosaur (C); A.I.M. Scientists (C); Hydraulic Helper (C); Aerial Doombot (C); H.E.R.B.I.E. Scout Unit (C); Unliving Legionnaire (C); Web Up (C); Trickster's Stratagem (C); Lake-town Lookout (C); Wakandan Drone Flock (C); Bilbo Baggins, Burglar // Take a Glance (C); Old Thrush (C); Esgaroth Garrison (C); S.H.I.E.L.D. Spy Kit (C); Mirkwood Meditator (C); Giant-Sized Flying Ant (C); Well-Worn Spatula (C); Iron Hills Stalwart (C); Long Lake Nuisance (C); Super Suit (C); Kree Sentinel (C); Hulk, Gamma Goliath (U); Red Hulk (U); Wonder Man, Hollywood Hero (U); Crimson Operative (C); Harbinger of the Tides (R); Angel of Finality (U); Angel of Vitality (U); Mindsparker (U); Repulsor Blast (C); Crackling Cyclops (C); Echo, Perceptive Prodigy (U); Futurist Forge (C); Thorin's Last Stand (C)
+  round 4:
+    picked:     Thorin Oakenshield (U); Make a Stand (U); Divine Resilience (U); Stolen Stark Tech (C); Old Fat Spider Can't See Me (U); Shuri, Wakandan Inventor (U); HYDRA Assault Robot (C); Viv Vision, Teen Synthezoid (U); Valorous Stance (U)
+    traded in:  Giant's Boulder (C); Vow to Erebor (C); Lakeshore Apothecary (C); Elvenking's Harper (C); Well-Worn Spatula (C); Web Up (C); Lake-town Lookout (C); Lake-town Lookout (C); Gnashing of Teeth (U); Gollum the Abandoned (U); Rhovanion Rampager (R); Cat Collector (U); Dwarven Shortsword (C); Moment of Glory (C); Unsummon (C); We Say Thee Nay! (C); Refute (C); Lightning Strike (C); Team Tactics (U); Falcon, Winged Wonder (U); Bothersome Noisemaker (U); Guttersnipe (U)
+
+=== Will: 18 picks, 94 trade-ins
+  colours picked: R9 B7 | colours traded away: G36 U20 B20 W18 R13
+  pick types: Artifact 5, Creature 4, Instant 3, Equipment 3, Sorcery 2, Enchantment 1
+  round 1:
+    picked:     Impact Tremors (C); Fake Your Own Death (C); Bolt Bend (U); Undying Malice (C); Crash Through (C)
+    bought:     Sol Ring [skill_tree, 5 VP]; Chaos Warp [shop, 30 VP]
+    traded in:  Mirkwood Nurturer (C); Mirkwood Nurturer (C); Attercop (C); Dáin's Company (R); Nori, Teller of Tales (C); Nori, Teller of Tales (C); Dwarven Provisioner (C); Dwarven Provisioner (C); Bombur, Gentle Dreamer (U); Gollum the Abandoned (U); Stony-Voiced Goblins (C); Long-Bodied Grey Dog (C); Long-Bodied Grey Dog (C); Old Thrush (C); Bejeweled Warg (R); The Chief Warg (U); The Chief Warg (U); Wargling (C); Silvan Reveler (U); Duskwatch Hunter (C); Woodland Weavemaster (U); Beorn, Reluctant Host // Till and Tend (C); Beorn, Reluctant Host // Till and Tend (C); Mirkwood Meditator (C); Wood Elves (C); Wood Elves (C); Wood Elves (C); Quarrel (C); Quarrel (C); Front Porch Sentries (C); Mirkwood (C); Mirkwood (C); Elvenking's Halls (C)
+  round 2:
+    picked:     Ronin, Shadow Stalker (U); Bolg of the North (U); Hex Magic (U)
+    bought:     Swiftfoot Boots [shop, 30 VP]
+    traded in:  Tom, Bert, and William (R); Down, Down to Goblin-town (U); Stony-Voiced Goblins (C); Stony-Voiced Goblins (C); Fíli the Pathfinder (R); Radagast of Rhosgobel (R); Stone by Sunlight (U); Gollum the Abandoned (U); Mirkwood Pathmaker (U); Woodland Weavemaster (U); Thranduil, Sindarin Liege // Silvan Rally (U); Down, Down to Goblin-town (U); Rick Jones, Destined Sidekick (U); Ori, Keeper of Songs (C); Ori, Keeper of Songs (C); Gandalf, Wandering Wizard (C); Hobbit Hole (C); Hobbit Hole (C); Front Porch Sentries (C); Guardian of the Halls (C); Guardian of the Halls (C); Little Bear (C); Little Bear (C); Warg Tactics (C); Helicarrier Strike (C)
+  round 3:
+    picked:     Whiplash, Vengeful Engineer (U); Stolen Stark Tech (C); Darksteel Colossus (M)
+    bought:     Pack Reroll [reroll, 10 VP]; Pack Reroll (late) [reroll, 10 VP]
+    traded in:  Smaug, Wicked Worm (R); Roads Go Ever, Ever On (R); Dáin's Company (R); Troop of Ponies (U); The Thing, Ben Grimm (U); Nasty Little Rabbit (U); Wargling (C); Elvenking's Halls (C); Gandalf, Wandering Wizard (C); Most Decrepit Old Bird // Speak Secrets (R); Lake-town (C); Óin the Brave (C); Óin the Brave (C); Gandalf, Wandering Wizard (C); Tidings of War (C); Uneasy Partings (C); Bilbo Baggins, Burglar // Take a Glance (C)
+  round 4:
+    picked:     Machinesmith Automaton (C); Vibranium Energy Daggers (C); Red Hulk (U); Goblin Plate Mail (C); Getaway Barrel (R); H.E.R.B.I.E. Scout Unit (C); Heraldic Banner (U)
+    bought:     Arcane Signet [skill_tree, 7 VP]
+    traded in:  Great Ugly-Looking Goblin // Clap! Snap! (U); Lakeshore Apothecary (C); Lakeshore Apothecary (C); Moment of Glory (C); Plunder the Trollshaws (C); Enchanted River's Grasp (C); Bilbo Baggins, Burglar // Take a Glance (C); Velvetwing Butterflies // Gaze in Wonder (C); Quarrel (C); Goblin-town Flunkies (C); Down, Down to Goblin-town (U); Troop of Ponies (U); Bifur, Melodic Rider (U); Great Ugly-Looking Goblin // Clap! Snap! (U); Gathering of Darkness (U); An Unexpected Party // At the Door (R); Misty Mountains Raider (U); Thorin Oakenshield (U); Thranduil's Decree (U)
+
+=== Spencer: 25 picks, 73 trade-ins
+  colours picked: B10 R9 W6 G6 U2 | colours traded away: R21 G19 U17 W12 B11
+  pick types: Creature 13, Instant 5, Sorcery 2, Artifact 2, Enchantment 1, Land 1, Equipment 1
+  round 2:
+    picked:     Garna, Bloodfist of Keld (U); Vampiric Rites (U); Zombify (U); Sower of Chaos (C); Felidar Cub (C); Evolving Wilds (C)
+    bought:     Command Tower [skill_tree, 5 VP]; Sol Ring [skill_tree, 7 VP]; Pack Reroll (late) [reroll, 10 VP]
+    traded in:  Bilbo, Luckwearer // Burglar's Plot (U); Nasty Little Rabbit (U); Lake-town Mariners // Gone Fishing (U); Lake-town Mariners // Gone Fishing (U); Thranduil, Sindarin Liege // Silvan Rally (U); Bofur, Reliable Guardian // Concerted Care (U); Guardian of the Halls (C); Iron Hills Stalwart (C); Magnificent End (C); Smaug, the Great Calamity // Spew Flame (C); Beorn, Reluctant Host // Till and Tend (C); Ravening Warg (C); Old Thrush (C); Dori, Bearer of Friends (C); Azog, Moria's Ruin (R); Balin, Loremaster (R); The Chief Warg (U); Cantankerous Keepers (R); Gigantic Big Bear (R); Goblin-town (C); Goblin-town (C)
+  round 3:
+    picked:     Exsanguinate (U); Thrill of Possibility (C); Ultron Drone (C); Stark Industries Executive (C); Immersturm Predator (R); Ghost, Spectral Saboteur (U); Widow's Bite (C)
+    traded in:  Cantankerous Keepers (R); Stone by Sunlight (U); Troll Negotiations (U); Old Fat Spider (U); Magnificent End (C); Long Lake Nuisance (C); Duskwatch Hunter (C); Quarrel (C); Fearsome Goblin Pair (U); Bard the Bowman (U); Bombur, Gentle Dreamer (U); Sound the Trumpets (U); Last Light of Durin's Day (R); Burn, Burn, Tree and Fern (U); Desert Were-Worm (R)
+  round 4:
+    picked:     Ramos, Dragon Engine (M); Boros Charm (U); Spider-Man, To the Rescue (U); Hawkeye's Bow (C); Powerful Broker (C); Take Up the Shield (C); Wood Elves (C); Llanowar Elves (C); Ruby, Daring Tracker (U); Hero's Downfall (U); Marauding Blight-Priest (C); Healer's Hawk (C)
+    traded in:  Wargling (C); Uneasy Partings (C); Mirkwood Meditator (C); Dori, Bearer of Friends (C); Dori, Bearer of Friends (C); Dori, Bearer of Friends (C); Long Lake Nuisance (C); Bombur, Gentle Dreamer (U); Ori, Keeper of Songs (C); The Mountain-king's Return (U); Thranduil's Decree (U); Sound the Trumpets (U); Beast, Erudite Aerialist (U); Guardian of the Halls (C); Velvetwing Butterflies // Gaze in Wonder (C); Boughside Wanderers (C); Fíli the Pathfinder (R); Gandalf, Spark Starter (U); The Black Arrow (U); Smaug's Fury (C); Gollum the Abandoned (U); Iron Hills Stalwart (C); Troop of Ponies (U); Dwarven Mattock (U); Fearsome Goblin Pair (U); Uneasy Partings (C); Elvenking's Harper (C); Boughside Wanderers (C); Gundabad Opportunist (C); Desert Were-Worm (R); Silvan Reveler (U); Justice, Vance Astrovik (U); Esgaroth Garrison (C); Ori, Keeper of Songs (C); Duskwatch Hunter (C); Felidar Cub (C); Crude Bent Blade (C)
+
+=== Drake: 40 picks, 132 trade-ins
+  colours picked: G31 U12 | colours traded away: W40 B37 R29 G22 U21
+  pick types: Creature 21, Instant 9, Enchantment 4, Sorcery 4, Land 1, Artifact 1
+  round 1:
+    picked:     Llanowar Elves (C); Thornweald Archer (C); Springbloom Druid (C); Evolving Wilds (C); Dwynen's Elite (C); Tatyova, Benthic Druid (U); Garruk's Uprising (U); Imperious Perfect (U); Burnished Hart (U); Prime Speaker Zegana (R); Primeval Bounty (M); Rampaging Baloths (R); Pelakka Wurm (U); Quakestrider Ceratops (U); Essence Scatter (U); Circuitous Route (U); Bite Down (C); Mischievous Mystic (U); Primal Might (R); Overrun (U); Reclamation Sage (U)
+    bought:     Sol Ring [skill_tree, 5 VP]; Arcane Signet [skill_tree, 7 VP]; Pack Reroll [reroll, 10 VP]
+    traded in:  Dwarven Provisioner (C); Moment of Glory (C); Celebrate the Mountain-king (U); Dáin, Lord of the Iron Hills (U); Eagle of the Great Shelf (U); Patient Instructor (C); Stone by Sunlight (U); Lake-town (C); An Unexpected Party // At the Door (R); Bofur, Reliable Guardian // Concerted Care (U); Bard's Company (R); The Mountain-king's Return (U); Dwarven Shortsword (C); Stir Up Trouble (C); Crude Bent Blade (C); Bolg of the North (U); Bard the Bowman (U); Dwarven Shortsword (C); Bolg of the North (U); Magnificent End (C); Stir Up Trouble (C); Goblin-town (C); Fearsome Goblin Pair (U); Thorin Oakenshield (U); Ori, Keeper of Songs (C); Mirkwood (C); Duskwatch Hunter (C); Inside Information (M); Stony-Voiced Goblins (C); Gathering of Darkness (U); Ori, Keeper of Songs (C); Getaway Barrel (R); Iron Hills Stalwart (C); Gundabad Opportunist (C); Dori, Bearer of Friends (C); Óin the Brave (C); Burn, Burn, Tree and Fern (U); Gnashing of Teeth (U); Thorin's Last Stand (C); Lake-town Lookout (C); Gandalf, Spark Starter (U); Nighthowl Pursuer (U); Lake-town Lookout (C); Lake-town Lookout (C); Thorin's Last Stand (C); Velvetwing Butterflies // Gaze in Wonder (C); Velvetwing Butterflies // Gaze in Wonder (C); Goblin Plate Mail (C); Goblin Plate Mail (C); Goblin-town Flunkies (C); Tidings of War (C); Ragged Short Spear (C); Great Fierce Bee (C); Iron Hills (C); Rage into the Valley (C); Iron Hills (C); Rage into the Valley (C); Front Porch Sentries (C); Great Fierce Bee (C); Front Porch Sentries (C); Front Porch Sentries (C); Great Fierce Bee (C); Ragged Short Spear (C); Tidings of War (C); Tidings of War (C); Goblin-town Flunkies (C); The Black Arrow (U); Most Decrepit Old Bird // Speak Secrets (R); Fateful Discovery (M); Master's Councillors (U); Well-Worn Spatula (C); Well-Worn Spatula (C); Long-Bodied Grey Dog (C); Long-Bodied Grey Dog (C)
+  round 2:
+    picked:     Flashfreeze (U); Fierce Empath (C); Snakeskin Veil (U); Silvan Reveler (U); Refute (C); Llanowar Elves (C); Grow from the Ashes (C); Absorbing Man (R); Mole Man, Moloid Master (R)
+    bought:     Pack Reroll [reroll, 10 VP]
+    traded in:  Bilbo's Gambit (R); Thrór's Map (U); Nighthowl Pursuer (U); Bilbo Baggins, Burglar // Take a Glance (C); Bilbo Baggins, Burglar // Take a Glance (C); Bilbo Baggins, Burglar // Take a Glance (C); Little Bear (C); Little Bear (C); Little Bear (C); Lakeshore Apothecary (C); Lakeshore Apothecary (C); Wargling (C); Ravening Warg (C); Front Porch Sentries (C); Reverent Howl (C); Nasty Little Rabbit (U); Guardian of the Halls (C); Guardian of the Halls (C); Ordinary Bear (C); S.H.I.E.L.D. Deployment Drone (C); Go Nuts! (C); Head of the Hunt (R); Gigantic Big Bear (R); Large Bear (U); Large Bear (U); The Mountain-king's Return (U)
+  round 3:
+    picked:     Down in the Valley (R); Radagast of Rhosgobel (R); Beorn's Hospitality (U); Trygon Predator (U); Ka-Zar of the Savage Land (U); Broken Wings (C); Into the Roil (C); Warg Tactics (C)
+    bought:     Pack Reroll [reroll, 10 VP]
+    traded in:  Gandalf, Goblins' Bane // Flameshape (M); Thorin Oakenshield (U); Glóin the Mighty // Easy Pickings (U); Master's Councillors (U); Óin the Brave (C); Crude Bent Blade (C); Dwarven Shortsword (C); Rage into the Valley (C); Vow to Erebor (C); Ravening Warg (C); Patient Instructor (C); Borough Backup (C); Gollum, Silent Slinker // Meager Meal (C); Ant-Man's Army (C); Glamdring, Foe-hammer // Gleam of Death (R); Quarrel (C); Enchanted River's Grasp (C); Mirkwood Nurturer (C); Guardian of the Halls (C); Ordinary Bear (C); Giant's Boulder (C)
+  round 4:
+    picked:     Voracious Greatshark (R); We Say Thee Nay! (C)
+    bought:     Pack Reroll [reroll, 10 VP]
+    traded in:  Along the Crooked Way (R); Uncover the Moon-Letters (R); Eagle of the Great Shelf (U); Bifur, Melodic Rider (U); Troll Negotiations (U); Lake-town (C); Mirkwood Nurturer (C); Esgaroth Garrison (C); Nori, Teller of Tales (C); Gollum, Silent Slinker // Meager Meal (C); Guardian of the Halls (C)
+
