@@ -13,6 +13,8 @@
 //!
 //! `cargo run --release --example synergy_research -- <data dir> <out dir> strength <games>`
 //! `cargo run --release --example synergy_research -- <data dir> <out dir> synergy <games> [archetype part]`
+//! `cargo run --release --example synergy_research -- <data dir> <out dir> deck <games> <deck file> <card|card|...>...`
+//! (`deck`: each package's cards in that deck, alone and together.)
 use msh_deckbuilder::archetypes::ARCHETYPES;
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
@@ -134,23 +136,27 @@ fn main() {
                     continue;
                 };
                 // The deck's most on-theme spells: key cards, then the most themes matched.
-                let mut themed: Vec<(i32, String)> = deck
+                // Ranked by how well each fits (key cards first), payoffs before enablers;
+                // ties by name only last (an integer score made ties of most cards, and the
+                // alphabet picked them).
+                let mut themed: Vec<(bool, f32, f32, String)> = deck
                     .cards
                     .keys()
                     .filter_map(|n| db.get(n))
                     .filter(|c| !c.is_land() && Some(&c.name) != deck.commander.as_ref())
                     .filter_map(|c| {
                         let f = arch.fit(c);
-                        f.fits().then(|| {
-                            (
-                                (f.key as i32) * 100 + (f.score() * 10.0) as i32,
-                                c.name.clone(),
-                            )
-                        })
+                        f.fits()
+                            .then(|| (f.key, f.score(), f.payoff, c.name.clone()))
                     })
                     .collect();
-                themed.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
-                let pkg_names: Vec<String> = themed.iter().take(5).map(|x| x.1.clone()).collect();
+                themed.sort_by(|x, y| {
+                    y.0.cmp(&x.0)
+                        .then(y.1.partial_cmp(&x.1).unwrap())
+                        .then(y.2.partial_cmp(&x.2).unwrap())
+                        .then(x.3.cmp(&y.3))
+                });
+                let pkg_names: Vec<String> = themed.iter().take(5).map(|x| x.3.clone()).collect();
                 if pkg_names.len() < 3 {
                     println!(
                         "{}: only {} on-theme spells, skipped",
@@ -182,6 +188,46 @@ fn main() {
                 );
             }
         }
-        _ => panic!("mode: strength or synergy"),
+        "deck" => {
+            // `deck <games> <deck file> <card|card|...>...`: each package in that deck.
+            let deck = Deck::load(std::path::Path::new(&a[4]), &db).expect("deck file");
+            println!(
+                "packages in {}: {} games per variant against the table and the peer field",
+                a[4], games
+            );
+            for spec in &a[5..] {
+                let names: Vec<String> = spec.split('|').map(|x| x.trim().to_string()).collect();
+                match msh_deckbuilder::playtest::synergy::package_synergy(
+                    &deck, &names, &db, &rules, &gauntlet, games, 0xD3C, &done, &cancel,
+                ) {
+                    Ok(Some(r)) => {
+                        println!(
+                            "package {:+.2} ± {:.2}  sum alone {:+.2} ± {:.2}  interaction {:+.2} ± {:.2}  [{}]",
+                            r.package.gain * 100.0,
+                            r.package.stderr * 100.0,
+                            r.sum_alone.gain * 100.0,
+                            r.sum_alone.stderr * 100.0,
+                            r.interaction.gain * 100.0,
+                            r.interaction.stderr * 100.0,
+                            names.join(", ")
+                        );
+                        for (c, (al, inp)) in r.cards.iter().zip(r.alone.iter().zip(&r.in_package))
+                        {
+                            println!(
+                                "    {:<34} alone {:+.2} ± {:.2}   in the package {:+.2} ± {:.2}",
+                                c,
+                                al.gain * 100.0,
+                                al.stderr * 100.0,
+                                inp.gain * 100.0,
+                                inp.stderr * 100.0
+                            );
+                        }
+                    }
+                    Ok(None) => return,
+                    Err(e) => println!("{}: {}", spec, e),
+                }
+            }
+        }
+        _ => panic!("mode: strength, synergy or deck"),
     }
 }
