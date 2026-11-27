@@ -63,6 +63,19 @@ impl Effort {
         colors: 2000,
         max_swaps: 4,
     };
+    /// Auto-build's second stage: few candidates (the best bench cards against the least
+    /// valuable deck cards), each on enough games to see a one-point swap. The quick
+    /// effort's 600-800 games per swap (+/-1.7 points) found nothing in the builder gate.
+    pub const REFINE: Effort = Effort {
+        name: "refine",
+        screen: 1500,
+        additions: 4000,
+        bench: 8,
+        cut_slots: 2,
+        confirm: 10000,
+        colors: 2000,
+        max_swaps: 3,
+    };
     /// About five minutes on 4 cores.
     pub const THOROUGH: Effort = Effort {
         name: "thorough",

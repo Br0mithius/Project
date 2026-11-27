@@ -56,7 +56,7 @@ fn main() {
             &coll,
             &rules,
             &referee,
-            msh_deckbuilder::lab::Effort::QUICK,
+            msh_deckbuilder::lab::Effort::REFINE,
             2,
             &Progress::new(),
         );

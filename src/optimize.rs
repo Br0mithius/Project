@@ -45,7 +45,7 @@ pub struct Opponents {
 
 /// The opponents and weighting every measurement uses (the referee's version: bump it when
 /// the opponent sets or the weighting change, so results from before can be told apart).
-pub const REFEREE_VERSION: u32 = 1;
+pub const REFEREE_VERSION: u32 = 2;
 
 impl Opponents {
     /// The one standard referee: the data folder's next-table decks (30% of the score) and

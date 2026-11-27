@@ -55,7 +55,7 @@ impl GuiApp {
         if let Some(job) = self.opt.job.take() {
             job.cancel();
         }
-        self.start_opt(false, Effort::QUICK);
+        self.start_opt(false, Effort::REFINE);
         if self.opt.job.is_some() {
             self.opt.auto_apply = true;
             self.status = format!(
