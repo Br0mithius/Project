@@ -114,6 +114,33 @@ fn main() {
             .collect();
         println!("    tested deck has, build lacks: {}", missing.join(", "));
         println!("    build has instead:            {}", extra.join(", "));
+        // Why: each differing card's builder score (in the build without it) and its
+        // measured value.
+        let names = golden
+            .cards
+            .iter()
+            .filter(|(n, k)| d.count_of(n) < **k)
+            .chain(d.cards.iter().filter(|(n, k)| golden.count_of(n) < **k))
+            .map(|(n, _)| n.clone());
+        for n in names {
+            let Some(c) = db.get(&n).filter(|c| !c.is_land()) else {
+                continue;
+            };
+            let mut without = d.clone();
+            without.remove(&n, 1);
+            let (score, why) = msh_deckbuilder::analysis::score_card(c, &without, &db, &rules);
+            let p = db.sim_values.power(&c.name);
+            println!(
+                "      {:<30} score {:5.2}  measured {}  | {}",
+                n,
+                score,
+                p.map_or("-".to_string(), |p| format!(
+                    "{:+.2} ± {:.2}",
+                    p.value, p.se
+                )),
+                why.iter().take(4).cloned().collect::<Vec<_>>().join("; ")
+            );
+        }
     }
     std::process::exit(if pass { 0 } else { 1 });
 }

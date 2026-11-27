@@ -606,6 +606,8 @@ pub const PACKAGE_FLOOR: f32 = 6.0;
 /// How much more a left-out card must score than the weakest card in for the build's
 /// upgrade pass to swap them (about one win-rate point on the measured scale).
 pub const UPGRADE_MARGIN: f32 = 2.0;
+/// The smallest margin, between two precisely measured cards.
+pub const UPGRADE_MARGIN_MIN: f32 = 0.5;
 
 pub fn build(
     arch: &SetArchetype,
@@ -852,7 +854,17 @@ pub fn build_with(
             }) else {
                 break;
             };
-            if add.score < cut.score + UPGRADE_MARGIN {
+            // The margin guards against noise: the full one for unmeasured or roughly
+            // measured cards, down to a floor as both measurements get precise (one
+            // standard error of their difference, in score points). With +/-0.3 values the
+            // fixed 2.0 kept Hour of Defeat (+0.5) over Rapid Rescue (+1.6).
+            let se = |c: &crate::card::Card| db.sim_values.power(&c.name).map(|p| p.se);
+            let margin = match (se(add.card), se(cut.card)) {
+                (Some(a), Some(b)) => (analysis::SIM_SCALE * (a * a + b * b).sqrt())
+                    .clamp(UPGRADE_MARGIN_MIN, UPGRADE_MARGIN),
+                _ => UPGRADE_MARGIN,
+            };
+            if add.score < cut.score + margin {
                 break;
             }
             let (cut, add) = (cut.card.name.clone(), add.card.name.clone());
