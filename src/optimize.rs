@@ -567,10 +567,16 @@ pub fn optimize(
                 None => break,
             }
         }
-        // Basics re-chosen for castability (how often each spell is castable on curve).
-        crate::mana::rebalance_basics(&mut d, db);
-        if !paths.iter().any(|(p, _)| canon(p) == canon(&d)) {
-            paths.push((d, path_steps));
+        // Basics re-chosen for castability (how often each spell is castable on curve) - as
+        // a second contender, not over the measured deck: the rule of thumb turned the
+        // Mountain HULK SMASH! measured better with back into a Plains. The final check on
+        // fresh games picks between them.
+        let mut rebalanced = d.clone();
+        crate::mana::rebalance_basics(&mut rebalanced, db);
+        for deck in [d, rebalanced] {
+            if !paths.iter().any(|(p, _)| canon(p) == canon(&deck)) {
+                paths.push((deck, path_steps.clone()));
+            }
         }
     }
     // ------------------------------------------------ final check on games no stage saw
