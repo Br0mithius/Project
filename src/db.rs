@@ -400,7 +400,9 @@ pub struct Rules {
     #[serde(skip)]
     pub avoid: Vec<String>,
     /// Cards the player always wants in (`keep.txt`): auto-build includes them when owned,
-    /// and no optimiser, lab or upgrade pass cuts them.
+    /// and no optimiser, lab or upgrade pass cuts them. (Not in rules.json: without this,
+    /// every saved rules.json failed to parse and the app silently used default rules.)
+    #[serde(skip)]
     pub keep: Vec<String>,
 }
 
@@ -439,10 +441,19 @@ impl Default for Rules {
 
 impl Rules {
     pub fn load(path: &Path) -> Rules {
-        let mut r: Rules = fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
+        let mut r: Rules = match fs::read_to_string(path) {
+            Ok(t) => serde_json::from_str(&t).unwrap_or_else(|e| {
+                // Never silently: a rules.json that stopped parsing (a new field without a
+                // default) made every tool and the app play default rules unnoticed.
+                eprintln!(
+                    "{} couldn't be read ({}); using the default rules.",
+                    path.display(),
+                    e
+                );
+                Rules::default()
+            }),
+            Err(_) => Rules::default(),
+        };
         r.data_dir = path.parent().map(Path::to_path_buf);
         r.load_avoid();
         r
@@ -576,6 +587,23 @@ impl Rules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rules.json saved by an older version (no field added since) still loads with its
+    /// settings: one new field without a default made every saved file fall back to the
+    /// default rules (singleton off, session 0) without a word.
+    #[test]
+    fn old_rules_files_still_load() {
+        let saved = r#"{"players":4,"deck_size":60,"commander_counts_toward_size":true,
+            "max_copies":0,"unlimited_basics":true,"enforce_color_identity":true,
+            "enforce_collection":true,"starting_life":30,"singleton":true,"session":6,
+            "piper_free":true}"#;
+        let r: Rules = serde_json::from_str(saved).expect("an old rules.json parses");
+        assert!(r.singleton);
+        assert_eq!(r.session, 6);
+        // And what this version writes reads back.
+        let back: Rules = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert!(back.singleton && back.session == 6);
+    }
 
     #[test]
     fn count_lines() {
