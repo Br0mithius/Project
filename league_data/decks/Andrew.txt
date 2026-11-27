@@ -1,5 +1,7 @@
 Commander
-1 Balmor, Battlemage Captain
+1 Gandalf, Goblins' Bane
+1 The Prismatic Piper
+# Prismatic Piper colour: U
 
 Deck
 1 Abrade
@@ -7,11 +9,11 @@ Deck
 1 Arcanis the Omnipotent
 1 Archmage of Runes
 1 Avengers Tower
+1 Balmor, Battlemage Captain
 1 Baxter Building
 1 Blasphemous Act
 1 Burst Lightning
 1 Castle Doom
-1 Chandra, Torch of Defiance
 1 Clinquant Skymage
 1 Command Tower
 1 Death to Our Enemies
@@ -26,10 +28,9 @@ Deck
 1 Hawkeye, Young Avenger
 1 Heartfire Immolator
 1 Innovative Commons
-6 Island
+11 Island
 1 Izzet Guildgate
 1 Mischievous Mystic
-5 Mountain
 1 Negate
 1 Opt
 1 Path of Ancestry
@@ -38,7 +39,6 @@ Deck
 1 Refute
 1 Scrawling Crawler
 1 Secluded Courtyard
-1 Sire of Seven Deaths
 1 Sol Ring
 1 Sphinx of the Final Word
 1 Stark Industries

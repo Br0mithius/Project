@@ -9,7 +9,7 @@ const DEFAULT_COLLECTION: &str = include_str!("../data/collection.txt");
 /// and the date they were made: a newer set replaces the data folder's `table.json` once
 /// (the old one is kept as a backup).
 const LEAGUE_TABLE: &str = include_str!("../league_data/table.json");
-pub const LEAGUE_DATA_VERSION: &str = "2026-11-27 round 4";
+pub const LEAGUE_DATA_VERSION: &str = "2026-11-27 round 4, leaderboard commanders";
 
 /// Finds the folder holding cards.json: `--data <dir>`, `./data`, `data` next to the
 /// program, or the source tree's `data` (debug builds). If none exist, creates `data`

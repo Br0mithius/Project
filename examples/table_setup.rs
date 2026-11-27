@@ -6,7 +6,7 @@
 //! "Drake=Tatyova, Benthic Druid" "Will=Smaug, Wicked Worm" ...`
 //! Players named with a leading `*` sit at the next table. `--realistic`: built from a pool a
 //! player could own (every common and uncommon, sampled rares and mythics, their picks,
-//! without what they traded away) instead of every league card. `Commander@WBRG` limits the deck to those colours. `+Player=Commander` keeps
+//! without what they traded away) instead of every league card. `Commander&U` adds The Prismatic Piper in that colour. `Commander@WBRG` limits the deck to those colours. `+Player=Commander` keeps
 //! the list they have and only replaces cards they traded away.
 
 use msh_deckbuilder::db::CardDb;
@@ -86,11 +86,29 @@ fn main() {
         let picked: Vec<String> = table.picks_of(who).iter().map(|p| p.card.clone()).collect();
         // A card traded away and not picked again is no longer theirs.
         let lost = |n: &str| gone.iter().any(|g| g.as_str() == n) && !picked.iter().any(|p| p == n);
+        // `Commander&U`: with The Prismatic Piper in that colour as partner.
+        let (cmd, piper) = match cmd.split_once('&') {
+            Some((c, col)) => (c, col.chars().next().map(|x| x.to_ascii_uppercase())),
+            None => (cmd, None),
+        };
         let cmd_card = db.get(cmd).expect("commander").clone();
+        // The pool's colours: the commander's, plus the Piper's (a commander of exactly
+        // those colours stands in for the pool sample).
+        let pool_card = piper
+            .and_then(|col| {
+                let want = cmd_card
+                    .identity()
+                    .union(msh_deckbuilder::card::ColorSet::from_char(col));
+                db.cards
+                    .iter()
+                    .find(|c| c.can_be_commander() && c.identity() == want)
+                    .cloned()
+            })
+            .unwrap_or_else(|| cmd_card.clone());
         // What they could own: every common and uncommon, a sample of rares and mythics
         // (as the peer field), their picks - without what they traded away.
         let mut pool = msh_deckbuilder::table::realistic_pool(
-            &cmd_card,
+            &pool_card,
             &db,
             66,
             14,
@@ -141,8 +159,9 @@ fn main() {
                     pool.counts
                         .retain(|n, _| db.get(n).is_none_or(|c| c.identity().is_subset_of(cs)));
                 }
+                pool.counts.insert(cmd_card.name.clone(), 1);
                 let (d, _, _) = msh_deckbuilder::archetypes::autobuild(
-                    &cmd_card, &db, &pool, &rules, colors, None,
+                    &cmd_card, &db, &pool, &rules, colors, piper,
                 );
                 (d, false)
             }

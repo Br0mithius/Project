@@ -1,5 +1,5 @@
 Commander
-1 Fynn, the Fangbearer
+1 Thranduil, Sindarin Liege
 
 Deck
 1 Aggressive Mammoth
@@ -9,40 +9,46 @@ Deck
 1 Beast Within
 1 Beorn, Reluctant Host
 1 Boughside Wanderers
-1 Carnivorous Cultivator
 1 Castle Doom
 1 Chromatic Lantern
 1 Circuitous Route
 1 Command Tower
-1 Commander's Sphere
+1 Curator of Destinies
+1 Darksteel Colossus
+1 Dwynen's Elite
+1 Elvenking's Halls
 1 Elvish Regrower
-1 Emrakul, the Exigent Doom
 1 Exotic Orchard
 1 Fellwar Stone
-16 Forest
+9 Forest
+1 Futurist Forge
+1 Fynn, the Fangbearer
+1 Galion, Elvenking's Butler
+1 Gandalf, Wandering Wizard
 1 Garruk, Curse Breaker
-1 Gate Colossus
-1 Ghalta the Unstoppable
 1 Ghalta, Primal Hunger
-1 Gigantosaurus
 1 Hedron Archive
-1 Heraldic Banner
 1 Imperious Perfect
+2 Island
+1 Koma, World-Eater
 1 Mister Hyde, Monster Within
 1 Path of Ancestry
-1 Quakestrider Ceratops
-1 Quilled Greatwurm
-1 Rampaging Baloths
-1 Rapid Rescue
-1 Roiling Canopy
+1 Propaganda
+1 Pym Technologies
+1 Ruric Thar, Biomagus
 1 Secluded Courtyard
-1 Sire of Seven Deaths
+1 Simic Guildgate
+1 Skyship Buccaneer
 1 Sol Ring
-1 Spinner of Souls
 1 Super-Adaptoid
 1 Surveillance Room
+1 Tajuru Pathwarden
+1 Temple of Mystery
+1 The Echoverse Fulcrum
+1 The Lord of the Eagles
 1 The Thing, Ben Grimm
-1 The Unbeatable Squirrel Girl
 1 The Vision
-1 Thought Vessel
+1 Thornwood Falls
+1 Thranduil's Company
+1 Transformative Commons
 1 Villainous Hideout

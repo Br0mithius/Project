@@ -1,5 +1,5 @@
 Commander
-1 Dwalin, Weaponmaster
+1 Thorin Oakenshield
 
 Deck
 1 Ancestor Dragon
@@ -10,32 +10,35 @@ Deck
 1 Balin, Loremaster
 1 Baxter Building
 1 Boros Guildgate
-1 Captain America's Shield
 1 Captain America, Super-Soldier
 1 Captain Mar-Vell, Space-Born
+1 Castle Doom
 1 Celebrate the Mountain-king
 1 Chandra, Torch of Defiance
+1 Chromatic Lantern
 1 Command Tower
 1 Daredevil, Man Without Fear
 1 Darksteel Colossus
 1 Dedicated Commons
 1 Desert Were-Worm
+1 Draconic Visitor
 1 Drakuseth, Maw of Flames
 1 Dwarven Shortsword
 1 Dáin, Lord of the Iron Hills
 1 Emrakul, the Exigent Doom
-1 Etali, Primal Storm
 1 Exotic Orchard
-1 Fumigate
+1 Fellwar Stone
+1 Fin Fang Foom
 1 Fíli the Pathfinder
+1 Gate Colossus
 1 Hedron Archive
 1 Herald of Eternal Dawn
 1 Hoarding Dragon
 1 Iron Hills
-1 Iron Hills Stalwart
-2 Mountain
+3 Mountain
+1 Murdock's Crusade
 1 Path of Ancestry
-9 Plains
+8 Plains
 1 Political Triumph
 1 Ragged Short Spear
 1 Secluded Courtyard
@@ -43,12 +46,9 @@ Deck
 1 Sol Ring
 1 Super-Adaptoid
 1 Surveillance Room
-1 Temple of Triumph
 1 The Black Arrow
 1 The Lonely Mountain
-1 The Sentry, Golden Guardian
 1 The Vision
 1 Thor, God of Thunder
 1 Villainous Hideout
 1 Wind-Scarred Crag
-1 Zetalpa, Primal Dawn
