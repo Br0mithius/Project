@@ -6,6 +6,7 @@
 //! the mean paired difference over the panel, in win-rate points.
 //!
 //! `cargo run --release --example builder_bench -- <data dir> <games> [variant]...`
+//! (`BENCH_SEED=<n>`: other pools and games, to confirm a result on fresh ones.)
 use msh_deckbuilder::analysis::BUILD_VARIANT;
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
@@ -49,6 +50,11 @@ fn main() {
     let table = msh_deckbuilder::table::Table::load(&dir);
     let mut gauntlet = msh_deckbuilder::table::gauntlet(&table, &db);
     gauntlet.extend(msh_deckbuilder::table::peer_field(&db, &rules));
+    // `BENCH_SEED=<n>`: other pools and other games (to confirm a result on fresh ones).
+    let bench_seed: u64 = std::env::var("BENCH_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let build = |variant: u32| -> Vec<Deck> {
         BUILD_VARIANT.store(variant, Ordering::Relaxed);
         let mut out = Vec::new();
@@ -58,7 +64,9 @@ fn main() {
                 continue;
             };
             for s in 0..2u64 {
-                let seed = msh_deckbuilder::table::name_seed(&cmd.name) ^ (s * 0x51ED);
+                let seed = msh_deckbuilder::table::name_seed(&cmd.name)
+                    ^ (s * 0x51ED)
+                    ^ bench_seed.wrapping_mul(0x9E3779B97F4A7C15);
                 let pool = msh_deckbuilder::table::realistic_pool(cmd, &db, 66, 14, seed);
                 let (mut d, _, _) =
                     msh_deckbuilder::archetypes::autobuild(cmd, &db, &pool, &rules, None, None);
@@ -77,7 +85,15 @@ fn main() {
     let preps: Vec<Prepared> = all.iter().map(|d| Prepared::new(d, &db)).collect();
     let refs: Vec<&Prepared> = preps.iter().collect();
     let (done, cancel) = (AtomicUsize::new(0), AtomicBool::new(false));
-    let o = play_all(&refs, &gauntlet, &rules, games, 0xBE7C4, &done, &cancel);
+    let o = play_all(
+        &refs,
+        &gauntlet,
+        &rules,
+        games,
+        0xBE7C4 ^ bench_seed,
+        &done,
+        &cancel,
+    );
     let n = base.len();
     let mean = (0..n).map(|i| o.win_rate(i)).sum::<f32>() / n as f32;
     println!(
