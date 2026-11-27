@@ -2001,7 +2001,8 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         When::EachTurn => Trig::Phase {
             phase: if head.contains("end step") {
                 Phase::End
-            } else if head.contains("beginning of combat") || head.contains("beginning of each combat")
+            } else if head.contains("beginning of combat")
+                || head.contains("beginning of each combat")
             {
                 Phase::Combat
             } else if head.contains("main phase") {
