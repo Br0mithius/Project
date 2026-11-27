@@ -352,7 +352,13 @@ pub fn gauntlet(table: &Table, db: &CardDb) -> Vec<Prepared> {
 /// against this field the same deck wins about 35% and the same removal measures 3.6
 /// points better than the creatures - which is how it plays at a real table.
 pub fn peer_decks(db: &CardDb) -> Vec<Deck> {
-    include_str!("../data/peer_field.txt")
+    // `MSH_PEER_FIELD=<file>`: another field (for checking a result against a second one).
+    let other = std::env::var("MSH_PEER_FIELD")
+        .ok()
+        .and_then(|f| std::fs::read_to_string(f).ok());
+    other
+        .as_deref()
+        .unwrap_or(include_str!("../data/peer_field.txt"))
         .split("===")
         .skip(1)
         .map(|text| Deck::from_text("peer", text, db))

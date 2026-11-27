@@ -54,6 +54,8 @@ fn main() {
         arg(&a, "--decks", 12),
     );
     let profile = a.iter().any(|x| x == "--profile");
+    // `--seed N`: other pools (a second field, for robustness checks).
+    let field_seed = arg(&a, "--seed", 0) as u64 * 0x9E37_79B9;
     let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
     db.sim_values = msh_deckbuilder::playtest::simvalues::SimValues::load(&dir);
     let rules = msh_deckbuilder::league::app_rules(&dir, None);
@@ -64,7 +66,7 @@ fn main() {
             &db,
             rares,
             mythics,
-            msh_deckbuilder::table::name_seed(&cmd.name),
+            msh_deckbuilder::table::name_seed(&cmd.name) ^ field_seed,
         );
         let (mut d, _, arch) =
             msh_deckbuilder::archetypes::autobuild(cmd, &db, &pool, &rules, None, None);
