@@ -758,6 +758,182 @@ impl ClaimReport {
     }
 }
 
+/// How many swaps `value_refine` nominates, the least measured gap it nominates on (win-rate
+/// points) and the precision a value needs to nominate at all.
+const NOMINATE_MAX: usize = 6;
+const NOMINATE_GAP: f32 = 0.35;
+const NOMINATE_SE: f32 = 0.5;
+
+/// Auto-build's second stage when the pool is measured: the precise card values nominate
+/// swaps (the best measured cards left out for the least valuable ones in), each is played
+/// on `games` paired games, and the ones that hold are confirmed together on fresh games.
+/// Far fewer candidates than the swap search, each on enough games to see a one-point swap:
+/// on the Thanos Session 5 list this found +1.3 points the search had missed.
+/// None when cancelled; a report with no steps when nothing was nominated or held.
+#[allow(clippy::too_many_arguments)]
+pub fn value_refine(
+    deck: &Deck,
+    db: &CardDb,
+    coll: &Collection,
+    rules: &Rules,
+    opp: &Opponents,
+    games: u32,
+    progress: &Progress,
+) -> Option<OptReport> {
+    let t0 = std::time::Instant::now();
+    let precise = |n: &str| {
+        db.sim_values
+            .power(n)
+            .filter(|p| p.se <= NOMINATE_SE)
+            .map(|p| p.value)
+    };
+    let id = deck.identity(db);
+    let cohesive = deck
+        .commander
+        .as_deref()
+        .and_then(|c| db.get(c))
+        .is_some_and(crate::analysis::cohesive_plan);
+    // The deck's measured spells, weakest first; the measured bench, best first.
+    let mut ins: Vec<(f32, String)> = deck
+        .cards
+        .keys()
+        .filter_map(|n| db.get(n))
+        .filter(|c| !c.is_land() && !rules.keeps(&c.name))
+        .filter_map(|c| precise(&c.name).map(|v| (v, c.name.clone())))
+        .collect();
+    ins.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut outs: Vec<(f32, String)> = db
+        .cards
+        .iter()
+        .filter(|c| {
+            !c.is_land()
+                && deck.commanders().iter().all(|k| **k != c.name)
+                && id.is_none_or(|i| c.identity().is_subset_of(i))
+                && crate::analysis::available(c, deck, coll, rules) > 0
+        })
+        .filter_map(|c| precise(&c.name).map(|v| (v, c.name.clone())))
+        .collect();
+    outs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    // Pair them off: each bench card with the weakest deck card it clearly out-measures and
+    // may replace under the plan.
+    let mut swaps: Vec<(String, String)> = Vec::new();
+    let mut work = deck.clone();
+    for (av, add) in &outs {
+        if swaps.len() >= NOMINATE_MAX {
+            break;
+        }
+        let cut = ins.iter().find(|(cv, cut)| {
+            av - cv >= NOMINATE_GAP
+                && work.count_of(cut) > 0
+                && !swaps.iter().any(|s| s.0 == *cut)
+                && (!cohesive || crate::cohesion::swap_keeps_plan(&work, db, cut, add, 1))
+        });
+        if let Some((_, cut)) = cut {
+            work.remove(cut, 1);
+            work.add(add, 1);
+            swaps.push((cut.clone(), add.clone()));
+        }
+    }
+    let report =
+        |best: Deck, steps: Vec<Step>, final_gain: Option<Gain>, notes: Vec<String>| OptReport {
+            start: deck.clone(),
+            best,
+            steps,
+            final_gain,
+            table_decks: opp.table.len(),
+            table_weight: opp.w(),
+            notes,
+            seconds: t0.elapsed().as_secs_f32(),
+        };
+    if swaps.is_empty() {
+        return Some(report(
+            deck.clone(),
+            Vec::new(),
+            None,
+            vec!["No measured card left out clearly out-measures one in the deck.".into()],
+        ));
+    }
+    let apply = |list: &[(String, String)]| {
+        let mut d = deck.clone();
+        for (cut, add) in list {
+            d.remove(cut, 1);
+            d.add(add, 1);
+        }
+        d
+    };
+    progress.set_stage("Playtesting the swaps the card values nominate");
+    progress.total.store(
+        (swaps.len() + 1) * games as usize * 2 + 2 * games as usize * 4,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let singles: Vec<Deck> = swaps
+        .iter()
+        .map(|s| apply(std::slice::from_ref(s)))
+        .collect();
+    let g1 = compare(deck, &singles, db, opp, rules, games, 0x7A1E, progress);
+    if progress.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    // A swap holds when it gains, clearly (1.5 standard errors), and not at the real
+    // table's expense (it may be flat there, not clearly worse).
+    let held: Vec<(String, String)> = swaps
+        .iter()
+        .zip(&g1)
+        .filter(|(_, g)| {
+            g.score.gain > 0.0 && g.score.z() >= 1.5 && g.table.is_none_or(|t| t.gain > -t.stderr)
+        })
+        .map(|(s, _)| s.clone())
+        .collect();
+    let mut notes: Vec<String> = swaps
+        .iter()
+        .zip(&g1)
+        .map(|((cut, add), g)| {
+            format!(
+                "{} -> {}: {}{}",
+                cut,
+                add,
+                pts(&g.score),
+                g.table
+                    .map_or(String::new(), |t| format!(" (your table {})", pts(&t)))
+            )
+        })
+        .collect();
+    if held.is_empty() {
+        notes.push("None of the nominated swaps held up on playtests.".into());
+        return Some(report(deck.clone(), Vec::new(), None, notes));
+    }
+    progress.set_stage("Confirming the swaps together on fresh games");
+    let best = apply(&held);
+    let g2 = compare(
+        deck,
+        std::slice::from_ref(&best),
+        db,
+        opp,
+        rules,
+        games * 2,
+        0xC0F1,
+        progress,
+    );
+    if progress.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let what = held
+        .iter()
+        .map(|(c, a)| format!("{} -> {}", c, a))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let clear = g2[0].score.z() >= 2.0;
+    Some(report(
+        if clear { best } else { deck.clone() },
+        vec![Step {
+            what,
+            gain: g2[0].score,
+        }],
+        Some(g2[0]),
+        notes,
+    ))
+}
+
 /// Plays each of `names` in `deck` in place of its two weakest spells (by the builder's
 /// score), keeps each card's better result, and measures the best `confirm_top` again on
 /// fresh games. Cards outside the deck's colours, already in it, or unknown are skipped.

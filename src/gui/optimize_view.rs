@@ -43,6 +43,8 @@ pub struct OptState {
     /// The running job is an auto-build's refine stage: its result is applied when it
     /// clearly beats the draft and the deck hasn't been edited meanwhile.
     pub auto_apply: bool,
+    /// The next job is the refine stage (value-nominated swaps first).
+    pub refine_next: bool,
 }
 
 impl GuiApp {
@@ -55,7 +57,9 @@ impl GuiApp {
         if let Some(job) = self.opt.job.take() {
             job.cancel();
         }
+        self.opt.refine_next = true;
         self.start_opt(false, Effort::REFINE);
+        self.opt.refine_next = false;
         if self.opt.job.is_some() {
             self.opt.auto_apply = true;
             self.status = format!(
@@ -98,13 +102,25 @@ impl GuiApp {
         let progress = Arc::new(Progress::new());
         let p = progress.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let refine = self.opt.refine_next;
         std::thread::spawn(move || {
             let opp = Opponents {
                 table,
                 league: crate::table::peer_field(&db, &rules),
                 table_weight: weight,
             };
-            let r = if claims {
+            // The refine stage: the swaps the precise card values nominate, each on enough
+            // games to see; the swap search only when no value nominates anything (a pool
+            // that isn't measured yet).
+            let nominated = if refine && !claims {
+                crate::optimize::value_refine(&deck, &db, &coll, &rules, &opp, 6000, &p)
+                    .filter(|r| !r.steps.is_empty())
+            } else {
+                None
+            };
+            let r = if let Some(rep) = nominated {
+                OptResult::Opt(Some(rep))
+            } else if claims {
                 OptResult::Claims(crate::optimize::test_claims(
                     &deck, &names, &db, &rules, &opp, 800, 8, &p,
                 ))

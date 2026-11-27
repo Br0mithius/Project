@@ -49,17 +49,36 @@ fn main() {
     let mut builds = builds;
     if a.iter().any(|x| x == "--refine") {
         let t0 = std::time::Instant::now();
-        let rep = msh_deckbuilder::optimize::optimize(
-            &cmd,
+        let nominated = msh_deckbuilder::optimize::value_refine(
             &builds[0],
             &db,
             &coll,
             &rules,
             &referee,
-            msh_deckbuilder::lab::Effort::REFINE,
-            2,
+            6000,
             &Progress::new(),
-        );
+        )
+        .filter(|r| !r.steps.is_empty());
+        if let Some(r) = &nominated {
+            for n in &r.notes {
+                eprintln!("  nominated: {}", n);
+            }
+        }
+        let rep = if nominated.is_some() {
+            nominated
+        } else {
+            msh_deckbuilder::optimize::optimize(
+                &cmd,
+                &builds[0],
+                &db,
+                &coll,
+                &rules,
+                &referee,
+                msh_deckbuilder::lab::Effort::REFINE,
+                2,
+                &Progress::new(),
+            )
+        };
         let refined = match rep {
             Some(r) if r.final_gain.is_some_and(|g| g.score.z() >= 2.0) => r.best,
             _ => builds[0].clone(),
