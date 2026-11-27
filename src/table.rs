@@ -3,6 +3,7 @@
 //! ticked as at the next table form a fixed gauntlet for playtests (`gauntlet`), so the
 //! lab can test a deck against the decks it will actually meet.
 
+use crate::card::Card;
 use crate::db::{CardDb, Collection, Rules};
 use crate::deck::Deck;
 use crate::playtest::Prepared;
@@ -370,6 +371,59 @@ pub fn peer_field(db: &CardDb, rules: &Rules) -> Vec<Prepared> {
         return crate::ranking::TestBed::new(db, rules).gauntlet;
     }
     decks.iter().map(|d| Prepared::new(d, db)).collect()
+}
+
+/// A pool a league player could own for `commander`: every common and uncommon (one copy),
+/// plus `rares` rares and `mythics` mythics sampled from the cards in its colours by
+/// `seed` (the peer field uses 66 and 14: decks then average 5.2 mythics and 11.7 rares,
+/// like the real table's 5.3 and 12.8).
+pub fn realistic_pool(
+    cmd: &Card,
+    db: &CardDb,
+    rares: usize,
+    mythics: usize,
+    seed: u64,
+) -> Collection {
+    let id = cmd.identity();
+    let mut counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut rare: Vec<&Card> = Vec::new();
+    let mut mythic: Vec<&Card> = Vec::new();
+    for c in db
+        .cards
+        .iter()
+        .filter(|c| c.identity().is_subset_of(id) && c.name != cmd.name)
+    {
+        match c.rarity.as_str() {
+            "rare" => rare.push(c),
+            "mythic" => mythic.push(c),
+            _ => {
+                counts.insert(c.name.clone(), 1);
+            }
+        }
+    }
+    let shuffle = |v: &mut Vec<&Card>, mut s: u64| {
+        for i in (1..v.len()).rev() {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            v.swap(i, (s % (i as u64 + 1)) as usize);
+        }
+    };
+    let seed = seed | 1;
+    shuffle(&mut rare, seed);
+    shuffle(&mut mythic, seed.rotate_left(17) | 1);
+    for c in rare.iter().take(rares).chain(mythic.iter().take(mythics)) {
+        counts.insert(c.name.clone(), 1);
+    }
+    counts.insert(cmd.name.clone(), 1);
+    Collection::new(std::path::PathBuf::new(), counts)
+}
+
+/// A seed from a name (FNV-1a), for `realistic_pool`.
+pub fn name_seed(s: &str) -> u64 {
+    s.bytes().fold(0xcbf29ce484222325u64, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 /// A strong version of `commander`'s deck: auto-build from every league card (one copy

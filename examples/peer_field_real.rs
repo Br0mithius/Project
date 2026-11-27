@@ -8,28 +8,12 @@
 //! [--rares R] [--mythics M] [--decks N] [--profile]`
 //! `--profile`: only build every deck and print the average rarity counts (to calibrate
 //! R and M against the real decks), no games.
-use msh_deckbuilder::card::Card;
-use msh_deckbuilder::db::{CardDb, Collection};
+use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::playtest::Prepared;
 use msh_deckbuilder::playtest::lab::play_all;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-
-fn hash(s: &str) -> u64 {
-    s.bytes().fold(0xcbf29ce484222325u64, |h, b| {
-        (h ^ b as u64).wrapping_mul(0x100000001b3)
-    })
-}
-
-fn shuffle<T>(v: &mut [T], mut seed: u64) {
-    for i in (1..v.len()).rev() {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        v.swap(i, (seed % (i as u64 + 1)) as usize);
-    }
-}
 
 fn arg(a: &[String], name: &str, def: usize) -> usize {
     a.iter()
@@ -75,28 +59,13 @@ fn main() {
     let rules = msh_deckbuilder::league::app_rules(&dir, None);
     let mut built: Vec<(Deck, String)> = Vec::new();
     for cmd in db.cards.iter().filter(|c| c.can_be_commander()) {
-        let id = cmd.identity();
-        let fits = |c: &&Card| c.identity().is_subset_of(id) && c.name != cmd.name;
-        let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-        let mut rare: Vec<&Card> = Vec::new();
-        let mut mythic: Vec<&Card> = Vec::new();
-        for c in db.cards.iter().filter(fits) {
-            match c.rarity.as_str() {
-                "rare" => rare.push(c),
-                "mythic" => mythic.push(c),
-                _ => {
-                    counts.insert(c.name.clone(), 1);
-                }
-            }
-        }
-        let seed = hash(&cmd.name) | 1;
-        shuffle(&mut rare, seed);
-        shuffle(&mut mythic, seed.rotate_left(17) | 1);
-        for c in rare.iter().take(rares).chain(mythic.iter().take(mythics)) {
-            counts.insert(c.name.clone(), 1);
-        }
-        counts.insert(cmd.name.clone(), 1);
-        let pool = Collection::new(std::path::PathBuf::new(), counts);
+        let pool = msh_deckbuilder::table::realistic_pool(
+            cmd,
+            &db,
+            rares,
+            mythics,
+            msh_deckbuilder::table::name_seed(&cmd.name),
+        );
         let (mut d, _, arch) =
             msh_deckbuilder::archetypes::autobuild(cmd, &db, &pool, &rules, None, None);
         if d.main_count() < d.main_target(&rules) {
