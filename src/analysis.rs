@@ -617,22 +617,14 @@ fn score_card_blend(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f3
     // noise 1.05: true spread 0.85). The old 0.6 trusted the rules of thumb past that, so
     // a card measured once - Alien Invasion, +4.8 ± 1.25 in the lock-out deck - kept its
     // weak rule-of-thumb score and auto-build left it out.
-    // (Variant 32: a gentler noise discount; variant 16: none.)
-    let noise = if variant_on(32) { 0.5 } else { 0.85 };
-    let sure = if variant_on(16) {
-        1.0
-    } else {
-        1.0 / (1.0 + (p.se / noise).powi(2))
-    };
-    // (Variants 2 and 4: trust playtests fully, or less.)
-    let top = if variant_on(2) || variant_on(16) || variant_on(32) {
-        1.0
-    } else if variant_on(4) {
-        0.6
-    } else {
-        0.85
-    };
-    let w = top * sure;
+    // A measured card is scored by its playtests alone. Measured on the builder benchmark
+    // (examples/builder_bench: 22 commanders x 2 realistic pools, 2,000 games each against
+    // the table and the peer field): the old blend (0.85 x a noise discount, the rest rules
+    // of thumb) against playtests alone, +3.44 +/- 0.19 win-rate points, confirmed on fresh
+    // pools and games +3.24 +/- 0.20; weight 1.0 with the discount +2.2, 0.6 -3.3, a
+    // harsher discount -2.9. The rules of thumb still score unmeasured cards.
+    let _ = p.se;
+    let w = 1.0;
     let measured = SIM_BASE + SIM_SCALE * p.value;
     why.insert(
         0,
