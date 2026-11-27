@@ -96,3 +96,15 @@ Defensive creatures are worth less against players who ignore blockers, but the 
 Deathtouch stacking: Attercop and Vampire Nighthawk are each worth the same with or
 without the other (interaction +0.01 ± 0.21); a fourth deathtoucher (Ravening Warg) is
 worth +0.55 to +0.80 because it is a weaker card, not because of overlap.
+
+## 2026-11-28: Session 6 (singleton) list, value-nominated swaps
+
+30,000 games each, then 40,000 fresh for the combinations:
+Kang -> Panther Pounce +0.96 ± 0.15 (table +0.47); Super Villain Lockup -> Beorn's
+Hospitality +0.91 ± 0.14 (table +0.89); Hero's Downfall -> Attercop +0.83 ± 0.15 (table
++0.69); Undercover Skrull -> Kree Sentinel +0.79 ± 0.15 (table −0.09, field +1.17);
+Iron Man -> Mortify −0.54 ± 0.14 (rejected: a higher single-card value did not survive
+the playtest). Three swaps together +2.62 ± 0.18 (table +2.29); all four **+3.44 ± 0.20**
+(table +2.11, field +4.01). The list takes all four: the fourth is flat at the table
+within noise and worth +1.25 against the field. (Rule: a swap is taken unless it is
+clearly worse at the real table - more than one standard error.)
