@@ -56,3 +56,26 @@ The referee (`optimize::Opponents::standard`): the real next table 30%, the peer
 3. 1,546 of 1,649 value rows are 800-game measurements against the old peer field.
 4. The gate has one golden deck; it measures consistency with the simulator, not truth.
 5. The refine stage of auto-build screens on 800 games: too few to find 1-point swaps.
+
+## 2026-11-27: value-nominated swaps
+
+The pool's precise values (12,000 games per opponent set) nominated four swaps the
+optimiser's own search had not found. On the tested Session 5 list, 30,000 games, then
+40,000 fresh ones:
+
+- Hero's Downfall -> Attercop +0.95 ± 0.15 (table +0.63, field +1.09)
+- Kang -> Panther Pounce +0.40 ± 0.15 (table +0.36, field +0.42)
+- Undercover Skrull -> Kree Sentinel +0.51 ± 0.16 (table −0.21, field +0.83)
+- Massacre Wurm -> Beorn's Hospitality +0.05 ± 0.15 (table −0.61, field +0.33)
+- the first two together, fresh games: **+1.33 ± 0.17** (table +1.18, field +1.40)
+- all four, fresh games: +2.44 ± 0.20 (table +0.84, field +3.12)
+
+The list takes the first two: they win against both opponent sets, and against the real
+table they beat all four. Lesson for the refine stage: nominate swaps from precise values
+and spend the games on those, rather than screening everything on a few hundred games.
+
+Builder gate after the peer field was regenerated: the draft is −1.17 ± 0.29 (Session 5)
+and −2.12 ± 0.28 (Session 6) behind the tested lists; the refine stage brings Session 5
+to −0.49 but takes 17 minutes. Two attempted draft fixes (trying each bench card in the
+upgrade pass; treating precisely measured jobless cards as non-filler) did not close the
+gap and were not shipped.

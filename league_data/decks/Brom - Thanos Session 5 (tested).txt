@@ -4,6 +4,7 @@ Commander
 Deck
 1 Arbiter of Woe
 1 Arcane Signet
+1 Attercop
 1 Avengers Tower
 1 Avengers: Under Siege
 1 Baxter Building
@@ -20,11 +21,10 @@ Deck
 1 Fumigate
 1 Futurist Forge
 1 Gleaming Bastion
-1 Hero's Downfall
 1 Jungle Hollow
-1 Kang, Temporal Tyrant
 1 Massacre Wurm
 1 Murdock's Crusade
+1 Panther Pounce
 5 Plains
 1 Political Triumph
 1 Pym Technologies
