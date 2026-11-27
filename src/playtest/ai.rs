@@ -1449,6 +1449,17 @@ pub mod exp {
     /// whenever a window is possible -0.65 ± 0.06 (-2.17 ± 0.20 against the table, whose
     /// Equipment deck opens it every turn; the peer field has none). Off.
     pub const HOLD_FOR_RESPONSE: u32 = 8;
+    /// A wide attack accepts its losses: the whole group, with the attackers that die to
+    /// blocks, is a plan too when its total is worth it - in a multiplayer game as well as
+    /// heads-up. Without it a single blocker that kills safely (a deathtouch creature, a
+    /// big body) vetoes a whole board of small attackers: the blocker moves to the next
+    /// attacker each time one is dropped, and after four rounds no plan is left.
+    /// Measured (`policy_ab`, 20,000 paired games, the seat changed): Drake's token deck
+    /// -0.16 +/- 0.07, Javi's elves -0.13 +/- 0.07, the Thanos deck -0.21 +/- 0.08. In a
+    /// four-player game the caution wins more: the creatures lost are also the defence
+    /// against the other two players. Off; `MSH_AI_EXP=16` makes every seat swing wide, to
+    /// test a card's value against opponents who attack through blockers.
+    pub const WIDE_SWING: u32 = 16;
 }
 
 /// A response window is likely on the opponents' turns: some opponent controls an
@@ -6498,8 +6509,7 @@ pub fn declare_attacks_why(
             // Heads-up, the whole team at once is a candidate too, losses and all: one or two
             // good blockers shouldn't veto every attack.
             if !bad.is_empty()
-                && it == 0
-                && opps.len() == 1
+                && (it == 0 && opps.len() == 1 || exp_on(g, me, exp::WIDE_SWING))
                 && value > 0.2
                 && best_plan.as_ref().is_none_or(|b| value > b.0)
             {
