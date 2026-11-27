@@ -79,3 +79,20 @@ and −2.12 ± 0.28 (Session 6) behind the tested lists; the refine stage brings
 to −0.49 but takes 17 minutes. Two attempted draft fixes (trying each bench card in the
 upgrade pass; treating precisely measured jobless cards as non-filler) did not close the
 gap and were not shipped.
+
+## 2026-11-28: do the bots over-respect blockers?
+
+The attack AI drops attackers that would die to a predicted block and re-plans; a blocker
+that kills safely moves to the next attacker, so one good blocker can stop a whole wide
+board. Letting groups attack and accept their losses (`exp::WIDE_SWING`) **lost** for the
+seat doing it: Drake's tokens −0.16 ± 0.07, Javi's elves −0.13 ± 0.07, Thanos −0.21 ± 0.08
+(20,000 paired games). In a four-player game the caution wins. Left off.
+
+With every seat swinging wide (`MSH_AI_EXP=16`, opponents who attack through blockers):
+Hero's Downfall -> Attercop is still +0.80 ± 0.15 (table +0.45; with cautious bots +0.95,
+table +0.63); both list swaps +1.07 ± 0.19 (table +0.46; cautious +1.33, table +1.18).
+Defensive creatures are worth less against players who ignore blockers, but the swaps hold.
+
+Deathtouch stacking: Attercop and Vampire Nighthawk are each worth the same with or
+without the other (interaction +0.01 ± 0.21); a fourth deathtoucher (Ravening Warg) is
+worth +0.55 to +0.80 because it is a weaker card, not because of overlap.
