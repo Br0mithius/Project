@@ -11,8 +11,7 @@ use msh_deckbuilder::analysis::BUILD_VARIANT;
 use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::playtest::Prepared;
-use msh_deckbuilder::playtest::lab::play_all;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
 const PANEL: &[&str] = &[
     "Thanos, the Mad Titan",
@@ -47,9 +46,7 @@ fn main() {
     let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
     db.attach_ratings(&dir);
     let rules = msh_deckbuilder::league::app_rules(&dir, None);
-    let table = msh_deckbuilder::table::Table::load(&dir);
-    let mut gauntlet = msh_deckbuilder::table::gauntlet(&table, &db);
-    gauntlet.extend(msh_deckbuilder::table::peer_field(&db, &rules));
+    let referee = msh_deckbuilder::optimize::Opponents::standard(&dir, &db, &rules);
     // `BENCH_SEED=<n>`: other pools and other games (to confirm a result on fresh ones).
     let bench_seed: u64 = std::env::var("BENCH_SEED")
         .ok()
@@ -84,20 +81,13 @@ fn main() {
     }
     let preps: Vec<Prepared> = all.iter().map(|d| Prepared::new(d, &db)).collect();
     let refs: Vec<&Prepared> = preps.iter().collect();
-    let (done, cancel) = (AtomicUsize::new(0), AtomicBool::new(false));
-    let o = play_all(
-        &refs,
-        &gauntlet,
-        &rules,
-        games,
-        0xBE7C4 ^ bench_seed,
-        &done,
-        &cancel,
-    );
+    // Each variant deck against its standard build: the standard decks first, then each
+    // variant's, all on the same games.
+    let res = referee.play(&refs, &rules, games, 0xBE7C4 ^ bench_seed);
     let n = base.len();
-    let mean = (0..n).map(|i| o.win_rate(i)).sum::<f32>() / n as f32;
+    let mean = (0..n).map(|i| res[i].0).sum::<f32>() / n as f32;
     println!(
-        "panel: {} decks, {} games each against the table and the peer field: mean win rate {:.2}%",
+        "panel: {} decks, {} games each against the table (30%) and the peer field (70%): mean win rate {:.2}%",
         n,
         games,
         mean * 100.0
@@ -113,7 +103,13 @@ fn main() {
             if !same {
                 changed += 1;
             }
-            let d = o.diff(off + i, i);
+            // Paired difference from the standard build of the same commander and pool.
+            let (vd, bd) = (res[off + i].1, res[i].1);
+            let d = msh_deckbuilder::playtest::lab::Measure {
+                gain: vd.gain - bd.gain,
+                stderr: (vd.stderr.powi(2) + bd.stderr.powi(2)).sqrt(),
+                games: vd.games,
+            };
             sum += d.gain as f64;
             var += (d.stderr as f64).powi(2);
             if d.gain < worst.0 {

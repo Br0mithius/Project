@@ -43,7 +43,54 @@ pub struct Opponents {
     pub table_weight: f32,
 }
 
+/// The opponents and weighting every measurement uses (the referee's version: bump it when
+/// the opponent sets or the weighting change, so results from before can be told apart).
+pub const REFEREE_VERSION: u32 = 1;
+
 impl Opponents {
+    /// The one standard referee: the data folder's next-table decks (30% of the score) and
+    /// the peer field (70%). Every tool that judges a deck, a card or a builder change uses
+    /// this, so the values the builder ranks by and the tests that judge its decks agree.
+    pub fn standard(dir: &std::path::Path, db: &CardDb, rules: &Rules) -> Opponents {
+        let table = crate::table::Table::load(dir);
+        Opponents {
+            table: crate::table::gauntlet(&table, db),
+            league: crate::table::peer_field(db, rules),
+            table_weight: DEFAULT_TABLE_WEIGHT,
+        }
+    }
+
+    /// Win rates of `decks` (each in our seat, the same games for all) and each one's
+    /// paired difference from the first, on the standard weighting.
+    pub fn play(
+        &self,
+        decks: &[&Prepared],
+        rules: &Rules,
+        games: u32,
+        seed: u64,
+    ) -> Vec<(f32, Measure)> {
+        let (done, cancel) = (
+            std::sync::atomic::AtomicUsize::new(0),
+            std::sync::atomic::AtomicBool::new(false),
+        );
+        let run = |g: &[Prepared], s: u64| {
+            (!g.is_empty()).then(|| play_all(decks, g, rules, games, s, &done, &cancel))
+        };
+        let (t, l) = (run(&self.table, seed), run(&self.league, seed ^ 0x5EED));
+        let w = self.w();
+        (0..decks.len())
+            .map(|i| match (&t, &l) {
+                (Some(a), Some(b)) => (
+                    w * a.win_rate(i) + (1.0 - w) * b.win_rate(i),
+                    weighted(w, a.diff(i, 0), b.diff(i, 0)),
+                ),
+                (Some(a), None) => (a.win_rate(i), a.diff(i, 0)),
+                (None, Some(b)) => (b.win_rate(i), b.diff(i, 0)),
+                (None, None) => (0.0, Measure::default()),
+            })
+            .collect()
+    }
+
     fn w(&self) -> f32 {
         if self.table.is_empty() {
             0.0
