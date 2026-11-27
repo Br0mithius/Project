@@ -6218,3 +6218,24 @@ fn red_hulk_enrage_damage_grows_with_his_counters() {
             .sum::<i32>();
     assert_eq!(dealt, 3, "1 damage, then 2");
 }
+
+/// "At the beginning of combat on your turn" is your turn only, even when the rest of the
+/// text says "each combat" (Alien Invasion's token "attacks each combat if able" made it
+/// fire on every player's combat: four tokens a round).
+#[test]
+fn combat_on_your_turn_is_yours_only() {
+    let db = crate::db::CardDb::load(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/cards.json"),
+    )
+    .unwrap();
+    let c = compile(db.get("Alien Invasion").unwrap());
+    let phase = c
+        .abilities
+        .iter()
+        .find_map(|a| match a.trig {
+            Trig::Phase { any_player, .. } => Some(any_player),
+            _ => None,
+        })
+        .expect("a beginning-of-combat trigger");
+    assert!(!phase, "Alien Invasion triggers on every player's combat");
+}

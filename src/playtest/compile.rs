@@ -1995,22 +1995,26 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             Trig::Event(Ev::CombatDamageAny, Filter::default())
         }
         When::CombatDamage => Trig::CombatDamage,
+        // Read from the trigger clause only: Alien Invasion's token "attacks each combat if
+        // able" made its "at the beginning of combat on your turn" fire on every player's
+        // combat (four tokens a round instead of one).
         When::EachTurn => Trig::Phase {
-            phase: if t.contains("end step") {
+            phase: if head.contains("end step") {
                 Phase::End
-            } else if t.contains("beginning of combat") || t.contains("beginning of each combat") {
+            } else if head.contains("beginning of combat") || head.contains("beginning of each combat")
+            {
                 Phase::Combat
-            } else if t.contains("main phase") {
+            } else if head.contains("main phase") {
                 Phase::Main
             } else {
                 Phase::Upkeep
             },
-            any_player: t.contains("each upkeep")
-                || t.contains("each end step")
-                || t.contains("each combat")
-                || t.contains("each player's")
-                || t.contains("each opponent's"),
-            opponents_only: t.contains("each opponent's"),
+            any_player: head.contains("each upkeep")
+                || head.contains("each end step")
+                || head.contains("each combat")
+                || head.contains("each player's")
+                || head.contains("each opponent's"),
+            opponents_only: head.contains("each opponent's"),
         },
         When::Event(e) => {
             let (kind, what) = match e {
