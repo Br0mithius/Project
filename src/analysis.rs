@@ -617,9 +617,15 @@ fn score_card_blend(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f3
     // noise 1.05: true spread 0.85). The old 0.6 trusted the rules of thumb past that, so
     // a card measured once - Alien Invasion, +4.8 ± 1.25 in the lock-out deck - kept its
     // weak rule-of-thumb score and auto-build left it out.
-    let sure = 1.0 / (1.0 + (p.se / 0.85).powi(2));
+    // (Variant 32: a gentler noise discount; variant 16: none.)
+    let noise = if variant_on(32) { 0.5 } else { 0.85 };
+    let sure = if variant_on(16) {
+        1.0
+    } else {
+        1.0 / (1.0 + (p.se / noise).powi(2))
+    };
     // (Variants 2 and 4: trust playtests fully, or less.)
-    let top = if variant_on(2) {
+    let top = if variant_on(2) || variant_on(16) || variant_on(32) {
         1.0
     } else if variant_on(4) {
         0.6
