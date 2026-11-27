@@ -5,9 +5,11 @@ use msh_deckbuilder::{analysis, db::*};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let dir = std::path::PathBuf::from(&args[1]);
-    let db = CardDb::load(&dir.join("cards.json")).unwrap();
+    let mut db = CardDb::load(&dir.join("cards.json")).unwrap();
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
-    let rules = Rules::default();
+    let rules = msh_deckbuilder::league::app_rules(&dir, None);
     let cmd = db.get(&args[2]).expect("commander");
     let (deck, _) = analysis::autobuild(cmd, &db, &coll, &rules, None, None);
     for name in &args[3..] {

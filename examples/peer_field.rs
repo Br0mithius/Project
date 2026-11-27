@@ -2,7 +2,7 @@
 //! each plays in our seat against three copies of the reference. 25% = as strong as it.
 //! `cargo run --release --example peer_field -- <data dir> <reference deck> [games] [out dir]`
 //! With an out dir, the top builds are saved there as deck files.
-use msh_deckbuilder::db::{CardDb, Rules};
+use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::deck::Deck;
 use msh_deckbuilder::playtest::Prepared;
 use msh_deckbuilder::playtest::lab::play_all;
@@ -11,8 +11,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let dir = std::path::PathBuf::from(&a[0]);
-    let db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
-    let rules = Rules::default();
+    let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
+    let rules = msh_deckbuilder::league::app_rules(&dir, None);
     let reference = Deck::load(std::path::Path::new(&a[1]), &db).expect("reference deck");
     let games: u32 = a.get(2).and_then(|g| g.parse().ok()).unwrap_or(300);
     let mut decks: Vec<Deck> = Vec::new();

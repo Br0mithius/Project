@@ -6,18 +6,20 @@
 //! "Drake=Tatyova, Benthic Druid" "Will=Smaug, Wicked Worm" ...`
 //! Players named with a leading `*` sit at the next table.
 
-use msh_deckbuilder::db::{CardDb, Rules};
+use msh_deckbuilder::db::CardDb;
 use msh_deckbuilder::table::{RealOpponent, Table, picks_from_league, strong_build};
 use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dir = PathBuf::from(&args[0]);
-    let db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
     let json = std::fs::read_to_string(&args[1]).expect("league json");
     let mut table = Table::load(&dir);
     table.picks = picks_from_league(&json).expect("picks");
-    let rules = Rules::default();
+    let rules = msh_deckbuilder::league::app_rules(&dir, None);
     for spec in &args[2..] {
         let (who, cmd) = spec.split_once('=').expect("Player=Commander");
         let (next, who) = match who.strip_prefix('*') {

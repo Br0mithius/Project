@@ -4,9 +4,11 @@ use std::time::Instant;
 
 fn main() {
     let dir = std::path::PathBuf::from(std::env::args().nth(1).expect("data dir"));
-    let db = CardDb::load(&dir.join("cards.json")).unwrap();
+    let mut db = CardDb::load(&dir.join("cards.json")).unwrap();
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
     let coll = Collection::load(&dir.join("collection.txt")).unwrap();
-    let rules = Rules::default();
+    let rules = msh_deckbuilder::league::app_rules(&dir, None);
     let t = Instant::now();
     let g = playtest::gauntlet(&db, &rules, 2026);
     println!("gauntlet: {} decks in {:?}", g.len(), t.elapsed());

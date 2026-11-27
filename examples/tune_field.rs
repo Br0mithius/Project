@@ -20,7 +20,9 @@ fn main() {
     let dir = PathBuf::from(&a[0]);
     let out = PathBuf::from(&a[1]);
     let _ = std::fs::create_dir_all(&out);
-    let db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
     let mut rounds = 3usize;
     let mut refs: Vec<Deck> = Vec::new();
     let mut files: Vec<String> = Vec::new();
@@ -209,7 +211,7 @@ fn main() {
             {
                 let is_gear =
                     |n: &str| db.get(n).is_some_and(|c| c.type_line.contains("Equipment"));
-                let rules = Rules::default();
+                let rules = msh_deckbuilder::league::app_rules(&dir, None);
                 while deck.cards.keys().filter(|n| is_gear(n)).count() < 8 {
                     let Some(add) =
                         msh_deckbuilder::analysis::suggestions(&deck, &db, &all, &rules)

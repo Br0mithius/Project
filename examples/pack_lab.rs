@@ -3,7 +3,7 @@
 //! and the pair's pack - and both play the same games against the peer field.
 //! `cargo run --release --example pack_lab -- <data dir> [games] [commanders per pair]`
 use msh_deckbuilder::colorpacks;
-use msh_deckbuilder::db::{CardDb, Collection, Rules};
+use msh_deckbuilder::db::{CardDb, Collection};
 use msh_deckbuilder::playtest::Prepared;
 use msh_deckbuilder::playtest::lab::play_all;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
@@ -11,10 +11,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let dir = std::path::PathBuf::from(&a[0]);
-    let db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
+    // The measured card values and ratings, as the app loads them.
+    db.attach_ratings(&dir);
     let games: u32 = a.get(1).and_then(|g| g.parse().ok()).unwrap_or(800);
     let per: usize = a.get(2).and_then(|g| g.parse().ok()).unwrap_or(3);
-    let rules = Rules::default();
+    let rules = msh_deckbuilder::league::app_rules(&dir, None);
     let all = Collection::new(
         std::path::PathBuf::new(),
         db.cards.iter().map(|c| (c.name.clone(), 1)).collect(),
