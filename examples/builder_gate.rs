@@ -23,7 +23,7 @@ fn main() {
     let dir = std::path::PathBuf::from(&a[0]);
     let games: u32 = a[2].parse().expect("games");
     let mut variants: Vec<u32> = vec![0];
-    variants.extend(a[3..].iter().map(|v| v.parse::<u32>().expect("variant")));
+    variants.extend(a[3..].iter().filter_map(|v| v.parse::<u32>().ok()));
     let mut db = CardDb::load(&dir.join("cards.json")).expect("cards.json");
     db.attach_ratings(&dir);
     let rules = msh_deckbuilder::league::app_rules(&dir, None);
@@ -44,6 +44,30 @@ fn main() {
             d
         })
         .collect();
+    // `--refine` (as the app's auto-build does): the standard draft after a quick playtest
+    // search, judged as variant 9999.
+    let mut builds = builds;
+    if a.iter().any(|x| x == "--refine") {
+        let t0 = std::time::Instant::now();
+        let rep = msh_deckbuilder::optimize::optimize(
+            &cmd,
+            &builds[0],
+            &db,
+            &coll,
+            &rules,
+            &referee,
+            msh_deckbuilder::lab::Effort::QUICK,
+            2,
+            &Progress::new(),
+        );
+        let refined = match rep {
+            Some(r) if r.final_gain.is_some_and(|g| g.score.z() >= 2.0) => r.best,
+            _ => builds[0].clone(),
+        };
+        eprintln!("refine stage took {:.0} s", t0.elapsed().as_secs_f32());
+        builds.push(refined);
+        variants.push(9999);
+    }
     let gains = compare(
         &golden,
         &builds,
@@ -64,7 +88,7 @@ fn main() {
             .sum();
         let (gap, se) = (g.score.gain * 100.0, g.score.stderr * 100.0);
         let ok = gap >= -MAX_GAP;
-        if *v == 0 {
+        if *v == 0 || *v == 9999 {
             pass = ok;
         }
         println!(

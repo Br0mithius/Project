@@ -143,6 +143,9 @@ struct Settings {
     high_contrast: bool,
     /// Deck columns grouped by what the cards do (locks, answers...) instead of mana value.
     group_by_job: bool,
+    /// After an auto-build, refine the deck by playtests in the background and apply the
+    /// result when it clearly wins (the second stage of auto-build).
+    refine_auto: bool,
     /// The play-by-hand options last used (stops, auto-pay), kept between sessions.
     play_opts: crate::playtest::human::PlayOptions,
 }
@@ -215,6 +218,7 @@ impl Default for Settings {
             text_scale: 1.0,
             high_contrast: false,
             group_by_job: false,
+            refine_auto: true,
             play_opts: Default::default(),
         }
     }
@@ -821,6 +825,7 @@ impl GuiApp {
         }
         let commander_before = self.deck.commander.clone();
         let mut chose_commander = false;
+        let mut auto_built = false;
         for a in actions {
             let before = self.deck.clone();
             match a {
@@ -904,6 +909,7 @@ impl GuiApp {
                     }
                 }
                 Action::AutoBuild(n, piper) => {
+                    auto_built = true;
                     if let Some(c) = self.db.get(&n).cloned() {
                         let (mut d, short, _) = crate::archetypes::autobuild(
                             &c,
@@ -1222,7 +1228,12 @@ impl GuiApp {
             }
         }
         // Choosing a commander (or auto-building) starts the playtest lab on that deck.
-        if chose_commander {
+        // An auto-build's second stage: a playtest search on the draft, applied when it
+        // clearly wins (the lab run would compete for the same cores, so it waits).
+        if auto_built && self.settings.refine_auto && self.deck.commander.is_some() {
+            self.stop_lab();
+            self.start_refine();
+        } else if chose_commander {
             match self.settings.lab_auto.effort() {
                 Some(e) => self.start_lab(e),
                 None => self.stop_lab(),
@@ -3131,6 +3142,15 @@ impl GuiApp {
                 self.save_settings();
             }
             });
+            ui.end_row();
+            ui.label("");
+            if ui
+                .checkbox(&mut self.settings.refine_auto, "After auto-build, refine the deck by playtests and apply what clearly wins")
+                .on_hover_text("Auto-build drafts a deck from card values in an instant; then a playtest search (a minute or two, in the background) tries swaps from your pool and applies the ones that win on fresh games. Undo goes back to the draft.")
+                .changed()
+            {
+                self.save_settings();
+            }
             ui.end_row();
         });
         ui.separator();

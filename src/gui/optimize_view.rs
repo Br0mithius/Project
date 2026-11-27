@@ -40,11 +40,29 @@ pub struct OptState {
     pub table_weight: Option<f32>,
     /// The "not claimable" name box.
     pub unavailable_text: String,
+    /// The running job is an auto-build's refine stage: its result is applied when it
+    /// clearly beats the draft and the deck hasn't been edited meanwhile.
+    pub auto_apply: bool,
 }
 
 impl GuiApp {
     fn opponents_for_opt(&self, weight: f32) -> (Vec<crate::playtest::Prepared>, f32) {
         (crate::table::gauntlet(&self.table, &self.db), weight)
+    }
+
+    /// The second stage of auto-build: a quick optimise whose result is applied by itself.
+    pub(super) fn start_refine(&mut self) {
+        if let Some(job) = self.opt.job.take() {
+            job.cancel();
+        }
+        self.start_opt(false, Effort::QUICK);
+        if self.opt.job.is_some() {
+            self.opt.auto_apply = true;
+            self.status = format!(
+                "{} Refining it by playtests in the background (a minute or two)...",
+                self.status
+            );
+        }
     }
 
     fn start_opt(&mut self, claims: bool, effort: Effort) {
@@ -119,14 +137,40 @@ impl GuiApp {
                 self.opt.job = None;
                 match r {
                     OptResult::Opt(Some(rep)) => {
-                        self.status = "Deck optimiser finished.".into();
+                        let auto = std::mem::take(&mut self.opt.auto_apply);
+                        let clear = rep.final_gain.is_some_and(|g| g.score.z() >= 2.0);
+                        if auto && clear && rep.start == self.deck && rep.best != self.deck {
+                            let g = rep.final_gain.map_or(0.0, |g| g.score.gain * 100.0);
+                            let n = crate::optimize::differences(&rep.start, &rep.best).len() / 2;
+                            self.history.push(self.deck.clone());
+                            self.deck = rep.best.clone();
+                            self.rev += 1;
+                            self.autosave();
+                            self.status = format!(
+                                "Refined by playtests: {} change{} worth {:+.1} win-rate points on fresh games. Undo goes back to the draft; details under Playtest > Optimise.",
+                                n,
+                                if n == 1 { "" } else { "s" },
+                                g
+                            );
+                        } else if auto {
+                            self.status = if rep.start != self.deck {
+                                "Playtest refinement finished, but the deck was edited meanwhile: see Playtest > Optimise to apply it.".into()
+                            } else {
+                                "Playtests found nothing clearly better than this build.".into()
+                            };
+                        } else {
+                            self.status = "Deck optimiser finished.".into();
+                        }
                         self.opt.report = Some(rep);
                     }
                     OptResult::Claims(Some(rep)) => {
                         self.status = "Claim test finished.".into();
                         self.opt.claims = Some(rep);
                     }
-                    _ => self.status = "Stopped.".into(),
+                    _ => {
+                        self.opt.auto_apply = false;
+                        self.status = "Stopped.".into()
+                    }
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => self.opt.job = None,
