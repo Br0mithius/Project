@@ -602,6 +602,7 @@ pub fn explore_with(
         .zip(basic.clone())
         .map(|(w, b)| Swap::new(&w, &b));
     let minus_land = common_basic
+        .clone()
         .zip(bench.first().map(|b| b.0.clone()))
         .map(|(b, s)| Swap::new(&b, &s));
     let mut a_decks: Vec<Vec<Swap>> = worth_swaps.iter().map(|s| vec![s.clone()]).collect();
@@ -744,11 +745,45 @@ pub fn explore_with(
             }
         }
     }
+    // A card in a colour the deck has fewer sources of than its average colour is also
+    // tried with a basic of that colour in place of the most common basic: alone, a card
+    // the mana can't cast measures low (HULK SMASH! in a singleton Thanos deck: -0.0 alone,
+    // +0.8 with a Mountain for a Swamp, 40,000 paired games).
+    const BASIC_OF: [&str; 5] = ["Plains", "Island", "Swamp", "Mountain", "Forest"];
+    let n_single = b_decks.len();
+    let mut compound_of: Vec<(usize, Swap)> = Vec::new();
+    {
+        let st = analysis::stats(&base, db);
+        let played: Vec<usize> = (0..5).filter(|&k| plays.0 & (1 << k) != 0).collect();
+        let mean_src =
+            played.iter().map(|&k| st.sources[k] as f32).sum::<f32>() / played.len().max(1) as f32;
+        if let Some(cb) = common_basic.as_ref().filter(|cb| base.count_of(cb) >= 2) {
+            for (i, d) in b_decks.iter().enumerate() {
+                let s = &d[0];
+                let Some(c) = db.get(&s.add).filter(|c| !c.is_land()) else {
+                    continue;
+                };
+                let id = c.identity();
+                let short = played.iter().copied().find(|&k| {
+                    id.0 & (1 << k) != 0 && (st.sources[k] as f32) < mean_src && BASIC_OF[k] != cb
+                });
+                if let Some(k) = short {
+                    if s.cut != *cb && db.get(BASIC_OF[k]).is_some() {
+                        compound_of.push((i, Swap::new(cb, BASIC_OF[k])));
+                    }
+                }
+            }
+        }
+    }
+    for (i, land) in &compound_of {
+        let s = b_decks[*i][0].clone();
+        b_decks.push(vec![s, land.clone()]);
+    }
     replan(b_decks.len() + 1, stage_c, colours);
     let out_b = run(&b_decks, effort.additions, SEED_ADDITIONS)?;
     add_base(&out_b);
     let mut additions: Vec<Addition> = Vec::new();
-    for (i, d) in b_decks.iter().enumerate() {
+    for (i, d) in b_decks.iter().enumerate().take(n_single) {
         let m = out_b.diff(i + 1, 0);
         record(&d[0], m);
         let s = &d[0];
@@ -764,6 +799,26 @@ pub fn explore_with(
                 gain: m,
                 heuristic: heuristic.get(&s.add).copied().unwrap_or(0.0),
             }),
+        }
+    }
+    // A compound that beat the card alone: the card goes in with its basic from now on.
+    let mut companions: Vec<(Swap, Swap)> = Vec::new();
+    for (j, (i, land)) in compound_of.iter().enumerate() {
+        let single = out_b.diff(i + 1, 0);
+        let both = out_b.diff(n_single + j + 1, 0);
+        let s = &b_decks[*i][0];
+        if both.gain > single.gain && both.z() >= 0.5 && swap_ok(s) {
+            if let Some(entry) = screened.iter_mut().find(|(x, _)| x == s) {
+                entry.1 = both;
+            }
+            if let Some(a) = additions
+                .iter_mut()
+                .find(|a| a.add == s.add && a.cut == s.cut)
+            {
+                a.gain = both;
+                a.add = format!("{} (with a {} for a {})", s.add, land.add, land.cut);
+            }
+            companions.push((s.clone(), land.clone()));
         }
     }
     additions.sort_by(|a, b| b.gain.gain.partial_cmp(&a.gain.gain).unwrap());
@@ -799,7 +854,18 @@ pub fn explore_with(
             });
         let crosses = combo.iter().any(|(x, _)| x.cut == s.add || x.add == s.cut);
         if cut_n < have && add_n < can_add && !crosses {
+            // Its basic comes with it (when the deck still has that basic to give).
+            let companion = companions
+                .iter()
+                .find(|(x, _)| *x == s)
+                .map(|c| c.1.clone());
             combo.push((s, m));
+            if let Some(land) = companion {
+                let given = combo.iter().filter(|(x, _)| x.cut == land.cut).count() as u32;
+                if base.count_of(&land.cut) > given {
+                    combo.push((land, m));
+                }
+            }
         }
     }
     let swaps_of = |c: &[(Swap, Measure)]| -> Vec<Swap> { c.iter().map(|x| x.0.clone()).collect() };
