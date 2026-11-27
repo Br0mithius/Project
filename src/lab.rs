@@ -875,12 +875,44 @@ pub fn explore_with(
     if !combo.is_empty() {
         progress.set_stage("Confirming the best combination on fresh games");
         let all = swaps_of(&combo);
+        // A card and the basic that came with it are one unit: left out together, and the
+        // basic's contribution is its card's (alone, a basic for a basic measures ~0 and
+        // was dropped, leaving the card without the colour it needed).
+        let partner = |i: usize| -> Option<usize> {
+            companions.iter().find_map(|(card, land)| {
+                if all[i] == *card {
+                    all.iter().position(|x| x == land)
+                } else if all[i] == *land {
+                    all.iter().position(|x| x == card)
+                } else {
+                    None
+                }
+            })
+        };
+        let is_land_partner = |i: usize| companions.iter().any(|(_, land)| all[i] == *land);
         let mut c_decks = vec![all.clone()];
+        // For each swap, the deck that leaves it out (a basic partner shares its card's).
+        let mut loo: Vec<usize> = vec![0; all.len()];
         if all.len() > 1 {
             for i in 0..all.len() {
-                let mut without = all.clone();
-                without.remove(i);
+                if is_land_partner(i) && partner(i).is_some() {
+                    continue;
+                }
+                let without: Vec<Swap> = all
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i && Some(*j) != partner(i))
+                    .map(|(_, x)| x.clone())
+                    .collect();
+                loo[i] = c_decks.len();
                 c_decks.push(without);
+            }
+            for i in 0..all.len() {
+                if is_land_partner(i) {
+                    if let Some(p) = partner(i) {
+                        loo[i] = loo[p];
+                    }
+                }
             }
         }
         replan(0, c_decks.len() + 1 + 2, colours_games);
@@ -889,8 +921,8 @@ pub fn explore_with(
         let gain_all = out_c.diff(1, 0);
         let contributions: Vec<Measure> = (0..all.len())
             .map(|i| {
-                if all.len() > 1 {
-                    out_c.diff(1, i + 2)
+                if all.len() > 1 && loo[i] > 0 {
+                    out_c.diff(1, loo[i] + 1)
                 } else {
                     gain_all
                 }
