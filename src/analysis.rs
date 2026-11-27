@@ -569,7 +569,42 @@ pub const SIM_SCALE: f32 = 2.2;
 /// `playtest::simvalues`), that measured power is the main part of the score, weighted by
 /// how sure the measurement is (more games and more decks, more weight - up to 85%); the
 /// rules-of-thumb score below fills the rest, and stands alone for unmeasured cards.
+/// Experimental deck-building variants (bit flags, 0 = the standard builder), switched at
+/// run time so a builder change and the standard builder build the same commanders from
+/// the same pools and play the same games (`examples/builder_bench.rs`).
+pub static BUILD_VARIANT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn variant_on(bit: u32) -> bool {
+    BUILD_VARIANT.load(std::sync::atomic::Ordering::Relaxed) & bit != 0
+}
+
 pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32, Vec<String>) {
+    let (mut score, mut why) = score_card_blend(card, deck, db, rules);
+    if variant_on(1) && !card.is_land() {
+        // (Variant 1) the deck's needs outside the blend with playtest values.
+        let st = stats(deck, db);
+        let plan = deck_plan(deck, db, rules);
+        if card.is_creature() && st.creatures < plan.creatures.0 {
+            let short = (plan.creatures.0 - st.creatures) as f32;
+            score += (0.4 * short).min(3.0);
+            why.push(format!(
+                "deck short of creatures ({}/{})",
+                st.creatures, plan.creatures.0
+            ));
+        }
+        let have_removal = st.roles.get(&Role::Removal).copied().unwrap_or(0) as f32;
+        if card.roles().contains(&Role::Removal) && have_removal >= plan.removal * 1.6 {
+            score -= 1.5;
+            why.push(format!(
+                "plenty of removal already ({:.0}/{:.0})",
+                have_removal, plan.removal
+            ));
+        }
+    }
+    (score, why)
+}
+
+fn score_card_blend(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32, Vec<String>) {
     let (h, mut why) = score_card_heuristic(card, deck, db, rules);
     if card.is_land() {
         return (h, why);
@@ -583,7 +618,15 @@ pub fn score_card(card: &Card, deck: &Deck, db: &CardDb, rules: &Rules) -> (f32,
     // a card measured once - Alien Invasion, +4.8 ± 1.25 in the lock-out deck - kept its
     // weak rule-of-thumb score and auto-build left it out.
     let sure = 1.0 / (1.0 + (p.se / 0.85).powi(2));
-    let w = 0.85 * sure;
+    // (Variants 2 and 4: trust playtests fully, or less.)
+    let top = if variant_on(2) {
+        1.0
+    } else if variant_on(4) {
+        0.6
+    } else {
+        0.85
+    };
+    let w = top * sure;
     let measured = SIM_BASE + SIM_SCALE * p.value;
     why.insert(
         0,
@@ -2351,6 +2394,9 @@ pub fn autobuild(
     }
     fill_basics(&mut deck, db, rules);
     force_keeps(&mut deck, db, coll, rules);
+    if variant_on(8) {
+        crate::mana::rebalance_basics(&mut deck, db);
+    }
     (deck, shortfall)
 }
 

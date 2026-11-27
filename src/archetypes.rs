@@ -882,6 +882,9 @@ pub fn build_with(
     let (mut deck, short) = deck;
     analysis::fill_basics(&mut deck, db, rules);
     analysis::force_keeps(&mut deck, db, coll, rules);
+    if analysis::variant_on(8) {
+        crate::mana::rebalance_basics(&mut deck, db);
+    }
     (deck, short)
 }
 
