@@ -1191,6 +1191,7 @@ impl<'a> Game<'a> {
                     }
                     alts.retain(|&j| self.perms[j].ctrl as usize != owner);
                     if let Some(new_id) = ai::redirect(self, owner, ctx.ctrl, id, &alts) {
+                        self.spell_target_chosen(Some(new_id), None);
                         let Some(j) = self.idx(new_id) else { continue };
                         let snap = self.perms[j].clone();
                         self.actor = ctx.ctrl as u8;
@@ -1208,6 +1209,7 @@ impl<'a> Game<'a> {
                     }
                 }
             }
+            self.spell_target_chosen(Some(id), None);
             let snap = self.perms[self.idx(id).unwrap_or(i).min(self.perms.len() - 1)].clone();
             if snap.id == id {
                 self.actor = ctx.ctrl as u8;
@@ -1229,7 +1231,16 @@ impl<'a> Game<'a> {
             super::audit::Cause::Card(pend.card, pend.ctrl)
         };
         let outer = std::mem::replace(&mut self.cause, cause);
+        // One of the cast spell's own abilities: the targets it chooses are the spell's.
+        let was_live = self.ext.cast_watch.as_mut().map(|w| {
+            let live =
+                pend.cast && pend.source.is_none() && pend.card == w.card && pend.back == w.back;
+            std::mem::replace(&mut w.live, live)
+        });
         self.resolve_pending_inner(pend);
+        if let (Some(w), Some(live)) = (self.ext.cast_watch.as_mut(), was_live) {
+            w.live = live;
+        }
         self.cause = outer;
     }
 
@@ -1578,6 +1589,15 @@ impl<'a> Game<'a> {
             .filter(|g| g.top)
             .and_then(|_| self.players[me].library.last().map(|&c| (me as u8, c)));
         self.ext.ward_countered = false;
+        // "Target opponent ..." in a spell being cast: it targets an opponent (Danitha,
+        // Spear of Agony).
+        if ab.text.contains("target opponent")
+            && self.ext.cast_watch.as_ref().is_some_and(|w| w.live)
+        {
+            if let Some(&o) = self.opponents(me).first() {
+                self.spell_target_chosen(None, Some(o));
+            }
+        }
         for (k, text, card_restr) in picks {
             if !self.players[me].alive {
                 return;
@@ -1956,6 +1976,7 @@ impl<'a> Game<'a> {
                             kicked: false,
                             overloaded: false,
                             x: None,
+                            cast: false,
                         });
                         if sac {
                             if let Some(j) = self.idx(x.id) {
@@ -1984,6 +2005,7 @@ impl<'a> Game<'a> {
                                 kicked: false,
                                 overloaded: false,
                                 x: None,
+                                cast: false,
                             });
                         }
                     }
@@ -2139,6 +2161,7 @@ impl<'a> Game<'a> {
                             kicked: false,
                             overloaded: false,
                             x: None,
+                            cast: false,
                         });
                     }
                 }
@@ -2192,6 +2215,7 @@ impl<'a> Game<'a> {
                         kicked: false,
                         overloaded: false,
                         x: None,
+                        cast: false,
                     });
                 }
             }
@@ -2427,6 +2451,7 @@ impl<'a> Game<'a> {
                     kicked: false,
                     overloaded: false,
                     x: None,
+                    cast: false,
                 });
             }
         }
@@ -3062,6 +3087,7 @@ impl<'a> Game<'a> {
                     }
                     match hit {
                         ai::Hit::Player(o) => {
+                            self.spell_target_chosen(None, Some(o));
                             self.note(|| format!("    {} damage aimed at P{}", n, o));
                             self.hurt_player(ctx, o, n)
                         }
@@ -5856,6 +5882,7 @@ impl<'a> Game<'a> {
                     kicked: false,
                     overloaded: false,
                     x: None,
+                    cast: false,
                 });
             }
         }
@@ -6021,6 +6048,7 @@ impl<'a> Game<'a> {
                             kicked: false,
                             overloaded: false,
                             x: None,
+                            cast: false,
                         });
                     }
                 }
@@ -6048,6 +6076,7 @@ impl<'a> Game<'a> {
     }
 
     pub fn emit_targeted(&mut self, id: u32) {
+        self.spell_target_chosen(Some(id), None);
         if let Some(i) = self.idx(id) {
             let snap = self.perms[i].clone();
             self.emit_about(Ev::Targeted, snap.ctrl as usize, &snap);

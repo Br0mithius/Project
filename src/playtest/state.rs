@@ -101,6 +101,8 @@ pub struct Perm {
     pub sac_at_end: bool,
     /// Modes already chosen ("choose one that hasn't been chosen"), a bit per mode.
     pub modes_used: u32,
+    /// "Is all creature types" while a condition holds (Undercover Skrull): on now.
+    pub all_types: bool,
     /// Once-each-turn triggers that already fired this turn (bit per ability).
     pub fired: u32,
     /// Mana value (of the card it is, or copies; 0 for other tokens).
@@ -294,6 +296,9 @@ pub struct Pending {
     pub overloaded: bool,
     /// The X paid for the spell or ability.
     pub x: Option<i32>,
+    /// One of a cast spell's own abilities (not a copy's): the targets it chooses are the
+    /// spell's targets (`GameExtra::cast_watch`).
+    pub cast: bool,
 }
 
 /// Context for resolving a spell's own abilities.
@@ -445,6 +450,21 @@ pub enum Purpose {
     Ability { src: u32 },
 }
 
+/// The spell being cast (see `GameExtra::cast_watch`).
+#[derive(Debug, Clone)]
+pub struct CastWatch {
+    pub caster: u8,
+    pub card: CardRef,
+    pub back: bool,
+    /// The spell's stand-in for trigger filters ("an instant or sorcery spell that ...").
+    pub probe: Perm,
+    /// One of the spell's own abilities is resolving: the targets chosen now are the
+    /// spell's (not those of a copy or of a trigger it set off).
+    pub live: bool,
+    /// "That targets" triggers this spell already set off: (source, ability).
+    pub fired: Vec<(u32, u16)>,
+}
+
 /// Turn-by-turn facts the rules text asks about, kept apart from the core game state.
 #[derive(Debug, Clone, Default)]
 pub struct GameExtra {
@@ -467,9 +487,12 @@ pub struct GameExtra {
     /// How often an ability resolved this turn: (source id, ability, turn, count).
     pub resolutions: Vec<(u32, u16, u32, u8)>,
     pub delayed: Vec<Delayed>,
-    /// What the spell being cast targets (`compile::TGT_*` bits), for "whenever you cast a
-    /// spell that targets a creature you control".
-    pub casting_targets: u8,
+    /// The spell being cast, while its own abilities resolve and choose its targets (for
+    /// "whenever you cast a spell that targets ...": `Game::spell_target_chosen`).
+    pub cast_watch: Option<CastWatch>,
+    /// A target of the spell being cast is being announced to those triggers: what it is
+    /// (`compile::TGT_*` bits, from the caster's side) and which permanent.
+    pub cast_target: Option<(u8, Option<u32>)>,
     /// The permanent about to enter was cast (not put onto the battlefield).
     pub entering_cast: bool,
     /// The last permanent spell that resolved and entered ("if you cast it").
@@ -1192,6 +1215,42 @@ impl<'a> Game<'a> {
             if lock {
                 x.eff_kw |= CANT_BLOCK;
                 x.locked = true;
+            }
+        }
+        // "As long as ..., this creature ... is all creature types" (Undercover Skrull): every
+        // type a changeling counts as while the condition holds, its printed ones otherwise.
+        let mut flips: Vec<(usize, bool)> = Vec::new();
+        for (i, x) in self.perms.iter().enumerate() {
+            let Some(c) = x.card.map(|r| self.card(r)).filter(|c| c.all_types_static) else {
+                continue;
+            };
+            let _ = c;
+            let on = !x.blank
+                && self.abilities_of(x).iter().any(|a| {
+                    a.trig == Trig::Static
+                        && a.text.contains("is all creature types")
+                        && self.cond_holds(&a.cond, x.ctrl as usize, Some(i))
+                });
+            if on != x.all_types {
+                flips.push((i, on));
+            }
+        }
+        for (i, on) in flips {
+            let printed: &[String] = match self.perms[i].card {
+                Some(r) => &self.players[r.0 as usize].cards[r.1 as usize].subtypes,
+                None => &[],
+            };
+            let x = &mut self.perms[i];
+            x.all_types = on;
+            if on {
+                for t in CHANGELING_TYPES {
+                    if !x.subtypes.iter().any(|s| s == t) {
+                        x.subtypes.push(t.to_string());
+                    }
+                }
+            } else {
+                x.subtypes
+                    .retain(|s| !CHANGELING_TYPES.contains(&s.as_str()) || printed.contains(s));
             }
         }
         // Rule-changing statics, per controller.
@@ -2269,6 +2328,7 @@ impl<'a> Game<'a> {
                             kicked: false,
                             overloaded: false,
                             x: None,
+                            cast: false,
                         });
                     }
                 }
@@ -2511,6 +2571,7 @@ impl<'a> Game<'a> {
             no_abilities: false,
             sac_at_end: false,
             modes_used: 0,
+            all_types: false,
             fired: 0,
             mv,
             attacking: false,
@@ -2737,6 +2798,7 @@ impl<'a> Game<'a> {
                         kicked: false,
                         overloaded: false,
                         x: None,
+                        cast: false,
                     });
                 }
             }
@@ -3014,13 +3076,35 @@ impl<'a> Game<'a> {
                     if f.not_types != 0 && s.types & f.not_types != 0 {
                         continue;
                     }
-                    // "A spell that targets a creature you control" (or "an Equipment spell").
-                    if ev == Ev::Cast
-                        && f.targets != 0
-                        && self.ext.casting_targets & f.targets & 0x0F == 0
-                        && !(f.targets & TGT_OR_EQUIPMENT != 0 && s.is(T_EQUIPMENT))
-                    {
-                        continue;
+                    // "A spell that targets a creature you control" (or "an Equipment spell"):
+                    // set off as the spell's targets are chosen (`spell_target_chosen`), once
+                    // per spell - by each target for "one or more creatures ... those
+                    // creatures" (Storm, Windrider). As the spell is cast, only the "an
+                    // Equipment spell or" half.
+                    if ev == Ev::Cast {
+                        match self.ext.cast_target {
+                            Some((bits, id)) => {
+                                let hit = bits & f.targets & 0x0F != 0
+                                    || f.targets & TGT_SELF != 0 && id == Some(src.id);
+                                let again = a.text.contains("those creatures");
+                                if !hit
+                                    || !again
+                                        && self
+                                            .ext
+                                            .cast_watch
+                                            .as_ref()
+                                            .is_some_and(|w| w.fired.contains(&(src.id, ai as u16)))
+                                {
+                                    continue;
+                                }
+                            }
+                            None if f.targets != 0
+                                && !(f.targets & TGT_OR_EQUIPMENT != 0 && s.is(T_EQUIPMENT)) =>
+                            {
+                                continue;
+                            }
+                            None => {}
+                        }
                     }
                     if (f.nontoken && s.is_token()) || (f.token && !s.is_token()) {
                         continue;
@@ -3066,11 +3150,18 @@ impl<'a> Game<'a> {
                     kicked: false,
                     overloaded: false,
                     x: None,
+                    cast: false,
                 });
             }
         }
         for (si, ai) in fired {
             self.perms[si].fired |= 1 << ai;
+        }
+        // (A target of the spell is being announced: the cast itself already set off the
+        // emblems and graveyard cards.)
+        if ev == Ev::Cast && self.ext.cast_target.is_some() {
+            self.pending.extend(add);
+            return;
         }
         // Emblems ("whenever you cast a spell, draw a card").
         for (o, pl) in self.players.iter().enumerate() {
@@ -3101,6 +3192,7 @@ impl<'a> Game<'a> {
                     kicked: false,
                     overloaded: false,
                     x: None,
+                    cast: false,
                 });
             }
         }
@@ -3145,11 +3237,85 @@ impl<'a> Game<'a> {
                         kicked: false,
                         overloaded: false,
                         x: None,
+                        cast: false,
                     });
                 }
             }
         }
         self.pending.extend(add);
+    }
+
+    /// The spell being cast targets this permanent or player: sets off "whenever you cast a
+    /// spell that targets ..." (Colleen Wing, Fin Fang Foom, Speedball) by what the spell
+    /// really targets. The engine chooses a spell's targets as its abilities resolve, so the
+    /// trigger is set off at that moment and resolves at once - before the spell's effect,
+    /// as when the targets are chosen on casting and the trigger goes on the stack above the
+    /// spell. A target chosen any other way sets nothing off.
+    pub(crate) fn spell_target_chosen(&mut self, perm: Option<u32>, player: Option<usize>) {
+        let Some(w) = self.ext.cast_watch.as_ref().filter(|w| w.live) else {
+            return;
+        };
+        let caster = w.caster as usize;
+        let mut bits = 0;
+        if let Some(x) = perm.and_then(|id| self.idx(id)).map(|i| &self.perms[i]) {
+            if x.is_creature() {
+                bits |= if x.ctrl as usize == caster {
+                    TGT_OWN_CREATURE
+                } else {
+                    TGT_OPP_CREATURE
+                };
+            }
+            if x.is(T_ARTIFACT | T_LAND) {
+                bits |= TGT_ARTIFACT_LAND;
+            }
+        }
+        if player.is_some_and(|o| o != caster) {
+            bits |= TGT_OPPONENT;
+        }
+        let probe = w.probe.clone();
+        self.ext.cast_target = Some((bits, perm));
+        let from = self.pending.len();
+        self.emit_about(Ev::Cast, caster, &probe);
+        self.ext.cast_target = None;
+        // (The watch is off while the triggers resolve: a copy they make isn't cast.)
+        let Some(mut watch) = self.ext.cast_watch.take() else {
+            return;
+        };
+        let mut new: Vec<Pending> = self.pending.drain(from..).collect();
+        if !new.is_empty() {
+            for pend in new.iter_mut() {
+                if let Some(src) = pend.source {
+                    watch.fired.push((src, pend.ability));
+                }
+                // "Those creatures gain flying" (Storm, Windrider): the target.
+                if perm.is_some() {
+                    pend.subject = perm;
+                }
+            }
+            // The spell's own resolution goes on afterwards: what it remembers is kept.
+            let saved = (
+                std::mem::take(&mut self.last_targets),
+                self.last_ctrl,
+                self.targeted,
+                self.reborn,
+                std::mem::take(&mut self.last_countered),
+                self.focus_card,
+                self.ext.ward_countered,
+            );
+            for pend in new {
+                self.resolve_pending(pend);
+            }
+            (
+                self.last_targets,
+                self.last_ctrl,
+                self.targeted,
+                self.reborn,
+                self.last_countered,
+                self.focus_card,
+                self.ext.ward_countered,
+            ) = saved;
+        }
+        self.ext.cast_watch = Some(watch);
     }
 
     /// Fires the spell-cast triggers: "whenever you cast", prowess, extort.
@@ -3171,7 +3337,7 @@ impl<'a> Game<'a> {
             ..self.probe()
         };
         self.ext.cast_probe = Some(probe.clone());
-        self.ext.casting_targets = card.spell_targets;
+        self.ext.cast_target = None;
         self.emit_about(Ev::Cast, p, &probe);
         if !card.is(T_CREATURE) {
             let lists: Vec<&'a [SimCard]> = self.players.iter().map(|pl| pl.cards).collect();
@@ -3256,6 +3422,7 @@ impl<'a> Game<'a> {
             no_abilities: false,
             sac_at_end: false,
             modes_used: 0,
+            all_types: false,
             fired: 0,
             mv: 0,
             attacking: false,

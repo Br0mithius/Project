@@ -5119,7 +5119,7 @@ On entering:
       itself: 4/4 trample
       -> (nothing changes)
 ABILITIES:
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00001 }): "whenever you cast a spell that targets ~, draw a card."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b100000 }): "whenever you cast a spell that targets ~, draw a card."
       -> You: hand +1, library -1
 
 Gnarlid Colony | {1}{G} | Creature — Beast | 2/2
@@ -10805,7 +10805,7 @@ On entering:
       itself: 2/2 
       -> (nothing changes)
 ABILITIES:
-  Event(Targeted, Filter { yours: None, types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever a player casts a spell that targets ~, he gets +2/+2 until end of turn. you may choose new targets for that spell."
+  Event(Cast, Filter { yours: None, types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b100000 }) [may]: "whenever a player casts a spell that targets ~, he gets +2/+2 until end of turn. you may choose new targets for that spell."
       -> Your Speedball, New Warrior: 2/2 -> 4/4
 
 Sphinx of False Conclusions | {2}{U}{U} | Creature — Sphinx Illusion | 4/2
@@ -11069,10 +11069,10 @@ ABILITIES:
       -> Opp A's Dragon left the battlefield
 
 Stolen Stark Tech | {1}{B} | Artifact — Equipment
-TEXT: When this Equipment enters, attach it to target creature you control. That creature gains indestructible until end of turn. (Damage and effects that say "destroy" don't destroy it.) / Equipped creature gets +1/+0. / Equip {1} ({1}: Attach to target creature you control. Equip only as a sorcery.)
-SIM: equip {1}
+TEXT: Flash / When this Equipment enters, attach it to target creature you control. That creature gains indestructible until end of turn. (Damage and effects that say "destroy" don't destroy it.) / Equipped creature gets +1/+0. / Equip {1} ({1}: Attach to target creature you control. Equip only as a sorcery.)
+SIM: keywords flash; equip {1}
 On entering (attached to your Bear):
-      itself: 
+      itself: flash
       -> Your Dragon: 6/6 -> 7/6, gains indestructible
 ABILITIES:
   Enters: "when ~ enters, attach it to target creature you control. that creature gains indestructible until end of turn."

@@ -809,6 +809,7 @@ fn fire(prep: &Prepared, ab_index: usize, back: bool, mode: Option<usize>) -> Ve
                 kicked: false,
                 overloaded: false,
                 x: None,
+                cast: false,
             });
         }
     }

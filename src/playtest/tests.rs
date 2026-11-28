@@ -1105,6 +1105,7 @@ fn fire(g: &mut Game, id: u32, k: usize) {
         kicked: false,
         overloaded: false,
         x: None,
+        cast: false,
     });
     g.run_pending();
     g.sba();
@@ -1846,6 +1847,7 @@ fn fire_card(g: &mut Game, idx: u16, k: usize, src: Option<u32>) {
         kicked: false,
         overloaded: false,
         x: None,
+        cast: false,
     });
     g.run_pending();
     g.sba();
@@ -6996,4 +6998,265 @@ fn super_suit_untaps_the_creature_it_is_attached_to() {
     let suit = put(&mut g, 0, 0);
     assert_eq!(perm(&g, suit).attached, Some(a));
     assert!(!perm(&g, a).tapped);
+}
+
+// ------------------------------------------------------------ third card audit (batches 0, 2, 5)
+
+/// Surveillance Room: "{1}, {T}: Add one mana of any color". With one other mana it pays a
+/// coloured pip nothing else makes - the spell is cast - and two lands still make one mana.
+#[test]
+fn surveillance_room_casts_a_spell_of_a_colour_no_other_source_makes() {
+    let db = db();
+    let d = prep(&[
+        db.get("Surveillance Room").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+        card("Ghoul", "{1}{B}", "Creature — Zombie", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let room = put(&mut g, 0, 0);
+    let mountain = put(&mut g, 0, 1);
+    assert_eq!(g.mana_available(0), 2, "two lands: two mana, not three");
+    g.players[0].hand = vec![3];
+    assert!(
+        !g.cast(0, Src::Hand(0), CastOpts::default()),
+        "{{1}}{{B}} would need three mana through the filter"
+    );
+    g.players[0].hand = vec![2];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()), "{{B}}");
+    assert!(perm(&g, room).tapped && perm(&g, mountain).tapped);
+    assert_eq!(g.mana_available(0), 0);
+    assert_eq!(g.players[0].pool, 0, "nothing floats");
+    // The bot does it on its own in its main phase.
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    g.players[0].hand = vec![2];
+    ai::main_phase(&mut g, 0, true);
+    assert!(
+        g.perms.iter().any(|x| x.ctrl == 0 && x.is_creature()),
+        "the Rat is cast through the filter"
+    );
+}
+
+/// Undercover Skrull: with two creature cards in the graveyard it "is all creature types".
+#[test]
+fn undercover_skrull_is_all_creature_types_with_two_creatures_in_the_graveyard() {
+    let db = db();
+    let d = prep(&[
+        db.get("Undercover Skrull").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let s = put(&mut g, 0, 0);
+    let base = perm(&g, s).p;
+    assert!(!perm(&g, s).subtypes.iter().any(|t| t == "dwarf"));
+    g.players[0].graveyard = vec![1, 1];
+    g.recalc();
+    assert_eq!(perm(&g, s).p, base + 2);
+    for t in ["dwarf", "hero", "villain", "elf"] {
+        assert!(perm(&g, s).subtypes.iter().any(|x| x == t), "is a {}", t);
+    }
+    // The graveyard empties: only its printed types again.
+    g.players[0].graveyard.clear();
+    g.recalc();
+    assert_eq!(perm(&g, s).p, base);
+    assert!(!perm(&g, s).subtypes.iter().any(|t| t == "dwarf"));
+    assert!(perm(&g, s).subtypes.iter().any(|t| t == "skrull"));
+}
+
+/// Fin Fang Foom: "an instant or sorcery spell that targets an artifact or land" is about
+/// what the spell targets as cast - Disenchant aimed at an enchantment isn't one.
+#[test]
+fn fin_fang_foom_needs_a_spell_that_really_targets_an_artifact_or_land() {
+    let db = db();
+    let d0 = prep_db(&db, &["Fin Fang Foom", "Disenchant", "Plains"]);
+    let d1 = prep(&[
+        card("Banner", "{1}", "Enchantment", "", None),
+        card("Relic", "{1}", "Artifact", "", None),
+    ]);
+    let mut g = game(&[&d0, &d1]);
+    g.active = 0;
+    let foom = put(&mut g, 0, 0);
+    lands(&mut g, 0, 4, 'W');
+    let banner = put(&mut g, 1, 0);
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(banner).is_none(), "the enchantment is destroyed");
+    assert_eq!(perm(&g, foom).counters, 0, "an enchantment: no trigger");
+    let relic = put(&mut g, 1, 1);
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.idx(relic).is_none());
+    assert_eq!(perm(&g, foom).counters, 2, "an artifact: two counters");
+}
+
+/// Gnarlback Rhino: "a spell that targets Gnarlback Rhino" is that very creature, not any
+/// creature its controller controls.
+#[test]
+fn gnarlback_rhino_draws_only_for_spells_that_target_it() {
+    let db = db();
+    let d = prep_db(&db, &["Gnarlback Rhino", "Giant Growth", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let rhino = put(&mut g, 0, 0);
+    let other = token(&mut g, 0, 2);
+    lands(&mut g, 0, 2, 'G');
+    g.players[0].hand = vec![1];
+    g.focus = Some(other);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(perm(&g, other).p, 5, "Giant Growth on the token");
+    assert_eq!(g.players[0].hand.len(), 0, "another creature: no card");
+    g.players[0].hand = vec![1];
+    g.focus = Some(rhino);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert_eq!(perm(&g, rhino).p, 7);
+    assert_eq!(g.players[0].hand.len(), 1, "the Rhino itself: draw a card");
+}
+
+/// Speedball: "whenever a player casts a spell that targets Speedball, he gets +2/+2" - any
+/// player's spell, only when Speedball is a target, and before the spell resolves.
+#[test]
+fn speedball_grows_when_a_spell_targets_him() {
+    let db = db();
+    let d0 = prep_db(&db, &["Speedball, New Warrior", "Giant Growth", "Forest"]);
+    let d1 = prep_db(&db, &["Last Gasp", "Swamp"]);
+    let c = compile(db.get("Speedball, New Warrior").unwrap());
+    assert!(
+        c.abilities.iter().any(
+            |a| matches!(&a.trig, Trig::Event(Ev::Cast, f) if f.targets != 0 && f.yours.is_none())
+        ),
+        "a cast trigger with a target filter, for any player's spell"
+    );
+    let mut g = game(&[&d0, &d1]);
+    g.active = 0;
+    let ball = put(&mut g, 0, 0);
+    let other = token(&mut g, 0, 3);
+    lands(&mut g, 0, 1, 'G');
+    lands(&mut g, 1, 2, 'B');
+    // His controller's Giant Growth on another creature: nothing.
+    g.players[0].hand = vec![1];
+    g.focus = Some(other);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert_eq!(perm(&g, other).p, 6);
+    assert_eq!(perm(&g, ball).p, 2, "not targeted: no +2/+2");
+    // An opponent's Last Gasp (-3/-3) on him: +2/+2 first, a 1/1 survives.
+    g.players[1].hand = vec![0];
+    g.focus = Some(ball);
+    assert!(g.cast(1, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert_eq!(
+        (perm(&g, ball).p, perm(&g, ball).t),
+        (1, 1),
+        "+2/+2, then -3/-3"
+    );
+}
+
+/// "A spell that targets a creature you control" (Colleen Wing) and "... an opponent or a
+/// creature an opponent controls" (Danitha, Spear of Agony) look at the real target:
+/// Lightning Strike ("any target") aimed at an opposing creature is the second, not the first.
+#[test]
+fn spell_target_triggers_look_at_the_actual_target() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Colleen Wing, Street Samurai",
+            "Danitha, Spear of Agony",
+            "Lightning Strike",
+            "Mountain",
+            "Giant Growth",
+            "Visions of Villainy",
+            "Storm, Windrider",
+            "Forest",
+            "Swamp",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let colleen = put(&mut g, 0, 0);
+    let danitha = put(&mut g, 0, 1);
+    let storm = put(&mut g, 0, 6);
+    lands(&mut g, 0, 8, 'R');
+    let ogre = token(&mut g, 1, 3);
+    g.players[0].hand = vec![2];
+    g.focus = Some(ogre);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert!(g.idx(ogre).is_none(), "3 damage to the opposing 3/3");
+    assert_eq!(perm(&g, colleen).counters, 0, "not a creature you control");
+    assert_eq!(
+        perm(&g, danitha).counters,
+        1,
+        "a creature an opponent controls"
+    );
+    // Giant Growth on Colleen: hers, not Danitha's; Storm gives the target flying.
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    lands(&mut g, 0, 1, 'G');
+    lands(&mut g, 0, 3, 'B');
+    let d2 = perm(&g, danitha).counters;
+    g.players[0].hand = vec![4];
+    g.focus = Some(colleen);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert_eq!(perm(&g, colleen).counters, 1);
+    assert_eq!(perm(&g, danitha).counters, d2);
+    assert!(
+        perm(&g, colleen).has(FLYING),
+        "Storm: the target gains flying"
+    );
+    assert!(!perm(&g, danitha).has(FLYING), "only the target");
+    // A spell with no target: nobody triggers.
+    g.players[0].hand = vec![5];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(perm(&g, colleen).counters, 1);
+    assert_eq!(perm(&g, danitha).counters, d2);
+    let _ = storm;
+}
+
+/// An Aura spell targets the creature it will enchant (Colleen Wing: a creature you control).
+#[test]
+fn an_aura_spell_targets_the_creature_it_enchants() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "Colleen Wing, Street Samurai",
+            "Ordeal of Nylea",
+            "Pacifism",
+            "Forest",
+            "Plains",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let colleen = put(&mut g, 0, 0);
+    let ogre = token(&mut g, 1, 3);
+    lands(&mut g, 0, 2, 'G');
+    lands(&mut g, 0, 2, 'W');
+    g.players[0].hand = vec![2];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(
+        g.perms.iter().any(|x| x.attached == Some(ogre)),
+        "Pacifism on the opposing creature"
+    );
+    assert_eq!(perm(&g, colleen).counters, 0, "an opponent's creature");
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.perms.iter().any(|x| x.attached == Some(colleen)));
+    assert_eq!(perm(&g, colleen).counters, 1, "her own creature");
+}
+
+/// Stolen Stark Tech has flash (official text).
+#[test]
+fn stolen_stark_tech_has_flash() {
+    let db = db();
+    let c = compile(db.get("Stolen Stark Tech").unwrap());
+    assert!(c.kw & FLASH != 0);
 }

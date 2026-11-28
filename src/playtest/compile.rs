@@ -290,6 +290,12 @@ pub const TGT_OPPONENT: u8 = 1 << 2;
 pub const TGT_ARTIFACT_LAND: u8 = 1 << 3;
 /// In a trigger's filter: "an Equipment spell or a spell that targets ...".
 pub const TGT_OR_EQUIPMENT: u8 = 1 << 4;
+/// In a trigger's filter: "a spell that targets ~" - this very permanent (Gnarlback Rhino,
+/// Speedball).
+pub const TGT_SELF: u8 = 1 << 5;
+/// In a trigger's filter: "that targets <something the engine can't read>": no spell matches
+/// (an unread qualifier never makes a trigger fire more often).
+pub const TGT_UNREAD: u8 = 1 << 6;
 
 /// What a spell's own abilities target (`TGT_*` bits): helpful effects on a creature of
 /// yours, harmful ones on an opponent's creature, an opponent, an artifact or land.
@@ -1124,6 +1130,8 @@ pub struct SimCard {
     pub improvise: bool,
     pub living_weapon: bool,
     pub changeling: bool,
+    /// "... and is all creature types" while a condition holds (Undercover Skrull).
+    pub all_types_static: bool,
     pub cant_be_countered: bool,
     /// An Aura that hurts what it enchants (cast on an opponent's creature).
     pub harmful_aura: bool,
@@ -2101,6 +2109,12 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                         Ev::Bounced
                     } else if t.contains(" blocks") {
                         Ev::Blocks
+                    } else if t.contains("casts a spell that targets ~")
+                        || t.contains("cast a spell that targets ~")
+                    {
+                        // "Whenever a player casts a spell that targets ~" (Speedball): spells
+                        // only, as they are cast - not abilities ("becomes the target").
+                        Ev::Cast
                     } else if t.contains("targets ~") {
                         Ev::Targeted
                     } else if t.contains(" casts") || t.contains(" cast ") {
@@ -2158,35 +2172,53 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             // Ms. Marvel), "an Equipment spell or a spell that targets ..." (Danitha): tricks,
             // Auras and Equipment - noncreature spells - not creature spells. A spell of a
             // named kind ("an instant or sorcery spell that targets") keeps its kind.
-            if matches!(e, Event::Cast(w)
-                if w.split(" that target").next().is_some_and(|h| h.ends_with("a spell"))
-                    && w.contains("that targets"))
-            {
-                f.types = 0;
-                f.not_types = T_CREATURE | T_LAND;
-                f.subtype = None;
-                f.restr = Default::default();
+            // ("Whenever a player casts a spell that targets ~", Speedball, reads as
+            // `Event::Other`.)
+            let cast_what: Option<&str> = match e {
+                Event::Cast(w) => Some(w.as_str()),
+                Event::Other(w) if kind == Ev::Cast => Some(w.as_str()),
+                _ => None,
+            };
+            if cast_what.is_some_and(|w| {
+                w.split(" that target")
+                    .next()
+                    .is_some_and(|h| h.ends_with("a spell"))
+                    && w.contains("that targets")
+            }) {
+                let yours = f.yours;
+                f = Filter {
+                    yours,
+                    not_types: T_CREATURE | T_LAND,
+                    ..Default::default()
+                };
             }
-            // ... and what it must target.
-            if let Event::Cast(w) = e {
+            // ... and what it must target, compared with what the spell really targets as
+            // it is cast (`Game::spell_target_chosen`).
+            if let Some(w) = cast_what {
                 if let Some(what) = w.split("that targets ").nth(1) {
                     let mut t = 0;
-                    if what.contains("you control") || what.starts_with('~') {
-                        t |= TGT_OWN_CREATURE;
+                    if what.starts_with('~') {
+                        // This very permanent, not any creature of its controller's.
+                        t |= TGT_SELF;
+                    } else {
+                        if what.contains("you control") {
+                            t |= TGT_OWN_CREATURE;
+                        }
+                        if what.contains("opponent") {
+                            t |= TGT_OPP_CREATURE | TGT_OPPONENT;
+                        }
+                        if what.contains("artifact") || what.contains("land") {
+                            t |= TGT_ARTIFACT_LAND;
+                        }
+                        // "That targets one or more creatures" (Storm, Windrider): anyone's.
+                        if t == 0 && what.contains("creature") {
+                            t |= TGT_OWN_CREATURE | TGT_OPP_CREATURE;
+                        }
                     }
-                    if what.contains("opponent") {
-                        t |= TGT_OPP_CREATURE | TGT_OPPONENT;
-                    }
-                    if what.contains("artifact") || what.contains("land") {
-                        t |= TGT_ARTIFACT_LAND;
-                    }
-                    // "That targets one or more creatures" (Storm, Windrider): anyone's. Left
-                    // at no bits, the filter was off and every noncreature spell - a draw
-                    // spell with no target at all - set the trigger off.
-                    if t & (TGT_OWN_CREATURE | TGT_OPP_CREATURE | TGT_ARTIFACT_LAND) == 0
-                        && what.contains("creature")
-                    {
-                        t |= TGT_OWN_CREATURE | TGT_OPP_CREATURE;
+                    // Something else: no spell matches (left at no bits the filter was off
+                    // and every spell set the trigger off).
+                    if t == 0 {
+                        t = TGT_UNREAD;
                     }
                     if w.starts_with("an equipment spell or") {
                         t |= TGT_OR_EQUIPMENT;
@@ -3948,6 +3980,7 @@ pub fn compile(card: &Card) -> SimCard {
         improvise: kw_words.iter().any(|k| k == "improvise"),
         living_weapon: kw_words.iter().any(|k| k == "living weapon"),
         changeling: kw_words.iter().any(|k| k == "changeling"),
+        all_types_static: own_text.contains("is all creature types"),
         cant_be_countered: own_text.contains("~ can't be countered"),
         harmful_aura,
         chapters,

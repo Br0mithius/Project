@@ -313,6 +313,7 @@ impl<'a> Game<'a> {
                         kicked: false,
                         overloaded: false,
                         x: None,
+                        cast: false,
                     });
                 }
             }
@@ -766,6 +767,7 @@ impl<'a> Game<'a> {
                         kicked: false,
                         overloaded: false,
                         x: None,
+                        cast: false,
                     });
                 }
             }

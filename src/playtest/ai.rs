@@ -4492,6 +4492,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                     kicked: false,
                     overloaded: false,
                     x: None,
+                    cast: false,
                 });
             }
         }

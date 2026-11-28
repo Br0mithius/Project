@@ -1207,6 +1207,16 @@ impl<'a> Game<'a> {
                 self.players[p].inst_sorc_this_turn.saturating_add(1);
         }
         self.on_cast(p, &probe_card);
+        // For "whenever you cast a spell that targets ...": on while the spell's own
+        // abilities choose its targets (`spell_target_chosen`).
+        let watch = self.ext.cast_probe.clone().map(|probe| CastWatch {
+            caster: p as u8,
+            card: (list as u8, idx),
+            back,
+            probe,
+            live: false,
+            fired: Vec::new(),
+        });
         if self.auditing() {
             self.audit_cast(p, src, (list, idx), back, &cost, x, opts, commander_slot);
         }
@@ -1304,6 +1314,13 @@ impl<'a> Game<'a> {
                     // An opponent's creature with ward: unpaid, the Aura spell is countered
                     // (it has nothing to enchant and goes to the graveyard).
                     let warded = self.perms[t].ctrl as usize != p && !self.pay_ward(p, t);
+                    // An Aura spell targets what it will enchant.
+                    let outer = std::mem::replace(
+                        &mut self.ext.cast_watch,
+                        watch.clone().map(|w| CastWatch { live: true, ..w }),
+                    );
+                    self.spell_target_chosen(Some(tid), None);
+                    self.ext.cast_watch = outer;
                     if warded {
                         self.note(|| "  (the target's ward isn't paid: it's countered)".into());
                     } else if let Some(j) = self.idx(id) {
@@ -1360,11 +1377,14 @@ impl<'a> Game<'a> {
                         kicked,
                         overloaded,
                         x,
+                        cast: true,
                     });
                 }
             }
             self.ext.must_target = must_target;
+            let outer_watch = std::mem::replace(&mut self.ext.cast_watch, watch);
             self.run_pending();
+            self.ext.cast_watch = outer_watch;
             self.ext.must_target = 0;
             if c.is(T_INSTANT | T_SORCERY) || back {
                 self.players[p].last_spell = Some(((list as u8, idx), back));
@@ -1950,6 +1970,7 @@ impl<'a> Game<'a> {
             kicked: false,
             overloaded: false,
             x: x_paid,
+            cast: false,
         });
         self.run_pending();
         self.sba();
@@ -2065,6 +2086,7 @@ impl<'a> Game<'a> {
             kicked: false,
             overloaded: false,
             x: None,
+            cast: false,
         });
         self.run_pending();
         self.sba();
@@ -2151,6 +2173,7 @@ impl<'a> Game<'a> {
             kicked: false,
             overloaded: false,
             x: None,
+            cast: false,
         });
         self.run_pending();
         self.sba();
@@ -2441,6 +2464,7 @@ impl<'a> Game<'a> {
                             kicked: false,
                             overloaded: false,
                             x: None,
+                            cast: false,
                         });
                     }
                 }
@@ -2479,6 +2503,7 @@ impl<'a> Game<'a> {
                                 kicked: false,
                                 overloaded: false,
                                 x: None,
+                                cast: false,
                             });
                         }
                     }
