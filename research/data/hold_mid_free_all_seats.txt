@@ -1,0 +1,4 @@
+## all hold (free attacks allowed); seat stops holding | Brom - Thanos Session 5 (tested): flags 64: -0.38 ± 0.34 win-rate pts  (table -1.21 ± 0.46, peer field -0.03 ± 0.45)
+## all hold (free attacks allowed); seat stops holding | Will: flags 64: -0.09 ± 0.24 win-rate pts  (table -0.38 ± 0.39, peer field +0.03 ± 0.30)
+## all hold (free attacks allowed); seat stops holding | Drake: flags 64: -0.61 ± 0.15 win-rate pts  (table -1.90 ± 0.35, peer field -0.05 ± 0.16)
+## all hold (free attacks allowed); seat stops holding | JD: flags 64: +0.11 ± 0.27 win-rate pts  (table -0.81 ± 0.40, peer field +0.51 ± 0.35)

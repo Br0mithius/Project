@@ -199,3 +199,10 @@ reviewer agents, 76 findings; two fixer agents fixed 67 (suite 274 -> 343 tests)
 fixed (Shuri, Absorbing Man, Fishing Pole, Theorist's Proxy, Ronin, Captain America's
 player hexproof, Wiccan's bot choice), 2 not engine bugs (Surveillance Room already
 worked; Affectionate Indrik is a bot choice).
+- Stability of the hold rule. With every seat holding, a seat that stopped holding GAINED:
+  Thanos +1.81 ± 0.35, Will +1.00 ± 0.25 (Drake -0.35, JD -0.15): holding only pays when
+  the table punishes tapped creatures. Refinement: a small attack the defender cannot
+  block at all still goes. With every seat on the refined rule, stopping no longer gains
+  (10,000 paired games): Thanos -0.38 ± 0.34, Will -0.09 ± 0.24, Drake -0.61 ± 0.15, JD
+  +0.11 ± 0.27. The refined rule is the default. Lesson for every bot rule from here: test
+  it one seat at a time AND with every seat using it.

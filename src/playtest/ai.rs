@@ -1479,6 +1479,11 @@ pub mod exp {
     /// +1.50 +/- 0.25, Drake +1.32 +/- 0.16, JD +1.27 +/- 0.29, Andrew +1.04 +/- 0.14. Rounds
     /// 4-10 and up to five attackers measure the same; rounds 3-14 or 5-12 and up to two
     /// attackers measure worse (`MSH_HOLD_MID=from,to,most`).
+    /// With every seat holding, a seat that stopped GAINED (Thanos +1.81, Will +1.00): when
+    /// nobody swings back, a small attack is free. So an attack nothing of the defender's
+    /// can block still goes (`MSH_HOLD_FREE`). With that, and every seat holding, a seat
+    /// that stops no longer gains (10,000 paired games: Thanos -0.38 +/- 0.34, Will -0.09,
+    /// Drake -0.61 +/- 0.15, JD +0.11 +/- 0.27): the rule is stable.
     pub const NO_HOLD_MID: u32 = 64;
 }
 
@@ -6444,6 +6449,26 @@ pub fn declare_attacks_why(
         dmg >= g.players[o].life
     });
     if kills {
+        return out;
+    }
+    // An attack nothing can block is free damage (`MSH_HOLD_FREE=0` turns this off).
+    static FREE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let free_ok = *FREE.get_or_init(|| std::env::var("MSH_HOLD_FREE").map_or(true, |v| v != "0"));
+    let open = |id: u32, d: Def| {
+        let (Some(i), Some(o)) = (g.idx(id), g.def_player(d)) else {
+            return false;
+        };
+        !g.perms
+            .iter()
+            .enumerate()
+            .any(|(b, x)| x.ctrl as usize == o && x.is_creature() && !x.tapped && g.can_block(b, i))
+    };
+    if free_ok
+        && out
+            .iter()
+            .filter(|(id, _)| taps(*id))
+            .all(|(id, d)| open(*id, *d))
+    {
         return out;
     }
     if let Some(wh) = why.as_deref_mut() {
