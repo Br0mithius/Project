@@ -2523,7 +2523,9 @@ impl<'a> Game<'a> {
         self.phase_triggers(a, Phase::Upkeep);
         // (A player who lost in their upkeep takes no further actions - CR 800.4a.)
         if !first_turn && self.players[a].alive {
+            self.ext.draw_step_first = true;
             self.draw(a, 1);
+            self.ext.draw_step_first = false;
         }
         self.run_pending();
         self.sba();

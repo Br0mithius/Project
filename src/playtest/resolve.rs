@@ -281,10 +281,46 @@ impl<'a> Game<'a> {
                     a.effects
                         .iter()
                         .any(|e| matches!(e, Effect::Doubler(k) if k.contains(kind)))
+                        // "Artifact tokens ... that many Dragons instead" (Draconic Visitor)
+                        // replaces tokens one for one: `artifact_tokens_become`.
+                        && !a.text.contains("artifact tokens would be created")
                         && (!a.text.contains("equipped creature")
                             || src.is_some() && x.attached == src)
                 })
         })
+    }
+
+    /// "If one or more artifact tokens would be created under your control, that many 5/5
+    /// red Dragon creature tokens with flying are created instead" (Draconic Visitor): the
+    /// creature token player `p`'s artifact tokens become.
+    pub fn artifact_tokens_become(&self, p: usize) -> Option<(i32, i32, u32, Vec<String>)> {
+        self.perms
+            .iter()
+            .filter(|x| x.ctrl as usize == p)
+            .find_map(|x| {
+                self.abilities_of(x).iter().find_map(|a| {
+                    if a.trig != Trig::Static
+                        || !a
+                            .text
+                            .contains("artifact tokens would be created under your control")
+                    {
+                        return None;
+                    }
+                    let rest = a.text.split("that many ").nth(1)?;
+                    let rest = rest.split(" are created instead").next()?;
+                    let (pt, rest) = rest.split_once(' ')?;
+                    let (pw, t) = pt.split_once('/')?;
+                    let (kinds, tail) = rest.split_once(" creature token")?;
+                    let kind = kinds.rsplit(' ').next()?;
+                    let kw = if tail.contains("flying") { FLYING } else { 0 };
+                    Some((
+                        pw.parse().ok()?,
+                        t.parse().ok()?,
+                        kw,
+                        vec![kind.to_string()],
+                    ))
+                })
+            })
     }
 
     /// X and "that many" values, counted from the board where the text says how.
@@ -1973,6 +2009,13 @@ impl<'a> Game<'a> {
 
     /// `make_item`, entering tapped or not; returns the token's id.
     pub fn make_item_tapped(&mut self, ctrl: usize, kind: &str, tapped: bool) -> u32 {
+        if let Some((p, t, kw, subs)) = self.artifact_tokens_become(ctrl) {
+            let i = self.make_token(ctrl, p, t, kw, subs);
+            self.perms[i].tapped = tapped;
+            let id = self.perms[i].id;
+            self.after_enter(i);
+            return id;
+        }
         let tok = match kind {
             "treasure" | "powerstone" | "gold" => Tok::Treasure,
             "food" => Tok::Food,
@@ -3621,7 +3664,14 @@ impl<'a> Game<'a> {
                     .card_ref
                     .filter(|_| text.contains('"') || text.contains(", a legendary "))
                     .filter(|&r| self.card(r).token.is_some());
+                let dragons = self.artifact_tokens_become(me).filter(|_| artifact);
                 for _ in 0..n.min(20) {
+                    if let Some((p, t, kw, subs)) = dragons.clone() {
+                        let i = self.make_token(me, p, t, kw, subs);
+                        made.push(self.perms[i].id);
+                        self.after_enter(i);
+                        continue;
+                    }
                     let i = self.make_token(me, *power, *toughness, kw, subs.clone());
                     if artifact {
                         self.perms[i].types |= T_ARTIFACT;

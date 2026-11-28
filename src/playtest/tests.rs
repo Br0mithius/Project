@@ -6291,3 +6291,46 @@ fn hoarding_dragon_exiles_the_artifact_until_it_dies() {
     assert_eq!(g.players[0].hand, vec![1], "the Dragon's card comes back");
     assert_eq!(g.players[0].exile, vec![2], "the other exiled card stays");
 }
+
+/// Draconic Visitor: artifact tokens become 5/5 flying Dragons one for one; other tokens
+/// are created as usual (it was read as a doubler of every token).
+#[test]
+fn draconic_visitor_turns_artifact_tokens_into_dragons() {
+    let db = db();
+    let d = prep_db(&db, &["Draconic Visitor", "Dragon Fodder"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    fire_card(&mut g, 1, 0, None);
+    let goblins = g.perms.iter().filter(|x| x.tok != Tok::None).count();
+    assert_eq!(goblins, 2, "Goblin tokens are not doubled");
+    let id = g.make_item(0, "treasure");
+    g.recalc();
+    let x = perm(&g, id);
+    assert!(x.is_creature() && x.has(FLYING), "a Dragon, not a Treasure");
+    assert_eq!((x.p, x.t), (5, 5));
+    assert_eq!(x.subtypes, vec!["dragon".to_string()]);
+    // The opponent's Treasures are still Treasures.
+    let id = g.make_item(1, "treasure");
+    assert!(!perm(&g, id).is_creature());
+}
+
+/// Bard, King of Dale: every draw but the first of your own draw step is two cards.
+#[test]
+fn bard_doubles_draws_except_the_draw_step() {
+    let db = db();
+    let d = prep_db(&db, &["Mountain", "Bard, King of Dale"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 1);
+    g.draw(0, 1);
+    assert_eq!(g.players[0].hand.len(), 2, "a draw is two cards");
+    g.draw(1, 1);
+    assert_eq!(g.players[1].hand.len(), 1, "not for the opponent");
+    g.players[0].hand.clear();
+    let before = g.players[0].library.len();
+    g.take_turn(0, false);
+    assert_eq!(
+        before - g.players[0].library.len(),
+        1,
+        "the draw step's card is one card"
+    );
+}

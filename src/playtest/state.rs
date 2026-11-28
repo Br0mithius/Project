@@ -472,6 +472,9 @@ pub struct GameExtra {
     pub cast_probe: Option<Perm>,
     /// An impulse-drawn card was cast instead of the alternative ("if you don't, ...").
     pub impulse_cast: bool,
+    /// The next card drawn is the first one of its player's draw step (Bard, King of Dale
+    /// leaves that one alone).
+    pub draw_step_first: bool,
     /// Permanents the last bounce effect returned to hand ("for each creature returned to
     /// your hand this way").
     pub last_bounced: i32,
@@ -1958,7 +1961,32 @@ impl<'a> Game<'a> {
     // ------------------------------------------------------------ zones
 
     pub fn draw(&mut self, p: usize, n: u32) {
+        // "If you would draw a card except the first one you draw in each of your draw
+        // steps, draw two cards instead" (Bard, King of Dale): a replacement applies once
+        // to each draw, so two of them make four.
+        let twice = self
+            .perms
+            .iter()
+            .filter(|x| {
+                x.ctrl as usize == p
+                    && self.abilities_of(x).iter().any(|a| {
+                        a.trig == Trig::Static
+                            && a.text
+                                .contains("if you would draw a card except the first one")
+                            && a.text.contains("draw two cards instead")
+                    })
+            })
+            .count()
+            .min(4) as u32;
+        let mut total = 0;
         for _ in 0..n {
+            total += if std::mem::take(&mut self.ext.draw_step_first) {
+                1
+            } else {
+                1 << twice
+            };
+        }
+        for _ in 0..total {
             match self.players[p].library.pop() {
                 Some(c) => {
                     self.players[p].hand.push(c);
