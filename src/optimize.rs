@@ -771,40 +771,7 @@ const NOMINATE_SE: f32 = 0.5;
 /// on the Thanos Session 5 list this found +1.3 points the search had missed.
 /// None when cancelled; a report with no steps when nothing was nominated or held.
 #[allow(clippy::too_many_arguments)]
-/// [`value_refine_once`] repeated (up to three rounds) while a round still changes the deck:
-/// a swap frees the next-best bench card to be paired with the next-weakest deck card.
 pub fn value_refine(
-    deck: &Deck,
-    db: &CardDb,
-    coll: &Collection,
-    rules: &Rules,
-    opp: &Opponents,
-    games: u32,
-    progress: &Progress,
-) -> Option<OptReport> {
-    let mut total = value_refine_once(deck, db, coll, rules, opp, games, progress)?;
-    for _ in 0..2 {
-        if total.best == total.start && !total.steps.is_empty() || total.steps.is_empty() {
-            break;
-        }
-        let Some(next) = value_refine_once(&total.best, db, coll, rules, opp, games, progress)
-        else {
-            break;
-        };
-        total.notes.extend(next.notes);
-        total.seconds += next.seconds;
-        if next.best == next.start {
-            break;
-        }
-        total.best = next.best;
-        total.steps.extend(next.steps);
-        total.final_gain = None;
-    }
-    total.start = deck.clone();
-    Some(total)
-}
-
-fn value_refine_once(
     deck: &Deck,
     db: &CardDb,
     coll: &Collection,

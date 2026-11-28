@@ -55,7 +55,10 @@ fn main() {
             &coll,
             &rules,
             &referee,
-            6000,
+            std::env::var("MSH_REFINE_GAMES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(6000),
             &Progress::new(),
         )
         .filter(|r| !r.steps.is_empty());
