@@ -408,6 +408,22 @@ pub fn review(
     playouts: u32,
     prog: &ReviewProgress,
 ) -> Vec<Decision> {
+    review_with(rec, db, playouts, None, None, prog)
+}
+
+/// `review` at scale. `sample` (count, seed): only that many decision points, picked at
+/// random. `confirm` (gap, play-outs): a point where some choice beats the bot's by `gap`
+/// points or more on the first `playouts` is played out that many more times on other luck,
+/// and those results replace the first ones (a reported gap isn't the screen's own
+/// selection); the other points are dropped.
+pub fn review_with(
+    rec: &GameRecord,
+    db: &CardDb,
+    playouts: u32,
+    sample: Option<(usize, u64)>,
+    confirm: Option<(f32, u32)>,
+    prog: &ReviewProgress,
+) -> Vec<Decision> {
     use std::sync::atomic::Ordering::Relaxed;
     let report = &rec.report;
     let seat = report.setup.seat;
@@ -438,6 +454,12 @@ pub fn review(
         if opts.len() >= 2 {
             points.push((k, kind, opts));
         }
+    }
+    if let Some((count, seed)) = sample {
+        let mut rng = crate::analysis::Rng::new(seed);
+        rng.shuffle(&mut points);
+        points.truncate(count);
+        points.sort_by_key(|p| p.0);
     }
     let jobs: usize = points.iter().map(|p| p.2.len()).sum();
     prog.total.store(jobs * (1 + playouts as usize), Relaxed);
@@ -471,36 +493,49 @@ pub fn review(
                 .unwrap_or(bot_idx)
         };
         // Fresh luck, the same for every choice.
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let wins: Vec<Vec<bool>> = std::thread::scope(|s| {
-            let hs: Vec<_> = (0..threads)
-                .map(|_| {
-                    s.spawn(|| {
-                        let mut r: Vec<(usize, Vec<bool>)> = Vec::new();
-                        loop {
-                            let i = next.fetch_add(1, Relaxed);
-                            if i >= playouts as usize || prog.cancel.load(Relaxed) {
-                                break;
+        let play = |count: u32, salt: u64| -> Vec<Vec<bool>> {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            std::thread::scope(|s| {
+                let hs: Vec<_> = (0..threads)
+                    .map(|_| {
+                        s.spawn(|| {
+                            let mut r: Vec<(usize, Vec<bool>)> = Vec::new();
+                            loop {
+                                let i = next.fetch_add(1, Relaxed);
+                                if i >= count as usize || prog.cancel.load(Relaxed) {
+                                    break;
+                                }
+                                let seed =
+                                    0x5EED_0000 + salt + i as u64 * 7919 + k as u64 * 104_729;
+                                let row = opts
+                                    .iter()
+                                    .map(|o| {
+                                        run(report, db, line(&o.1), Some((k, seed))).winner == seat
+                                    })
+                                    .collect();
+                                prog.done.fetch_add(opts.len(), Relaxed);
+                                r.push((i, row));
                             }
-                            let seed = 0x5EED_0000 + i as u64 * 7919 + k as u64 * 104_729;
-                            let row = opts
-                                .iter()
-                                .map(|o| {
-                                    run(report, db, line(&o.1), Some((k, seed))).winner == seat
-                                })
-                                .collect();
-                            prog.done.fetch_add(opts.len(), Relaxed);
-                            r.push((i, row));
-                        }
-                        r
+                            r
+                        })
                     })
-                })
-                .collect();
-            let mut all: Vec<(usize, Vec<bool>)> =
-                hs.into_iter().flat_map(|h| h.join().unwrap()).collect();
-            all.sort_by_key(|x| x.0);
-            all.into_iter().map(|x| x.1).collect()
-        });
+                    .collect();
+                let mut all: Vec<(usize, Vec<bool>)> =
+                    hs.into_iter().flat_map(|h| h.join().unwrap()).collect();
+                all.sort_by_key(|x| x.0);
+                all.into_iter().map(|x| x.1).collect()
+            })
+        };
+        let mut wins = play(playouts, 0);
+        if let Some((gap, more)) = confirm {
+            let n = wins.len().max(1) as f32;
+            let of = |i: usize| wins.iter().filter(|r| r[i]).count() as f32 / n;
+            let best = (0..opts.len()).map(of).fold(0.0, f32::max);
+            if 100.0 * (best - of(bot_idx)) < gap {
+                continue;
+            }
+            wins = play(more, 0x00C0_FFEE_0000);
+        }
         let count = |i: usize| wins.iter().filter(|r| r[i]).count() as u32;
         let choices: Vec<Choice> = opts
             .iter()
