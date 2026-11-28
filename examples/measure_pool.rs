@@ -1,6 +1,6 @@
 //! Measures every spell of a deck and every owned spell outside it (each played in the
 //! deck), as the app's "measure" does (`simvalues::PoolJob`): paired games against the
-//! real table (30%) and the peer field (70%). Rows are added to
+//! real table and the peer field (half each). Rows are added to
 //! `<out dir>/sim_card_values.tsv`.
 //!
 //! `cargo run --release --example measure_pool -- <data dir> <deck file> <games> <out dir>`

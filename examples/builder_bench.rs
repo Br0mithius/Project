@@ -87,7 +87,7 @@ fn main() {
     let n = base.len();
     let mean = (0..n).map(|i| res[i].0).sum::<f32>() / n as f32;
     println!(
-        "panel: {} decks, {} games each against the table (30%) and the peer field (70%): mean win rate {:.2}%",
+        "panel: {} decks, {} games each against the table and the peer field (half each): mean win rate {:.2}%",
         n,
         games,
         mean * 100.0

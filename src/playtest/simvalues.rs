@@ -436,7 +436,7 @@ pub struct PoolJob {
     pub deck: Prepared,
     pub extra: Vec<Card>,
     pub opponents: Vec<Prepared>,
-    /// The real next-table decks (30% of each value, as the optimiser scores decks);
+    /// The real next-table decks (half of each value, as the optimiser scores decks);
     /// empty when no table is set up.
     pub table: Vec<Prepared>,
     pub league: bool,
@@ -514,7 +514,7 @@ impl PoolJob {
             done,
             cancel,
         );
-        // The same referee as every deck test: the real table 30%, the peer field 70%.
+        // The same referee as every deck test: the real table and the peer field, half each.
         if !self.table.is_empty() && !cancel.load(std::sync::atomic::Ordering::Relaxed) {
             let t = measure(
                 &self.deck_name,

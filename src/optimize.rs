@@ -26,13 +26,11 @@ use crate::playtest::lab::{Measure, play_all};
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
-/// The table's default share of the score; the rest is the peer field (decks about as
-/// strong as the user's). The stand-ins for real opponents are guesses built around their
-/// commanders and trade picks, and even tuned by this optimiser they stay well below a
-/// tuned deck (it won about 49% of four-player games against them, 35% against the peer
-/// field), so they are the smaller share: a deck is judged mostly by opposition as good
-/// as itself, where answers matter.
-pub const DEFAULT_TABLE_WEIGHT: f32 = 0.3;
+/// The table's default share of the score; the rest is the peer field (built decks about
+/// as strong as the user's). Half and half, the owner's call: the real league decks are
+/// the opposition that is actually played, so they count as much as the built field.
+/// (It was 0.3 until 2026-11-28.)
+pub const DEFAULT_TABLE_WEIGHT: f32 = 0.5;
 
 /// Who the games are against: the next table's decks (trade picks in) and the simulated
 /// league, weighted. With no table, only the league counts.
@@ -48,8 +46,8 @@ pub struct Opponents {
 pub const REFEREE_VERSION: u32 = 2;
 
 impl Opponents {
-    /// The one standard referee: the data folder's next-table decks (30% of the score) and
-    /// the peer field (70%). Every tool that judges a deck, a card or a builder change uses
+    /// The one standard referee: the data folder's next-table decks (half the score) and
+    /// the peer field (half). Every tool that judges a deck, a card or a builder change uses
     /// this, so the values the builder ranks by and the tests that judge its decks agree.
     pub fn standard(dir: &std::path::Path, db: &CardDb, rules: &Rules) -> Opponents {
         let table = crate::table::Table::load(dir);
