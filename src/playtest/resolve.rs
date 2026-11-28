@@ -4695,6 +4695,13 @@ impl<'a> Game<'a> {
                             }
                             self.recalc();
                         }
+                    } else if text.contains(", exile it, then shuffle") {
+                        // "Search your library for an artifact card, exile it" (Hoarding
+                        // Dragon): the card waits in exile, linked to the source.
+                        self.players[me].exile.push(c);
+                        if let Some(s) = self.src_idx(ctx) {
+                            self.perms[s].exiled_with.push((me as u8, (me as u8, c)));
+                        }
                     } else if text.contains("on top") {
                         self.players[me].library.push(c);
                     } else if text.contains("put that card into your graveyard")
@@ -5692,8 +5699,24 @@ impl<'a> Game<'a> {
                 }
             }
             "returns the exiled card" | "returns an exiled card" => {
-                if let Some(c) = self.players[me].exile.pop() {
-                    self.players[me].hand.push(c);
+                // Only a card the source itself exiled (linked abilities, CR 607): last
+                // known information when the source has died.
+                let held = self
+                    .src_perm(ctx)
+                    .map(|x| x.exiled_with)
+                    .unwrap_or_default();
+                for (owner, r) in held {
+                    let pl = &mut self.players[owner as usize];
+                    if let Some(pos) = pl.exile.iter().position(|&c| c == r.1) {
+                        pl.exile.remove(pos);
+                        pl.hand.push(r.1);
+                        if label == "returns an exiled card" {
+                            break;
+                        }
+                    }
+                }
+                if let Some(s) = self.src_idx(ctx) {
+                    self.perms[s].exiled_with.clear();
                 }
             }
             "recycles a graveyard card" => {

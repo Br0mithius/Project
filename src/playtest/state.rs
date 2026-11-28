@@ -82,6 +82,10 @@ pub struct Perm {
     pub threaten_from: Option<u8>,
     /// Cards exiled "until ~ leaves the battlefield".
     pub holding: Vec<(u8, CardRef)>,
+    /// Cards this permanent exiled for a linked ability to find later ("search your
+    /// library for an artifact card, exile it" ... "put the exiled card into its owner's
+    /// hand", Hoarding Dragon). They stay exiled when it leaves.
+    pub exiled_with: Vec<(u8, CardRef)>,
     pub activations: u8,
     /// A finality counter: if it would die, it's exiled instead.
     pub finality: bool,
@@ -2385,6 +2389,7 @@ impl<'a> Game<'a> {
             loyalty_used: false,
             threaten_from: None,
             holding: Vec::new(),
+            exiled_with: Vec::new(),
             activations: 0,
             finality: false,
             no_abilities: false,
@@ -3086,6 +3091,7 @@ impl<'a> Game<'a> {
             loyalty_used: false,
             threaten_from: None,
             holding: Vec::new(),
+            exiled_with: Vec::new(),
             activations: 0,
             finality: false,
             no_abilities: false,

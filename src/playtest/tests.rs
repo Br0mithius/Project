@@ -6271,3 +6271,23 @@ fn combat_on_your_turn_is_yours_only() {
         .expect("a beginning-of-combat trigger");
     assert!(!phase, "Alien Invasion triggers on every player's combat");
 }
+
+/// Hoarding Dragon: the artifact it finds waits in exile (not in hand), and when the Dragon
+/// dies that card - not whatever was exiled last - goes to its owner's hand.
+#[test]
+fn hoarding_dragon_exiles_the_artifact_until_it_dies() {
+    let db = db();
+    let d = prep_db(&db, &["Hoarding Dragon", "Mind Stone", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![2, 2, 1, 2];
+    let dragon = put(&mut g, 0, 0);
+    assert!(g.players[0].hand.is_empty(), "the artifact is not in hand");
+    assert_eq!(g.players[0].exile, vec![1], "it is exiled");
+    assert_eq!(g.players[0].library.len(), 3);
+    g.players[0].exile.push(2); // something else exiled later
+    g.destroy(g.idx(dragon).unwrap());
+    g.run_pending();
+    g.sba();
+    assert_eq!(g.players[0].hand, vec![1], "the Dragon's card comes back");
+    assert_eq!(g.players[0].exile, vec![2], "the other exiled card stays");
+}
