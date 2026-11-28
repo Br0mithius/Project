@@ -130,3 +130,21 @@ clearly worse at the real table - more than one standard error.)
   -2.45; Mortify for the third Visions -0.78; Iron Man for Panther Pounce -0.43; HULK
   SMASH! for Attercop -0.36; She-Hulk for Doc Samson -0.18 (table -1.17); the two
   Mountains alone -0.05.
+
+## 2026-11-28: bot self-review by brute force (first run)
+
+`examples/bot_regret`: 300 bot-against-bot games (Session 5 Thanos list against the eight
+opponent decks, seats rotated), 8 sampled decisions a game, every option tried with the bot
+playing on; screen 24 play-outs, points with a 15-point gap confirmed on 160 others
+(`research/data/bot_regret_thanos_300.tsv`). 92 of about 2,400 sampled decisions had an
+option clearly better than the bot's (gap >= 10 points and 2 standard errors):
+- attacks: sending everything at one player beat the bot's attack 20 times (mean gap 30),
+  not attacking 8 times (30);
+- main phase: passing first (playing after combat) 20 times (26); another land first 15
+  times (24-41);
+- targets and yes/no choices 26 times.
+One 90-point case checked by hand (game 257, round 8): reproduced, 2 of 60 against 56 of
+60. The bot paid for a commander that got countered with its red sources and could not
+cast Red Hulk; with the other land it did, kept a blocker home, and survived the next
+attack. Positions like this are knife-edge, so single gaps are large; the patterns need
+more games and other decks before any rule changes.

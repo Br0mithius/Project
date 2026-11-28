@@ -1,0 +1,163 @@
+game	seat	round	kind	what	bot_pct	best_pct	gap	se	playouts	bot_turn	best_choice	best_turn
+0	0	8	Attack	Declare attackers	18	92	74	4	160	casts Dáin, Lord of the Iron Hills	everything -> P2 Smaug, Wicked Worm (16 life)	casts Thanos, the Mad Titan; casts Dáin, Lord of the Iron Hills
+2	2	1	MainPhase	Main phase 1	68	71	4	5	160	plays land Command Tower (untapped)	Play land: Swamp	plays land Swamp (untapped)
+2	2	9	MainPhase	Main phase 1	0	39	39	4	160	plays land Plains (untapped); casts Web Up	pass	
+5	1	4	MainPhase	Main phase 1	67	88	21	5	160	plays land Plains (untapped); casts Thanos, the Mad Titan	Play land: Scoured Barrens	plays land Scoured Barrens (tapped); casts Visions of Villainy
+5	1	7	Choice	Stasis Snare: "when ~ enters, exile target creature an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	54	54	0	6	160	casts Futurist Forge	the bot's choice (The Vision 3/6 (P0))	casts Futurist Forge
+10	2	4	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	41	46	5	6	160	casts Storm, Windrider	Wind-Scarred Crag	casts Storm, Windrider
+16	0	6	Attack	Declare attackers	54	74	20	5	160		everything -> P3 Nick Fury, Agent of S.H.I.E.L.D. (30 life)	
+19	3	2	MainPhase	Main phase 1	84	87	3	4	160	plays land Swamp (untapped); casts Arcane Signet	Play land: Baxter Building	plays land Baxter Building (untapped); casts Arcane Signet
+20	0	1	MainPhase	Main phase 1	68	71	4	5	160	plays land Wind-Scarred Crag (tapped)	Play land: Tranquil Cove	plays land Tranquil Cove (tapped)
+23	3	7	Choice	Choose odd or even: destroy each other creature with mana value of that quality	52	63	11	5	160	casts Cloudblazer; plays land Dismal Backwater (tapped)	Odd (4 of theirs, 0 of yours)	casts Cloudblazer; plays land Dismal Backwater (tapped)
+25	1	3	MainPhase	Main phase 2	49	63	14	5	160	casts Attercop	pass	
+27	3	10	Choice	Choose odd or even: destroy each other creature with mana value of that quality	47	71	24	5	160		Odd (3 of theirs, 0 of yours)	
+28	0	3	MainPhase	Main phase 1	89	89	0	4	160	plays land Surveillance Room (untapped)	the bot's choice (plays land Surveillance Room (untapped))	plays land Surveillance Room (untapped)
+29	1	6	MainPhase	Main phase 1	2	32	30	4	160	plays land Plains (untapped); casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P1): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 1 mana left)	pass	plays land Plains (untapped); casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P1): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 1 mana left)
+34	2	12	Attack	Declare attackers	88	91	3	3	160		no attack	casts Massacre Wurm
+36	0	10	MainPhase	Main phase 1	2	31	29	4	160	casts Cloudblazer	pass	casts Cloudblazer
+40	0	5	Attack	Declare attackers	48	74	26	5	160		no attack	
+42	2	11	Attack	Declare attackers	34	94	59	4	160		no attack	casts Zetalpa, Primal Dawn
+51	3	7	Attack	Declare attackers	18	67	49	5	160		everything -> planeswalker Garruk, Curse Breaker [2] (P1)	
+53	1	5	MainPhase	Main phase 1	42	42	0	6	160	casts Celebrate the Mountain-king	the bot's choice (casts Celebrate the Mountain-king)	casts Celebrate the Mountain-king
+53	1	5	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	46	55	9	6	160		Celebrate the Mountain-king (P0)	
+53	1	9	Choice	Choose odd or even: destroy each other creature with mana value of that quality	3	26	23	4	160		Odd (3 of theirs, 0 of yours)	
+56	0	4	MainPhase	Main phase 1	29	65	36	5	160	plays land Tranquil Cove (tapped); casts Visions of Villainy; casts Panther Pounce; casts Visions of Villainy	pass	plays land Tranquil Cove (tapped); casts Visions of Villainy; casts Panther Pounce; casts Visions of Villainy
+56	0	4	Attack	Declare attackers	28	65	37	5	160		everything -> P3 Nick Fury, Agent of S.H.I.E.L.D. (31 life)	
+56	0	5	Choice	Discard a card	17	22	5	4	160		Doctor Doom	
+56	0	6	Attack	Declare attackers	2	51	48	4	160	casts Doc Samson, Super Psychiatrist	everything -> P2 Smaug, Wicked Worm (14 life)	casts Doc Samson, Super Psychiatrist
+58	2	9	Choice	Choose odd or even: destroy each other creature with mana value of that quality	39	94	54	4	160	activates Villainous Hideout (P2): {3}, {t}: target villain you control connives. activate only as a sorcery. (paid {3}, 2 mana left)	Odd (4 of theirs, 1 of yours)	activates Villainous Hideout (P2): {3}, {t}: target villain you control connives. activate only as a sorcery. (paid {3}, 2 mana left)
+58	2	10	MainPhase	Main phase 1	26	35	9	5	160	plays land Plains (untapped); casts Doctor Doom; casts Cloudblazer	pass	plays land Plains (untapped); casts Cloudblazer; casts Avengers: Under Siege
+58	2	10	Attack	Declare attackers	28	54	26	5	160		everything -> P0 Nick Fury, Agent of S.H.I.E.L.D. (30 life)	
+59	3	2	MainPhase	Main phase 1	46	60	14	6	160	plays land Swiftwater Cliffs (tapped)	Play land: Plains	plays land Plains (untapped)
+59	3	6	MainPhase	Main phase 2	69	83	14	5	160	casts Captain Marvel, Earth's Protector	pass	
+60	0	7	Choice	Discard a card	68	87	19	5	160	casts Undercover Skrull	Undercover Skrull	plays land Plains (untapped); casts Futurist Forge
+60	0	9	MainPhase	Main phase 2	44	76	32	5	160	casts Attercop	pass	
+62	2	5	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	57	81	24	5	160	casts Visions of Villainy	Sower of Chaos 4/3 (P1)	casts Visions of Villainy
+63	3	5	Attack	Declare attackers	45	59	14	6	160		no attack	
+66	2	11	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	12	81	69	4	160	casts Panther Pounce; activates Clue (P2): {2}, sacrifice this: draw a card (paid {2}, 1 mana left)	Zetalpa, Primal Dawn 4/8 (P0)	casts Zetalpa, Primal Dawn
+67	3	4	Attack	Declare attackers	43	57	14	6	160		everything -> P0 Gandalf, Goblins' Bane (30 life)	
+67	3	7	MainPhase	Main phase 1	10	28	18	4	160	plays land Training Compound (untapped); casts The Mind Stone	pass	
+67	3	8	Attack	Declare attackers	71	98	27	4	160	casts Attercop	everything -> P1 Thranduil, Sindarin Liege (12 life)	casts Attercop
+68	0	3	Response	End of P3's turn	83	83	0	4	160	casts Panther Pounce; activates Clue (P0): {2}, sacrifice this: draw a card (paid {2}, 3 mana left)	the bot's choice (pass)	casts Panther Pounce; activates Clue (P0): {2}, sacrifice this: draw a card (paid {2}, 3 mana left)
+76	0	2	MainPhase	Main phase 1	77	80	3	5	160	plays land Surveillance Room (untapped); casts Thought Vessel	Play land: Jungle Hollow	plays land Jungle Hollow (tapped)
+79	3	3	MainPhase	Main phase 1	74	80	6	5	160	plays land Swamp (untapped); casts Visions of Villainy	pass	plays land Swamp (untapped); casts Visions of Villainy
+83	3	5	Attack	Declare attackers	42	86	44	5	160		no attack	
+83	3	6	Choice	Thor, God of Thunder: 2 damage - choose the target	77	82	6	4	160	casts Attercop	P1 (22 life)	casts Attercop
+86	2	7	Attack	Declare attackers	46	73	27	5	160		everything -> P3 Tatyova, Benthic Druid (30 life)	
+87	3	6	MainPhase	Main phase 1	72	91	18	4	160	plays land Command Tower (untapped); casts Thanos, the Mad Titan	Play land: Pym Technologies	plays land Pym Technologies (tapped); casts Political Triumph
+89	1	2	MainPhase	Main phase 1	54	56	2	6	160	plays land Training Compound (untapped); casts Thought Vessel	Play land: Swamp	plays land Swamp (untapped); casts Thought Vessel
+89	1	7	MainPhase	Main phase 1	25	61	36	5	160	plays land Scoured Barrens (tapped); activates Avengers Tower (P1): {4}, {t}: look at the top three cards of your library. you may reveal a hero card from among them and put it into your hand. put the rest on the bottom of your library in any order. (paid {4}, 5 mana left); casts Celebrate the Mountain-king	Play land: Surveillance Room	plays land Surveillance Room (untapped); casts Celebrate the Mountain-king
+89	1	7	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	19	51	32	5	160		Scrawling Crawler 3/2 (P3)	
+89	1	7	Choice	Discard a card	22	39	18	5	160		Visions of Villainy	
+90	2	5	Choice	Stasis Snare: "when ~ enters, exile target creature an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	32	32	0	5	160		the bot's choice (Gandalf, Goblins' Bane 2/3 (P1))	
+92	0	8	Attack	Declare attackers	86	92	6	3	160		everything -> P1 Thranduil, Sindarin Liege (13 life)	
+93	1	5	Choice	Discard a card	76	79	3	5	160		Doc Samson, Super Psychiatrist	
+98	2	2	MainPhase	Main phase 1	56	64	7	5	160	plays land Surveillance Room (untapped); casts Thought Vessel	Play land: Wind-Scarred Crag	plays land Wind-Scarred Crag (tapped)
+98	2	3	MainPhase	Main phase 1	55	55	0	6	160	plays land Pym Technologies (tapped); casts Web Up	the bot's choice (plays land Pym Technologies (tapped))	plays land Pym Technologies (tapped); casts Web Up
+99	3	4	MainPhase	Main phase 2	41	61	19	5	160	casts Attercop	pass	
+102	2	7	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	64	65	1	5	160	casts Web Up; casts Murdock's Crusade	Wind-Scarred Crag	casts Web Up; casts Murdock's Crusade
+102	2	7	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	65	96	31	4	160	casts Murdock's Crusade	Army token 3/3 (P0)	casts Murdock's Crusade
+103	3	5	Choice	Discard a card	45	78	33	5	160		Vampire Nighthawk	
+108	0	7	Attack	Declare attackers	73	85	12	5	160	casts Massacre Wurm	everything -> P1 Thranduil, Sindarin Liege (21 life)	casts Vampire Nighthawk
+109	1	4	Choice	Rapid Rescue: "mill two cards. you may put a permanent card from among the milled cards into your hand. you gain 2 life." - do it?	83	88	4	4	160		no	
+110	2	5	MainPhase	Main phase 1	54	69	15	5	160	plays land Wind-Scarred Crag (tapped); casts Murdock's Crusade	pass	plays land Wind-Scarred Crag (tapped); casts Murdock's Crusade
+112	0	4	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	61	65	4	5	160		Llanowar Elves 1/1 (P1)	
+113	1	5	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	61	68	7	5	160		Echo, Perceptive Prodigy 1/4 (P3)	
+114	2	5	MainPhase	Main phase 1	38	46	8	5	160	plays land Swamp (untapped); casts Celebrate the Mountain-king	Play land: Gleaming Bastion	plays land Gleaming Bastion (untapped); casts Celebrate the Mountain-king
+114	2	6	Attack	Declare attackers	19	39	19	5	160		everything -> P1 Gandalf, Goblins' Bane (22 life)	
+118	2	4	Choice	Discard a card	83	83	0	4	160		the bot's choice (Rapid Rescue)	
+121	1	12	MainPhase	Main phase 1	63	88	25	5	160	plays land Plains (untapped); casts Visions of Villainy; activates Avengers Tower (P1): {4}, {t}: look at the top three cards of your library. you may reveal a hero card from among them and put it into your hand. put the rest on the bottom of your library in any order. (paid {4}, 8 mana left)	pass	plays land Plains (untapped); casts Visions of Villainy; activates Avengers Tower (P1): {4}, {t}: look at the top three cards of your library. you may reveal a hero card from among them and put it into your hand. put the rest on the bottom of your library in any order. (paid {4}, 8 mana left)
+122	2	5	MainPhase	Main phase 1	59	74	14	5	160	plays land Scoured Barrens (tapped); casts Murdock's Crusade	pass	plays land Scoured Barrens (tapped); casts Murdock's Crusade
+122	2	7	Attack	Declare attackers	58	86	28	5	160		everything -> P3 Thranduil, Sindarin Liege (20 life)	
+123	3	5	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	75	86	11	4	160		Gandalf, Goblins' Bane 2/3 (P0)	
+123	3	6	Attack	Declare attackers	51	75	24	5	160	casts Doc Samson, Super Psychiatrist	everything -> P2 Thorin Oakenshield (24 life)	casts Thanos, the Mad Titan
+123	3	7	MainPhase	Main phase 1	48	62	14	6	160	plays land Bloodfell Caves (tapped); activates Thanos, the Mad Titan 4/4 (P3): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 1 mana left)	pass	plays land Bloodfell Caves (tapped); activates Thanos, the Mad Titan 4/4 (P3): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 1 mana left)
+130	2	4	Choice	Scry 1: choose the cards to keep on top (the rest go to the bottom)	73	77	4	5	160		none	
+130	2	7	Attack	Declare attackers	72	74	1	5	160		everything -> P0 Nick Fury, Agent of S.H.I.E.L.D. (30 life)	
+131	3	7	MainPhase	Main phase 1	48	72	24	5	160	plays land Baxter Building (untapped); activates Futurist Forge (P3): {3}{u}, sacrifice ~: draw two cards. (paid {3}{U}, 6 mana left); casts Stasis Snare; casts Rapid Rescue; casts Thought Vessel	pass	plays land Baxter Building (untapped); activates Futurist Forge (P3): {3}{u}, sacrifice ~: draw two cards. (paid {3}{U}, 4 mana left); casts Visions of Villainy; casts Thought Vessel
+132	0	11	MainPhase	Main phase 1	82	89	7	4	160	casts Fumigate	pass	casts Fumigate
+133	1	2	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	75	78	3	5	160	casts Thought Vessel	none	casts Thought Vessel
+141	1	7	Attack	Declare attackers	72	81	8	5	160		everything -> planeswalker Chandra, Torch of Defiance [2] (P0)	
+141	1	10	Choice	Thor, God of Thunder: "when ~ enters, exile target equipment, instant, or sorcery card from your graveyard. until the end of your ..." - do it?	1	96	95	2	160	casts Murdock's Crusade	no	casts Storm, Windrider
+141	1	10	Choice	Murdock's Crusade: "choose one. if ~ was cast using teamwork, choose both instead. — street justice — exile target creature wit..." - choose 1 target(s)	0	61	61	4	160		Darksteel Colossus 11/11 (P0)	
+144	0	8	Choice	Murdock's Crusade: "choose one. if ~ was cast using teamwork, choose both instead. — street justice — exile target creature wit..." - choose 1 target(s)	9	19	9	4	160	casts Avengers: Under Siege	Smaug, Wicked Worm 5/5 (P2)	casts Avengers: Under Siege
+146	2	4	MainPhase	Main phase 1	25	41	16	5	160	plays land Training Compound (untapped); casts Rapid Rescue; casts Political Triumph	pass	plays land Training Compound (untapped); casts Rapid Rescue; casts Political Triumph
+148	0	3	MainPhase	Main phase 1	70	77	7	5	160	plays land Baxter Building (untapped); casts Rapid Rescue	Play land: Gleaming Bastion	plays land Gleaming Bastion (untapped); casts Thanos, the Mad Titan
+151	3	3	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	63	63	0	5	160	casts Dáin, Lord of the Iron Hills	the bot's choice (Doc Samson, Super Psychiatrist)	casts Dáin, Lord of the Iron Hills
+152	0	7	MainPhase	Main phase 1	59	80	21	5	160	activates Thanos, the Mad Titan 4/4 (P0): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 3 mana left); casts Futurist Forge	pass	casts Attercop; casts Futurist Forge; plays land Baxter Building (untapped)
+152	0	7	Attack	Declare attackers	64	76	12	5	160		everything -> P2 Smaug, Wicked Worm (14 life)	
+154	2	4	Attack	Declare attackers	48	58	10	6	160		no attack	
+158	2	5	Attack	Declare attackers	4	65	61	4	160		everything -> P0 The Great Goblin (20 life)	
+161	1	1	MainPhase	Main phase 1	56	61	6	6	160	plays land Swiftwater Cliffs (tapped)	Play land: Tranquil Cove	plays land Tranquil Cove (tapped)
+161	1	23	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	16	28	12	5	160		The Sentry, Golden Guardian 5/5 (P2)	
+163	3	8	Attack	Declare attackers	72	88	16	4	160		everything -> P1 Thranduil, Sindarin Liege (24 life)	
+168	0	14	Block	Declare blockers	22	51	28	5	160		no blocks	
+171	3	2	MainPhase	Main phase 1	66	67	1	5	160	plays land Pym Technologies (tapped)	Play land: Surveillance Room	plays land Surveillance Room (untapped); casts Political Triumph
+172	0	10	MainPhase	Main phase 1	46	100	54	4	160	casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P0): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 3 mana left); casts Panther Pounce; activates Clue (P0): {2}, sacrifice this: draw a card (paid {2}, 0 mana left)	pass	casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P0): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 3 mana left); casts Panther Pounce; activates Clue (P0): {2}, sacrifice this: draw a card (paid {2}, 0 mana left)
+173	1	8	Choice	Rapid Rescue: "mill two cards. you may put a permanent card from among the milled cards into your hand. you gain 2 life." - do it?	41	57	16	6	160		no	
+174	2	6	MainPhase	Main phase 1	81	82	1	4	160	plays land Pym Technologies (tapped); activates Thanos, the Mad Titan 4/4 (P2): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 0 mana left)	Play land: Wind-Scarred Crag	plays land Wind-Scarred Crag (tapped); activates Thanos, the Mad Titan 4/4 (P2): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 0 mana left)
+177	1	8	MainPhase	Main phase 1	33	39	6	5	160	plays land Surveillance Room (untapped); casts Cloudblazer; casts Dáin, Lord of the Iron Hills	pass	plays land Surveillance Room (untapped); casts Cloudblazer; casts Dáin, Lord of the Iron Hills
+182	2	4	Attack	Declare attackers	82	85	3	4	160		everything -> P3 Tatyova, Benthic Druid (26 life)	
+188	0	2	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	70	72	2	5	160	casts Undercover Skrull	none	casts Undercover Skrull
+188	0	5	Attack	Declare attackers	29	40	11	5	160		no attack	
+190	2	5	MainPhase	Main phase 1	62	86	23	5	160	plays land Avengers Tower (untapped); casts Thor, God of Thunder	Play land: Plains	plays land Plains (untapped); casts Thanos, the Mad Titan
+190	2	7	Block	Declare blockers	72	94	22	4	160		no blocks	
+191	3	6	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	51	51	0	6	160	casts Murdock's Crusade; casts Thanos, the Mad Titan	the bot's choice (Panther Pounce)	casts Murdock's Crusade; casts Thanos, the Mad Titan
+193	1	6	MainPhase	Main phase 1	8	55	48	4	160	plays land Scoured Barrens (tapped); casts Doctor Doom	pass	plays land Scoured Barrens (tapped); casts Doctor Doom
+193	1	6	Choice	Sacrifice a permanent to pay the cost (or none)	5	79	74	4	160		Thanos, the Mad Titan 1/1 (P1)	
+195	3	5	MainPhase	Main phase 1	73	76	3	5	160	plays land Plains (untapped); casts Stasis Snare; casts Visions of Villainy	pass	plays land Plains (untapped); casts Stasis Snare; casts Visions of Villainy
+196	0	8	MainPhase	Main phase 1	8	89	81	3	160	plays land Villainous Hideout (untapped); casts Arbiter of Woe; casts Rapid Rescue	Play land: Scoured Barrens	plays land Scoured Barrens (tapped); casts Rapid Rescue; casts Web Up; casts Arbiter of Woe
+198	2	5	MainPhase	Main phase 1	43	85	42	5	160	plays land Baxter Building (untapped); casts Thanos, the Mad Titan	Play land: Plains	plays land Plains (untapped); casts Vampire Nighthawk
+199	3	5	MainPhase	Main phase 1	48	76	28	5	160	plays land Swamp (untapped); casts Visions of Villainy	Play land: Surveillance Room	plays land Surveillance Room (untapped); activates Thanos, the Mad Titan 4/4 (P3): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 0 mana left)
+199	3	6	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	41	70	29	5	160		The Mind Stone (P0)	
+201	1	7	Attack	Declare attackers	46	72	27	5	160		everything -> P2 Nick Fury, Agent of S.H.I.E.L.D. (28 life)	
+202	2	6	MainPhase	Main phase 2	68	75	7	5	160	casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P2): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 0 mana left)	pass	
+202	2	9	Choice	Murdock's Crusade: choose the mode(s)	11	32	21	4	160		choose one. if ~ was cast using teamwork, choose both instead. — legal justice — exile target enchantment with mana value 4 or greater.	casts Doctor Doom
+211	3	6	Attack	Declare attackers	91	91	1	3	160	casts Attercop	everything -> P1 Thranduil, Sindarin Liege (15 life)	casts Thanos, the Mad Titan
+211	3	7	Attack	Declare attackers	92	98	5	2	160		everything -> P2 Thorin Oakenshield (15 life)	casts Thanos, the Mad Titan
+214	2	3	MainPhase	Main phase 1	87	90	3	4	160	plays land Plains (untapped); casts Visions of Villainy	pass	plays land Plains (untapped); casts Visions of Villainy
+217	1	9	MainPhase	Main phase 1	41	83	42	5	160	plays land Plains (untapped); activates Thanos, the Mad Titan 4/4 (P1): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 0 mana left)	pass	plays land Plains (untapped); activates Thanos, the Mad Titan 4/4 (P1): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 0 mana left)
+221	1	3	MainPhase	Main phase 1	76	76	0	5	160	plays land Plains (untapped); casts Dáin, Lord of the Iron Hills	the bot's choice (plays land Plains (untapped))	plays land Plains (untapped); casts Dáin, Lord of the Iron Hills
+221	1	7	Choice	Murdock's Crusade: "choose one. if ~ was cast using teamwork, choose both instead. — street justice — exile target creature wit..." - choose 1 target(s)	45	56	11	6	160		Dwarf token 3/4 (P0)	
+222	2	7	Response	End of P1's turn	32	46	14	5	160	casts Panther Pounce; activates Clue (P2): {2}, sacrifice this: draw a card (paid {2}, 1 mana left); plays land Baxter Building (untapped); casts Thanos, the Mad Titan	pass	plays land Baxter Building (untapped); casts Thanos, the Mad Titan
+222	2	7	MainPhase	Main phase 1	4	93	89	3	160	plays land Baxter Building (untapped); casts Thanos, the Mad Titan	Play land: Jungle Hollow	plays land Jungle Hollow (tapped); casts Undercover Skrull
+223	3	7	Choice	Stasis Snare: "when ~ enters, exile target creature an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	67	67	0	5	160	casts Visions of Villainy; plays land Plains (untapped)	the bot's choice (Red Hulk 8/9 (P2))	casts Visions of Villainy; plays land Plains (untapped)
+224	0	4	Choice	Discard a card	84	87	3	4	160		Visions of Villainy	casts Panther Pounce
+225	1	5	MainPhase	Main phase 1	75	89	14	4	160	plays land Surveillance Room (untapped); casts Thanos, the Mad Titan	Play land: Training Compound	plays land Training Compound (untapped); casts Thanos, the Mad Titan
+227	3	10	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	79	99	19	3	160	casts Celebrate the Mountain-king; casts Massacre Wurm	Blossoming Sands	casts Celebrate the Mountain-king
+228	0	6	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	72	82	10	5	160		Sol Ring (P1)	
+229	1	4	MainPhase	Main phase 1	40	63	23	5	160	plays land Tranquil Cove (tapped); casts Celebrate the Mountain-king	Play land: Training Compound	plays land Training Compound (untapped); casts Thanos, the Mad Titan
+234	2	10	Attack	Declare attackers	93	98	5	2	160	casts Massacre Wurm	everything -> P0 Nick Fury, Agent of S.H.I.E.L.D. (24 life)	casts Captain Marvel, Earth's Protector; activates Captain Marvel, Earth's Protector 5/4 (P2): {5}{w}{w}: put a +1/+1 counter and an indestructible counter on ~. (paid {2}, 0 mana left)
+239	3	12	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	74	91	16	4	160		The Sentry, Golden Guardian 5/5 (P0)	
+245	1	1	MainPhase	Main phase 1	78	78	0	5	160	plays land Villainous Hideout (untapped)	the bot's choice (plays land Villainous Hideout (untapped))	plays land Villainous Hideout (untapped)
+247	3	5	MainPhase	Main phase 2	79	79	0	5	160	casts Undercover Skrull	the bot's choice (casts Undercover Skrull)	casts Undercover Skrull
+248	0	2	MainPhase	Main phase 1	81	88	7	4	160	plays land Pym Technologies (tapped)	Play land: Scoured Barrens	plays land Scoured Barrens (tapped)
+248	0	14	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	2	52	50	4	160	casts Political Triumph	Celebrate the Mountain-king (P3)	activates Thanos, the Mad Titan 4/4 (P0): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 7 mana left); casts Political Triumph
+250	2	6	Choice	Choose odd or even: destroy each other creature with mana value of that quality	42	55	12	6	160		Even (1 of theirs, 1 of yours)	
+251	3	4	Choice	Celebrate the Mountain-king: "when ~ enters, for each opponent, exile up to one target nonland permanent that player controls until ~ lea..." - choose up to 1 target(s)	84	88	4	4	160		Sol Ring (P1)	
+252	0	2	MainPhase	Main phase 1	71	77	6	5	160	plays land Command Tower (untapped); casts Attercop	Play land: Dismal Backwater	plays land Dismal Backwater (tapped)
+254	2	3	MainPhase	Main phase 2	66	66	0	5	160	casts Undercover Skrull	the bot's choice (casts Undercover Skrull)	casts Undercover Skrull
+254	2	5	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	56	82	26	5	160	casts Panther Pounce	The Sentry, Golden Guardian 5/5 (P1)	casts Panther Pounce
+255	3	10	MainPhase	Main phase 1	63	89	26	5	160	plays land Dismal Backwater (tapped); casts The Mind Stone; casts Avengers: Under Siege	pass	plays land Dismal Backwater (tapped); casts The Mind Stone; casts Red Hulk; casts Avengers: Under Siege
+256	0	8	Attack	Declare attackers	82	97	15	3	160		everything -> P2 Smaug, Wicked Worm (18 life)	
+257	1	7	Attack	Declare attackers	14	50	36	5	160		no attack	
+257	1	8	MainPhase	Main phase 1	3	94	91	2	160	plays land Avengers Tower (untapped); casts Thanos, the Mad Titan; activates Villainous Hideout (P1): {3}, {t}: target villain you control connives. activate only as a sorcery. (paid {3}, 3 mana left); casts Political Triumph	Play land: Jungle Hollow	plays land Jungle Hollow (tapped); casts Thanos, the Mad Titan; casts Red Hulk
+258	2	6	Choice	Surveil 1: choose the cards to keep on top (the rest go to your graveyard)	73	73	0	5	160	casts Celebrate the Mountain-king; casts Attercop	the bot's choice (Red Hulk)	casts Celebrate the Mountain-king; casts Attercop
+259	3	5	MainPhase	Main phase 1	64	86	22	5	160	plays land Bloodfell Caves (tapped); casts Thanos, the Mad Titan	Play land: Swamp	plays land Swamp (untapped); casts Thor, God of Thunder
+261	1	8	Choice	Discard a card	23	30	7	5	160		Arbiter of Woe	plays land Plains (untapped)
+267	3	3	Choice	Web Up: "when ~ enters, exile target nonland permanent an opponent controls until ~ leaves the battlefield." - choose 1 target(s)	61	71	10	5	160		Imperious Perfect 2/2 (P1)	
+272	0	5	Attack	Declare attackers	89	96	7	3	160		everything -> P1 Tatyova, Benthic Druid (26 life)	
+273	1	6	Attack	Declare attackers	59	72	13	5	160		no attack	
+273	1	7	Attack	Declare attackers	46	84	38	5	160	casts Massacre Wurm	everything -> P0 Smaug, Wicked Worm (18 life)	casts Thanos, the Mad Titan; casts Vampire Nighthawk
+277	1	5	Attack	Declare attackers	79	88	9	4	160		everything -> P3 Ramos, Dragon Engine (24 life)	
+278	2	4	MainPhase	Main phase 2	88	88	0	4	160	casts Undercover Skrull	the bot's choice (casts Undercover Skrull)	casts Undercover Skrull
+280	0	11	Attack	Declare attackers	68	84	16	5	160	casts Massacre Wurm; casts Vampire Nighthawk	everything -> P3 Nick Fury, Agent of S.H.I.E.L.D. (24 life)	casts Thanos, the Mad Titan; activates Thanos, the Mad Titan 4/4 (P0): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{U}{G}, 0 mana left)
+283	3	1	MainPhase	Main phase 1	68	74	7	5	160	plays land Villainous Hideout (untapped)	Play land: Tranquil Cove	plays land Tranquil Cove (tapped)
+283	3	3	MainPhase	Main phase 1	47	50	3	6	160	plays land Tranquil Cove (tapped)	Play land: Surveillance Room	plays land Surveillance Room (untapped); casts The Mind Stone
+285	1	4	MainPhase	Main phase 1	69	77	8	5	160	plays land Plains (untapped); casts Sol Ring; casts Celebrate the Mountain-king	Play land: Surveillance Room	plays land Surveillance Room (untapped); casts Sol Ring; casts Celebrate the Mountain-king
+287	3	3	MainPhase	Main phase 2	76	86	9	4	160	casts Attercop	pass	
+290	2	5	Choice	Scry 1: choose the cards to keep on top (the rest go to the bottom)	87	87	0	4	160		the bot's choice (Plains)	
+293	1	5	Attack	Declare attackers	54	93	39	4	160		no attack	
+298	2	11	MainPhase	Main phase 1	35	58	23	5	160	plays land Baxter Building (untapped); casts The Mind Stone; activates Thanos, the Mad Titan 5/5 (P2): {c}{w}{u}{b}{r}{g}: put two +1/+1 counters on ~. choose odd or even. destroy each other creature with mana value of the chosen quality. (paid {C}{W}{U}{B}{R}{G}, 3 mana left); casts Futurist Forge	Play land: Plains	plays land Plains (untapped); casts The Mind Stone; casts Doctor Doom
+298	2	13	Choice	Sacrifice a permanent	24	30	6	5	160	plays land Swamp (untapped); casts Visions of Villainy; casts Stasis Snare; activates Futurist Forge (P2): {3}{u}, sacrifice ~: draw two cards. (paid {3}{U}, 5 mana left); casts Doc Samson, Super Psychiatrist	Red Hulk 6/7 (P2)	plays land Swamp (untapped); casts Visions of Villainy; casts Stasis Snare; activates Futurist Forge (P2): {3}{u}, sacrifice ~: draw two cards. (paid {3}{U}, 5 mana left); casts Doc Samson, Super Psychiatrist
+299	3	3	MainPhase	Main phase 1	29	48	19	5	160	plays land Baxter Building (untapped); casts Visions of Villainy	Play land: Plains	plays land Plains (untapped); casts Thanos, the Mad Titan
