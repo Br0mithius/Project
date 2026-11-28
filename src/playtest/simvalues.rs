@@ -28,7 +28,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 // 3: measured against the peer field (decks about as strong as a tuned deck) instead of
 //    the simulated league, whose weak decks undervalued answers; counterspell colour
 //    limits and return-on-death tricks played.
-pub const SIM_VERSION: u32 = 3;
+// 4: 40 starting life, the card audit against official text and rulings (67 fixes), and
+//    bots that hold small mid-game attacks back.
+pub const SIM_VERSION: u32 = 4;
 
 pub const FILE: &str = "sim_card_values.tsv";
 /// Measurements shipped with the app (across the league's decks and every archetype), so the
