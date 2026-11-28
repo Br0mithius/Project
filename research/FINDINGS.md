@@ -108,3 +108,18 @@ the playtest). Three swaps together +2.62 ± 0.18 (table +2.29); all four **+3.4
 (table +2.11, field +4.01). The list takes all four: the fourth is flat at the table
 within noise and worth +1.25 against the field. (Rule: a swap is taken unless it is
 clearly worse at the real table - more than one standard error.)
+
+## 2026-11-28: Alien Invasion - a card to grow into
+
+- Manual play let "attacks each combat if able" creatures stay home (fixed): the Aliens
+  piled up as blockers, which made the card look far stronger at the table than it is.
+- Head to head in Rapid Rescue's slot (Session 5 list, 20,000 paired games): -2.36 ± 0.19;
+  with every seat casting engines early (EARLY_ENGINE) -2.30 ± 0.19.
+- 3,000 logged games against Drake, JD and Will (deck wins 67%): cast by round 4, 28 of 31
+  won (90%); rounds 5-6 64%; 7-9 69%; never drawn 65%. In hand by round 4 it was castable
+  by round 5 in a third of games: {1}{R}{R}{G} against about ten red sources is the limit,
+  not the bot's timing. Small sample, and a hand with that mana is a good hand anyway.
+- Decision (with Brom): not in the current list; re-test with the red sources when the
+  pool gains fixing (Session 5 packs, Dec 3). Refine at 20,000 games per swap did not pass
+  the gate either (S5 -0.98, S6 -0.78, 11-14 minutes): stays at 6,000.
+- EARLY_ENGINE on our seat, current Session 5 list: +0.20 ± 0.08 (20,000 games); to confirm.
