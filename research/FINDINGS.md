@@ -234,3 +234,14 @@ Confirmation on fresh games, 10,000: She-Hulk + Beorn's +1.94 ± 0.38 overall bu
 -0.59 ± 0.46, peer field +3.03 ± 0.50; Pet Avengers + Beorn's +2.05 ± 0.37, table +0.24 ±
 0.45, peer field +2.83. The gain is against the peer field only; against the real table
 (Drake, Will, JD) the swaps are a wash. List not changed.
+- Session 6 list, same method (`pool_values_40life_s6.tsv`, `swap_pass_40life_s6.txt`; the
+  slot tests ran on a 50/50 build, recombined here at 30/70): nothing clears two standard
+  errors except She-Hulk for HULK SMASH! at +0.75 ± 0.38 (table +2.02, field +0.20). Second
+  fresh-games check of the Session 5 pairs: Pet Avengers + Beorn's +1.39 ± 0.38 (table
+  -0.39), She-Hulk + Beorn's +1.56 ± 0.38 (table -0.57); Alien Invasion for Rapid Rescue
+  -1.35 ± 0.30 (table -2.47). Lists unchanged until the peer field is rebuilt.
+- Referee weighting: tried 50/50 at the owner's request, back to 30/70 the same hour when
+  the numbers showed the peer field is the stronger opposition (tested list wins 62% vs
+  the table stand-ins, 39% vs the field).
+- SIM_VERSION 4: values measured at 30 life / before the audit / before the hold rule stop
+  counting. Whole-database re-measure and a rebuilt, tuned peer field follow.

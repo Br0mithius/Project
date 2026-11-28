@@ -1,0 +1,29 @@
+### slot Thought Vessel
+in place of Thought Vessel (6000 games each; points of win rate, + = better than Thought Vessel):
+Rage into the Valley               +0.27 ± 0.34  (table +0.43 ± 0.46, peer field +0.10 ± 0.50)
+Pet Avengers                       -0.30 ± 0.35  (table -0.07 ± 0.47, peer field -0.53 ± 0.52)
+She-Hulk, Jade Defender            +0.02 ± 0.36  (table -0.40 ± 0.48, peer field +0.43 ± 0.53)
+Little Bear                        -0.96 ± 0.34  (table -0.72 ± 0.46, peer field -1.20 ± 0.49)
+### slot HULK SMASH!
+in place of HULK SMASH! (6000 games each; points of win rate, + = better than HULK SMASH!):
+Rage into the Valley               +0.36 ± 0.33  (table +1.35 ± 0.43, peer field -0.63 ± 0.49)
+Pet Avengers                       +0.85 ± 0.34  (table +1.68 ± 0.45, peer field +0.02 ± 0.50)
+She-Hulk, Jade Defender            +1.11 ± 0.35  (table +2.02 ± 0.47, peer field +0.20 ± 0.51)
+Little Bear                        -0.07 ± 0.32  (table +0.78 ± 0.44, peer field -0.93 ± 0.46)
+### slot Panther Pounce
+in place of Panther Pounce (6000 games each; points of win rate, + = better than Panther Pounce):
+Rage into the Valley               -0.54 ± 0.30  (table -0.12 ± 0.41, peer field -0.97 ± 0.45)
+Pet Avengers                       -0.29 ± 0.34  (table +0.12 ± 0.46, peer field -0.70 ± 0.51)
+She-Hulk, Jade Defender            -0.43 ± 0.35  (table -0.35 ± 0.47, peer field -0.52 ± 0.51)
+Little Bear                        -1.43 ± 0.33  (table -1.47 ± 0.44, peer field -1.40 ± 0.48)
+### slot Attercop
+in place of Attercop (6000 games each; points of win rate, + = better than Attercop):
+Rage into the Valley               -0.02 ± 0.33  (table +0.37 ± 0.43, peer field -0.40 ± 0.50)
+Pet Avengers                       -0.37 ± 0.33  (table -0.05 ± 0.43, peer field -0.68 ± 0.49)
+She-Hulk, Jade Defender            +0.01 ± 0.34  (table +0.18 ± 0.44, peer field -0.17 ± 0.50)
+Little Bear                        -1.59 ± 0.29  (table -1.55 ± 0.38, peer field -1.63 ± 0.45)
+### S5 list, 50/50, fresh games
+in place of Undercover Skrull (10000 games each; points of win rate, + = better than Undercover Skrull):
+Undercover Skrull>Pet Avengers|Doc Samson, Super Psychiatrist>Beorn's Hospitality +0.88 ± 0.34  (table -0.39 ± 0.46, peer field +2.15 ± 0.50)
+Undercover Skrull>She-Hulk, Jade Defender|Doc Samson, Super Psychiatrist>Beorn's Hospitality +0.95 ± 0.34  (table -0.57 ± 0.46, peer field +2.47 ± 0.50)
+Rapid Rescue>Alien Invasion        -1.67 ± 0.27  (table -2.47 ± 0.36, peer field -0.87 ± 0.40)
