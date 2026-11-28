@@ -1036,6 +1036,7 @@ impl<'a> Game<'a> {
                 if let Some(i) = self.idx(id) {
                     self.perms[i].tapped = true;
                     base.generic -= 1;
+                    self.became_tapped(id);
                 }
             }
             if !self.pay_for(p, &base, why) {
@@ -1068,7 +1069,7 @@ impl<'a> Game<'a> {
                             let snap = self.perms[i].clone();
                             self.emit_about(Ev::TeamworkTapped, p, &snap);
                             // It became tapped ("whenever ~ becomes tapped": Hawkeye).
-                            self.emit(Ev::Tapped, p, Some(id));
+                            self.became_tapped(id);
                         }
                     }
                 }
@@ -1772,7 +1773,7 @@ impl<'a> Game<'a> {
             } => {
                 if *tap {
                     self.perms[i].tapped = true;
-                    self.emit(Ev::Tapped, p, Some(id));
+                    self.became_tapped(id);
                 }
                 let Some(i) = self.idx(id) else { return false };
                 if self.perms[i].is_creature() {
@@ -1807,6 +1808,7 @@ impl<'a> Game<'a> {
                 for t in self.tap_helpers(p, id, extra) {
                     if let Some(j) = self.idx(t) {
                         self.perms[j].tapped = true;
+                        self.became_tapped(t);
                     }
                 }
                 if let Some(slots) = self.gy_cost(p, extra, None) {
@@ -2226,6 +2228,7 @@ impl<'a> Game<'a> {
         for id in helpers {
             if let Some(i) = self.idx(id) {
                 self.perms[i].tapped = true;
+                self.became_tapped(id);
             }
         }
         // (Crewing doesn't make it able to attack: a Vehicle that arrived this turn is still
@@ -2456,6 +2459,7 @@ impl<'a> Game<'a> {
                 x.till = None;
             }
             x.fired = 0;
+            x.taps = 0;
             x.hit_turn = 0;
             x.hurt_by = 0;
             x.dt_by = 0;

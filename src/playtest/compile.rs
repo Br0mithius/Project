@@ -2056,6 +2056,12 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                 Event::OthersAttack if one_attacker(trigger_part(t)) => {
                     (Ev::EachAttacker, trigger_part(t))
                 }
+                // "Whenever a creature you control becomes tapped" (Captain America, Living
+                // Legend): about each creature as it taps, for any reason. ("One or more
+                // creatures you control become tapped" is once per batch: left as the attack.)
+                Event::OthersAttack if trigger_part(t).contains("becomes tapped") => {
+                    (Ev::Tapped, trigger_part(t))
+                }
                 Event::OthersAttack => (Ev::OthersAttack, "you"),
                 Event::Other(what) => {
                     let k = if what.contains("teamwork") {

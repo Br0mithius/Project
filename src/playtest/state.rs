@@ -86,6 +86,9 @@ pub struct Perm {
     /// library for an artifact card, exile it" ... "put the exiled card into its owner's
     /// hand", Hoarding Dragon). They stay exiled when it leaves.
     pub exiled_with: Vec<(u8, CardRef)>,
+    /// How many times it became tapped this turn ("if it's the first time that creature
+    /// has become tapped this turn", Captain America, Living Legend).
+    pub taps: u8,
     pub activations: u8,
     /// A finality counter: if it would die, it's exiled instead.
     pub finality: bool,
@@ -1947,6 +1950,10 @@ impl<'a> Game<'a> {
                 self.perms[i].fired |= COUNTER_MANA_USED;
             } else {
                 self.perms[i].tapped = true;
+                if self.perms[i].is_creature() {
+                    let id = self.perms[i].id;
+                    self.became_tapped(id);
+                }
             }
         }
         for id in sac {
@@ -2418,6 +2425,7 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             exiled_with: Vec::new(),
+            taps: 0,
             activations: 0,
             finality: false,
             no_abilities: false,
@@ -2744,6 +2752,15 @@ impl<'a> Game<'a> {
         }
     }
 
+    /// Permanent `id` just became tapped (attacking, a cost, mana, crewing, a tap effect):
+    /// counted for the turn, and "whenever ... becomes tapped" abilities see it.
+    pub fn became_tapped(&mut self, id: u32) {
+        let Some(i) = self.idx(id) else { return };
+        self.perms[i].taps = self.perms[i].taps.saturating_add(1);
+        let p = self.perms[i].ctrl as usize;
+        self.emit(Ev::Tapped, p, Some(id));
+    }
+
     pub fn emit_about(&mut self, ev: Ev, p: usize, subject: &Perm) {
         self.emit_inner(ev, p, Some(subject));
     }
@@ -2876,6 +2893,14 @@ impl<'a> Game<'a> {
                     {
                         continue;
                     }
+                    // "If it's the first time that creature has become tapped this turn".
+                    if ev == Ev::Tapped
+                        && a.text
+                            .contains("first time that creature has become tapped")
+                        && s.taps != 1
+                    {
+                        continue;
+                    }
                     if a.text.contains("with deathtouch") && !s.has(DEATHTOUCH) {
                         continue;
                     }
@@ -2915,6 +2940,15 @@ impl<'a> Game<'a> {
                             continue;
                         }
                     }
+                }
+                // "Whenever you attack with creatures with total power 12 or greater for the
+                // first time each turn": a smaller attack isn't that event at all, and
+                // doesn't use up the turn's trigger.
+                if a.once_per_turn
+                    && matches!(a.cond, Cond::AttackingPower(_))
+                    && !self.cond_holds(&a.cond, src.ctrl as usize, Some(si))
+                {
+                    continue;
                 }
                 if a.once_per_turn && ai < 32 {
                     fired.push((si, ai));
@@ -3120,6 +3154,7 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             exiled_with: Vec::new(),
+            taps: 0,
             activations: 0,
             finality: false,
             no_abilities: false,

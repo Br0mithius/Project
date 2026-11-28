@@ -218,7 +218,7 @@ impl<'a> Game<'a> {
             }
             if !self.perms[i].has(VIGILANCE) {
                 self.perms[i].tapped = true;
-                self.emit(Ev::Tapped, a, Some(id));
+                self.became_tapped(id);
             }
             let Some(i) = self.idx(id) else { continue };
             if let Some(d) = self.def_player(def) {

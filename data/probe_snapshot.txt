@@ -2000,7 +2000,7 @@ On entering:
       itself: 3/4 vigilance
       -> (nothing changes)
 ABILITIES:
-  Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if MyTurn]: "whenever a creature you control becomes tapped during your turn, if it's the first time that creature has become tapped this turn, untap it."
+  Event(Tapped, Filter { yours: Some(true), types: 1, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if MyTurn]: "whenever a creature you control becomes tapped during your turn, if it's the first time that creature has become tapped this turn, untap it."
       -> (nothing changes)
       if the condition holds -> (nothing changes)
 
@@ -5951,7 +5951,7 @@ Hex Magic | {2}{R} | Sorcery — Arcane
 TEXT: Exile all the cards from your hand, then draw that many cards. Until the end of your next turn, you may play cards exiled this way.
 ABILITIES:
   Spell [may]: "exile all the cards from your hand, then draw that many cards. until the end of your next turn, you may play cards exiled this way."
-      -> You: hand +3, library -3
+      -> You: library -3, exile +3, cards playable from exile +3
 
 Hexhaven Battalion | {4}{W}{W} | Sorcery
 TEXT: Create three 2/2 colorless Wizard Soldier creature tokens named Cadet. Empower Jace 2. (Put two loyalty counters on a Jace token you control. If you don't control one, first create a blue Jace planeswalker token with "[-1]: Surveil 1" and "[-3]: Draw a card.") / Basic landcycling {2} ({2}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)

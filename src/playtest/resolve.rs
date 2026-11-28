@@ -3266,9 +3266,13 @@ impl<'a> Game<'a> {
                     if *lasting {
                         x.lock_effect = true;
                     } else {
+                        let was = x.tapped;
                         x.tapped = true;
                         if text.contains("doesn't untap") || text.contains("don't untap") {
                             x.stun = x.stun.max(1);
+                        }
+                        if !was {
+                            self.became_tapped(id);
                         }
                     }
                 }
@@ -3380,6 +3384,29 @@ impl<'a> Game<'a> {
                         self.discard(me);
                     }
                 }
+            }
+            // "Exile all the cards from your hand, then draw that many cards. Until the end
+            // of your next turn, you may play cards exiled this way" (Hex Magic).
+            Effect::Draw { you: true, .. }
+                if text.contains("exile all the cards from your hand, then draw that many") =>
+            {
+                let hand = std::mem::take(&mut self.players[me].hand);
+                let n = hand.len() as u32;
+                let playable = text.contains("you may play cards exiled this way");
+                let until = self.play_until(me, text.contains("end of your next turn"), false);
+                for c in hand {
+                    self.players[me].exile.push(c);
+                    if playable {
+                        self.players[me].playable.push(Playable {
+                            card: (me as u8, c),
+                            until,
+                            own_turn: false,
+                            pay_life: false,
+                        });
+                    }
+                }
+                self.last_drawn = n as i32;
+                self.draw(me, n);
             }
             Effect::Draw { amount, you } => {
                 let n = self.x_value(ctx, amount).max(0) as u32;
@@ -4344,6 +4371,42 @@ impl<'a> Game<'a> {
                     self.targeted = true;
                     self.last_targets = ids.clone();
                     ids
+                } else if t.mass {
+                    // "Untap all attacking creatures" (Desert Were-Worm), "untap all
+                    // creatures you control" (Aurelia): every one of them.
+                    let attacking = text.contains("untap all attacking");
+                    self.candidates(ctx, t, false)
+                        .into_iter()
+                        .filter(|&i| !attacking || self.perms[i].attacking)
+                        .map(|i| self.perms[i].id)
+                        .collect()
+                } else if text.contains("untap it")
+                    || text.contains("untap that creature")
+                    || text.contains("untap him")
+                    || text.contains("untap her")
+                {
+                    // "It" is a creature the text already named, never a new choice: the
+                    // equipped creature (S.H.I.E.L.D. Spy Kit), the target of the effect
+                    // before (Panther Pounce) or the creature the trigger is about (Captain
+                    // America, Living Legend).
+                    if text.contains("equipped creature") {
+                        self.src_perm(ctx)
+                            .and_then(|x| x.attached)
+                            .filter(|&id| self.idx(id).is_some())
+                            .into_iter()
+                            .collect()
+                    } else if self.targeted || !self.last_targets.is_empty() {
+                        self.last_targets
+                            .iter()
+                            .copied()
+                            .filter(|&id| self.idx(id).is_some())
+                            .collect()
+                    } else {
+                        ctx.subject
+                            .filter(|&id| self.idx(id).is_some())
+                            .into_iter()
+                            .collect()
+                    }
                 } else {
                     let t2 = Target {
                         whose: Whose::Yours,
@@ -6264,7 +6327,7 @@ impl<'a> Game<'a> {
                 if let Some(i) = self.src_idx(ctx).filter(|&i| !self.perms[i].tapped) {
                     self.perms[i].tapped = true;
                     let id = self.perms[i].id;
-                    self.emit(Ev::Tapped, me, Some(id));
+                    self.became_tapped(id);
                 }
             }
             "sacrifices itself" => {

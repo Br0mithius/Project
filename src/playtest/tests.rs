@@ -6334,3 +6334,114 @@ fn bard_doubles_draws_except_the_draw_step() {
         "the draw step's card is one card"
     );
 }
+
+/// Hex Magic: the hand is exiled, that many cards are drawn (it drew a flat three and kept
+/// the hand), and the exiled cards may be played until the end of your next turn.
+#[test]
+fn hex_magic_exiles_the_hand_and_draws_that_many() {
+    let db = db();
+    let d = prep_db(&db, &["Mountain", "Hex Magic", "Mind Stone"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    g.players[0].hand = vec![2, 2];
+    fire_card(&mut g, 1, 0, None);
+    assert_eq!(g.players[0].hand, vec![0, 0], "two new cards");
+    assert_eq!(g.players[0].exile, vec![2, 2], "the old hand is exiled");
+    assert_eq!(g.players[0].playable.len(), 2, "and may be played");
+    assert_eq!(g.players[0].playable[0].until.0, g.round + 1);
+    // With an empty hand nothing is drawn.
+    g.players[0].hand.clear();
+    fire_card(&mut g, 1, 0, None);
+    assert!(g.players[0].hand.is_empty());
+}
+
+/// Desert Were-Worm: "untap all attacking creatures" untaps every attacker (it untapped
+/// one), and an attack with less than 12 power doesn't use up the turn's trigger.
+#[test]
+fn desert_were_worm_untaps_every_attacker() {
+    let db = db();
+    let d = prep_db(&db, &["Desert Were-Worm", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let worm = put(&mut g, 0, 0);
+    let a = token(&mut g, 0, 6);
+    let b = token(&mut g, 0, 6);
+    let home = token(&mut g, 0, 1);
+    g.recalc();
+    // A small attack first: no trigger, and it stays available.
+    let i = g.idx(a).unwrap();
+    g.perms[i].attacking = true;
+    g.emit(Ev::OthersAttack, 0, None);
+    g.run_pending();
+    assert_eq!(perm(&g, worm).fired, 0, "6 power is not 12");
+    for id in [a, b, home] {
+        let i = g.idx(id).unwrap();
+        g.perms[i].tapped = true;
+        g.perms[i].attacking = id != home;
+    }
+    g.emit(Ev::OthersAttack, 0, None);
+    g.run_pending();
+    assert!(!perm(&g, a).tapped && !perm(&g, b).tapped, "both attackers");
+    assert!(perm(&g, home).tapped, "not the creature that stayed home");
+}
+
+/// Captain America, Living Legend: each creature you control untaps the first time it
+/// becomes tapped on your turn (every attacker, a creature tapped for a cost), not the
+/// second time, and not on other players' turns.
+#[test]
+fn captain_america_untaps_each_creature_on_its_first_tap() {
+    let db = db();
+    let d = prep_db(&db, &["Captain America, Living Legend", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    put(&mut g, 0, 0);
+    let a = token(&mut g, 0, 2);
+    let b = token(&mut g, 0, 2);
+    for id in [a, b] {
+        let i = g.idx(id).unwrap();
+        g.perms[i].tapped = true;
+        g.became_tapped(id);
+    }
+    g.run_pending();
+    assert!(!perm(&g, a).tapped && !perm(&g, b).tapped, "both untap");
+    let i = g.idx(a).unwrap();
+    g.perms[i].tapped = true;
+    g.became_tapped(a);
+    g.run_pending();
+    assert!(perm(&g, a).tapped, "the second tap stays");
+    // An opponent's turn: nothing.
+    g.active = 1;
+    for x in g.perms.iter_mut() {
+        x.taps = 0;
+    }
+    let i = g.idx(b).unwrap();
+    g.perms[i].tapped = true;
+    g.became_tapped(b);
+    g.run_pending();
+    assert!(perm(&g, b).tapped, "only during your turn");
+}
+
+/// "Untap it" is the creature the effect before targeted (Panther Pounce) or the equipped
+/// creature (S.H.I.E.L.D. Spy Kit), not the controller's best tapped creature.
+#[test]
+fn untap_it_is_the_creature_already_named() {
+    let db = db();
+    let d = prep_db(&db, &["S.H.I.E.L.D. Spy Kit", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let kit = put(&mut g, 0, 0);
+    let small = token(&mut g, 0, 1);
+    let big = token(&mut g, 0, 7);
+    let i = g.idx(kit).unwrap();
+    g.perms[i].attached = Some(small);
+    for id in [small, big] {
+        let i = g.idx(id).unwrap();
+        g.perms[i].tapped = true;
+    }
+    let i = g.idx(small).unwrap();
+    g.perms[i].attacking = true;
+    let k = ability_of(&g, kit, |a| a.text.contains("attacks alone"));
+    fire(&mut g, kit, k);
+    assert!(!perm(&g, small).tapped, "the equipped creature untaps");
+    assert!(perm(&g, big).tapped, "nothing else does");
+}

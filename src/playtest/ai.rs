@@ -4447,7 +4447,7 @@ pub fn respond_to_spell(g: &mut Game, caster: usize, card: CardRef, back: bool) 
                     g.perms[i].tapped = true;
                     let snap = g.perms[i].clone();
                     g.emit_about(Ev::TeamworkTapped, o, &snap);
-                    g.emit(Ev::Tapped, o, Some(id));
+                    g.became_tapped(id);
                 }
             }
         }
