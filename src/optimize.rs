@@ -826,7 +826,9 @@ pub fn value_refine(
             av - cv >= NOMINATE_GAP
                 && work.count_of(cut) > 0
                 && !swaps.iter().any(|s| s.0 == *cut)
-                && (!cohesive || crate::cohesion::swap_keeps_plan(&work, db, cut, add, 1))
+                && (!cohesive
+                    || std::env::var_os("MSH_REFINE_FREE").is_some()
+                    || crate::cohesion::swap_keeps_plan(&work, db, cut, add, 1))
         });
         if let Some((_, cut)) = cut {
             work.remove(cut, 1);
