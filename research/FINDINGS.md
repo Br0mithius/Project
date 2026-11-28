@@ -206,3 +206,16 @@ worked; Affectionate Indrik is a bot choice).
   (10,000 paired games): Thanos -0.38 ± 0.34, Will -0.09 ± 0.24, Drake -0.61 ± 0.15, JD
   +0.11 ± 0.27. The refined rule is the default. Lesson for every bot rule from here: test
   it one seat at a time AND with every seat using it.
+
+## 2026-11-28: self-review rerun on the new bots (hold rule on, audited rules, 40 life)
+
+360 games (140 Thanos list, 110 Drake, 110 JD as the reviewed seat), every option at every
+decision, 30 play-outs each, no selection (`research/data/bot_review_r3_*.tsv.gz`). Average
+gain of each class of alternative over the bot's own choice, win-rate points:
+no attack -0.53 ± 0.42 (rounds 5-7 +0.73 ± 0.43, 8-10 +0.71 ± 0.91, 11+ -2.58 ± 0.90; it
+was +1.2 ± 0.3 before the rule), a different attack -1.73 ± 0.34, no blocks -2.76 ± 1.04,
+pass in main phase -0.96 ± 0.20, a different land/spell first -0.03 ± 0.15, "none" on an
+optional choice -1.31 ± 0.53, a different pick on a choice -0.88 ± 0.14, pass instead of
+responding +0.06 ± 0.06. No class of alternative beats the bot any more; the hold rule
+used up the one pattern this coarse split could see. The next patterns need finer
+features (which attack, which target) or far more games per class.
