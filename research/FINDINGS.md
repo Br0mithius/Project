@@ -219,3 +219,18 @@ optional choice -1.31 ± 0.53, a different pick on a choice -0.88 ± 0.14, pass 
 responding +0.06 ± 0.06. No class of alternative beats the bot any more; the hold rule
 used up the one pattern this coarse split could see. The next patterns need finer
 features (which attack, which target) or far more games per class.
+
+## 2026-11-28: pool values and swap pass at 40 life (Session 5 list)
+
+Pool re-measured in the tested Session 5 list, 3,000 games a card, audited rules, hold-rule
+bots, 40 life (`research/data/pool_values_40life_s5.tsv`). Nearly every card measures
+higher than at 30 life; bench cards Beorn's Hospitality +3.0, She-Hulk +2.8, Kree Sentinel
++2.3 now rate above much of the deck; Alien Invasion +1.7 (was -0.4); Undercover Skrull
++0.2 and Doc Samson +0.6 are the bottom of the deck.
+Slot tests, 6,000 paired games (`swap_pass_40life_s5.txt`): for Skrull, She-Hulk +1.84 ±
+0.40, Beorn's +1.61, Pet Avengers +1.50; for Doc Samson, Beorn's +1.67 ± 0.40, Pet Avengers
++1.33; nothing beats Rapid Rescue (Alien Invasion -1.29 ± 0.39, was -2.36 at 30 life).
+Confirmation on fresh games, 10,000: She-Hulk + Beorn's +1.94 ± 0.38 overall but table
+-0.59 ± 0.46, peer field +3.03 ± 0.50; Pet Avengers + Beorn's +2.05 ± 0.37, table +0.24 ±
+0.45, peer field +2.83. The gain is against the peer field only; against the real table
+(Drake, Will, JD) the swaps are a wash. List not changed.

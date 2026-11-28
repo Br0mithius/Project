@@ -25,3 +25,7 @@ HULK SMASH!                        -1.03 ± 0.38  (table -1.65 ± 0.47, peer fie
 Pet Avengers                       -0.18 ± 0.39  (table -0.92 ± 0.48, peer field +0.13 ± 0.53)
 Alien Invasion                     -1.29 ± 0.39  (table -2.43 ± 0.46, peer field -0.80 ± 0.53)
 Iron Man, Master of Machines       -0.61 ± 0.39  (table -1.30 ± 0.46, peer field -0.32 ± 0.52)
+in place of Undercover Skrull (10000 games each; points of win rate, + = better than Undercover Skrull):
+Undercover Skrull>She-Hulk, Jade Defender|Doc Samson, Super Psychiatrist>Beorn's Hospitality +1.94 ± 0.38  (table -0.59 ± 0.46, peer field +3.03 ± 0.50)
+Undercover Skrull>She-Hulk, Jade Defender|Doc Samson, Super Psychiatrist>Pet Avengers +1.39 ± 0.38  (table -0.66 ± 0.46, peer field +2.27 ± 0.50)
+Undercover Skrull>Pet Avengers|Doc Samson, Super Psychiatrist>Beorn's Hospitality +2.05 ± 0.37  (table +0.24 ± 0.45, peer field +2.83 ± 0.50)
