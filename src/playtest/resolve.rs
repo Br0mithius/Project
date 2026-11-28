@@ -3365,6 +3365,7 @@ impl<'a> Game<'a> {
                         _ => 1,
                     })
                     .unwrap_or(1);
+                self.ext.you_sacrificed = false;
                 for o in victims {
                     let types = if text.contains("creature or planeswalker") {
                         T_CREATURE | T_PLANESWALKER
@@ -3376,9 +3377,26 @@ impl<'a> Game<'a> {
                     for _ in 0..n {
                         if let Some(i) = self.h_sacrifice(o, types, &ctx.card_restr) {
                             self.sacrifice(i);
+                            self.ext.you_sacrificed |= o == me;
                         }
                     }
                 }
+            }
+            // "If you sacrificed a creature this way, create a 4/4 Beast" (Garruk, Veiled
+            // Butcher): nothing when you had no creature to sacrifice.
+            Effect::Tokens { .. }
+                if text.contains("if you sacrificed a creature this way, create")
+                    && !self.ext.you_sacrificed => {}
+            // "For each opponent who didn't discard two nonland cards this way, you draw a
+            // card" (Garruk, Veiled Butcher).
+            Effect::Draw { you: true, .. }
+                if text.contains(
+                    "for each opponent who didn't discard two nonland cards this way",
+                ) =>
+            {
+                let n = std::mem::take(&mut self.ext.short_discards).max(0);
+                self.last_drawn = n;
+                self.draw(me, n as u32);
             }
             // Countering happens when the spell is cast (see `ai::respond_to_spell`).
             Effect::CounterSpell => {}
@@ -3398,6 +3416,30 @@ impl<'a> Game<'a> {
                 if !skip {
                     for _ in 0..k {
                         self.discard(me);
+                    }
+                }
+            }
+            // "Draw two cards. If your library has no cards in it, you win the game ... (If
+            // you draw from an empty library this way, you still win the game.)" (Fblthp,
+            // Impossibly Lost).
+            Effect::Draw { amount, you: true }
+                if text.contains("if your library has no cards in it, you win the game") =>
+            {
+                let n = self.x_value(ctx, amount).max(0);
+                self.last_drawn = n;
+                self.ext.no_deck_loss = true;
+                self.draw(me, n as u32);
+                self.ext.no_deck_loss = false;
+                // (Not against "your opponents can't win the game".)
+                let opps = self.opponents(me);
+                if self.players[me].library.is_empty()
+                    && !opps
+                        .iter()
+                        .any(|&o| self.players[o].alive && self.cant_lose(o))
+                {
+                    self.note(|| format!("P{} wins the game with an empty library", me));
+                    for o in opps {
+                        self.players[o].alive = false;
                     }
                 }
             }
@@ -3594,7 +3636,16 @@ impl<'a> Game<'a> {
                     } else {
                         1
                     };
+                    self.ext.short_discards = 0;
                     for o in victims {
+                        let nonland = |g: &Game, o: usize| {
+                            let pl = &g.players[o];
+                            pl.hand
+                                .iter()
+                                .filter(|&&c| !pl.cards[c as usize].is(T_LAND))
+                                .count()
+                        };
+                        let before = nonland(self, o);
                         if whole_hand {
                             let hand = std::mem::take(&mut self.players[o].hand);
                             let had = !hand.is_empty();
@@ -3605,6 +3656,9 @@ impl<'a> Game<'a> {
                         } else if times > 1 {
                             for _ in 0..times.min(self.players[o].hand.len()) {
                                 self.discard(o);
+                            }
+                            if o != me && before.saturating_sub(nonland(self, o)) < 2 {
+                                self.ext.short_discards += 1;
                             }
                         } else if text.contains("reveal") || text.contains("you choose") {
                             self.reveal_and_take(ctx, o);
@@ -4992,6 +5046,39 @@ impl<'a> Game<'a> {
                 }
                 self.recalc();
             }
+            // "If it's a Dwarf, you may attach an Equipment you control to it" (Vow to
+            // Erebor): only to the creature just targeted, only if it is one, and any
+            // Equipment you control (the bot moves only a free one).
+            Effect::Attach
+                if text.contains("if it's a")
+                    && text.contains("you may attach an equipment you control to it") =>
+            {
+                let Some(host) = self.last_targets.iter().rev().find_map(|&id| self.idx(id)) else {
+                    return;
+                };
+                let kind = text
+                    .split("if it's a ")
+                    .nth(1)
+                    .and_then(|r| r.split([',', ' ']).next())
+                    .unwrap_or("");
+                if !self.perms[host].subtypes.iter().any(|s| s == kind) {
+                    return;
+                }
+                let hid = self.perms[host].id;
+                let gear: Vec<usize> = (0..self.perms.len())
+                    .filter(|&i| {
+                        let x = &self.perms[i];
+                        x.ctrl as usize == me && x.is(T_EQUIPMENT) && x.attached != Some(hid)
+                    })
+                    .collect();
+                let free = ai::unattached_equipment(self, me).filter(|e| gear.contains(e));
+                if let Some(e) =
+                    self.h_pick(me, &gear, "Attach which Equipment? (or none)", free, true)
+                {
+                    self.perms[e].attached = Some(hid);
+                    self.recalc();
+                }
+            }
             Effect::Attach => {
                 let src = self.src_idx(ctx);
                 let equipment = src
@@ -6104,6 +6191,23 @@ impl<'a> Game<'a> {
                     .filter(|(k, _)| with.contains(k))
                     .fold(0, |m, (_, b)| m | b);
                 let i = self.make_token(o, p, t, kw, token_subtypes(text));
+                // Abilities in quotes, a name ("The Void, a legendary ... token with "The
+                // Void attacks each combat if able""): the card's token.
+                if let Some(r) = ctx
+                    .card_ref
+                    .filter(|_| text.contains('"') || text.contains(", a legendary "))
+                    .filter(|&r| self.card(r).token.is_some())
+                {
+                    let tk = self
+                        .card(r)
+                        .token
+                        .as_deref()
+                        .map_or((0, 0), |t| (t.kw, t.types));
+                    let x = &mut self.perms[i];
+                    x.tok_src = Some(r);
+                    x.kw |= tk.0;
+                    x.types |= tk.1 & T_LEGENDARY;
+                }
                 self.after_enter(i);
             }
             // The permanent itself becomes a creature (for good, or until end of turn).
@@ -6146,6 +6250,14 @@ impl<'a> Game<'a> {
                     x.base_p = pt.0;
                     x.base_t = pt.1;
                     x.kw |= kw;
+                    // 'Gains "power and toughness are each equal to the number of lands
+                    // you control"': followed from now on, as lands come and go.
+                    if rest.contains("equal to the number of lands you control") {
+                        let id = x.id;
+                        if !self.ext.land_pt.contains(&id) {
+                            self.ext.land_pt.push(id);
+                        }
+                    }
                 }
                 self.recalc();
             }

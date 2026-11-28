@@ -3488,8 +3488,10 @@ fn bifur_doubles_dwarf_triggers_with_an_enduring_story() {
     for _ in 0..3 {
         put(&mut g, 0, 1);
     }
-    assert!(g.players[0].enduring_story);
+    // (Not before a permanent with storied is there: ruling 2026-06-29.)
+    assert!(!g.players[0].enduring_story);
     put(&mut g, 0, 0);
+    assert!(g.players[0].enduring_story);
     assert_eq!(counters(&g), 2);
 }
 
@@ -6492,4 +6494,113 @@ fn hawkeye_young_avenger_adds_his_power_to_noncombat_damage() {
     fire_card(&mut g, 1, 0, None);
     let dealt = (30 - g.players[1].life) + perm(&g, wall).damage as i32;
     assert_eq!(dealt, 5, "3 + Hawkeye's power 2");
+}
+
+/// Beorn's Hospitality as a Bear: its power and toughness follow the number of lands (they
+/// were counted once, when the ability resolved).
+#[test]
+fn beorns_hospitality_follows_the_land_count() {
+    let db = db();
+    let d = prep_db(&db, &["Beorn's Hospitality", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 3, 'G');
+    let bear = put(&mut g, 0, 0);
+    let k = ability_of(&g, bear, |a| a.text.contains("becomes a bear"));
+    fire(&mut g, bear, k);
+    assert!(perm(&g, bear).is_creature());
+    assert_eq!((perm(&g, bear).p, perm(&g, bear).t), (3, 3));
+    lands(&mut g, 0, 2, 'G');
+    g.recalc();
+    // (Its own landfall put a +1/+1 counter on it for each of the two.)
+    let x = perm(&g, bear);
+    assert_eq!(
+        (x.p - x.counters, x.t - x.counters),
+        (5, 5),
+        "two more lands"
+    );
+}
+
+/// Vow to Erebor: "if it's a Dwarf, you may attach an Equipment you control to it" - not
+/// to another kind of creature.
+#[test]
+fn vow_to_erebor_attaches_only_to_a_dwarf() {
+    let db = db();
+    let d = prep_db(&db, &["Vow to Erebor", "Basilisk Collar", "Axgard Cavalry"]);
+    let mut g = game(&[&d, &d]);
+    let collar = put(&mut g, 0, 1);
+    let elf = token(&mut g, 0, 3);
+    fire_card(&mut g, 0, 0, None);
+    assert_eq!(perm(&g, elf).temp_p, 2, "the token is pumped");
+    assert_eq!(perm(&g, collar).attached, None, "but it's no Dwarf");
+    let mut g = game(&[&d, &d]);
+    let collar = put(&mut g, 0, 1);
+    let dwarf = put(&mut g, 0, 2);
+    fire_card(&mut g, 0, 0, None);
+    assert_eq!(perm(&g, collar).attached, Some(dwarf));
+}
+
+/// The Sentry's token for an opponent is The Void: legendary, and it attacks each combat
+/// if able (it was a plain 5/5 that could stay home).
+#[test]
+fn the_void_must_attack() {
+    let db = db();
+    let d = prep_db(&db, &["The Sentry, Golden Guardian"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let i = g
+        .perms
+        .iter()
+        .position(|x| x.ctrl == 1 && x.is_token())
+        .expect("The Void");
+    assert!(g.must_attack(i), "attacks each combat if able");
+    assert!(g.perms[i].is(T_LEGENDARY));
+    assert!(g.perms[i].has(FLYING) && g.perms[i].has(INDESTRUCTIBLE));
+}
+
+/// Garruk, Veiled Butcher: [-2] makes the Beast only if you sacrificed a creature; [-3]
+/// draws a card for each opponent who didn't discard two nonland cards.
+#[test]
+fn garruk_veiled_butcher_counts_what_happened() {
+    let db = db();
+    let d = prep_db(&db, &["Garruk, Veiled Butcher", "Swamp", "Mind Stone"]);
+    let mut g = game(&[&d, &d]);
+    let garruk = put(&mut g, 0, 0);
+    let k = ability_of(&g, garruk, |a| a.text.starts_with("[-2]"));
+    fire(&mut g, garruk, k);
+    assert!(
+        !g.perms.iter().any(|x| x.is_token()),
+        "no creature sacrificed, no Beast"
+    );
+    token(&mut g, 0, 1);
+    fire(&mut g, garruk, k);
+    assert!(g.perms.iter().any(|x| x.is_token() && x.base_p == 4));
+    let k = ability_of(&g, garruk, |a| a.text.starts_with("[-3]"));
+    g.players[1].hand = vec![2, 2, 2];
+    fire(&mut g, garruk, k);
+    assert_eq!(g.players[0].hand.len(), 0, "two nonland cards: no card");
+    g.players[1].hand = vec![1, 2];
+    fire(&mut g, garruk, k);
+    assert_eq!(g.players[0].hand.len(), 1, "a land among them: a card");
+}
+
+/// Fblthp, Impossibly Lost: with the library empty after the draw you win, even when the
+/// draw came from an empty library (that made its controller lose).
+#[test]
+fn fblthp_wins_with_an_empty_library() {
+    let db = db();
+    let d = prep_db(&db, &["Fblthp, Impossibly Lost", "Island"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let f = put(&mut g, 0, 0);
+    let k = ability_of(&g, f, |a| a.text.contains("you win the game"));
+    fire(&mut g, f, k);
+    assert!(g.players[1].alive, "cards left in the library: no win");
+    let f = put(&mut g, 0, 0);
+    g.players[0].library = vec![1];
+    fire(&mut g, f, k);
+    assert!(
+        g.players[0].alive,
+        "drawing from the empty library doesn't lose"
+    );
+    assert!(!g.players[1].alive, "you win the game");
 }

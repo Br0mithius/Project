@@ -4807,7 +4807,6 @@ ABILITIES:
       -> Opp B's Bear left the battlefield
       -> You gets 4/4 beast token 4/4 with trample
   Loyalty(-3): "[-3]: each opponent discards two cards. for each opponent who didn't discard two nonland cards this way, you draw a card."
-      -> You: hand +1, library -1
       -> Opp A: hand -2, graveyard +2
       -> Opp B: hand -2, graveyard +2
 
@@ -12171,7 +12170,7 @@ ABILITIES:
 
 The Sentry, Golden Guardian | {3}{W} | Legendary Creature — Human Hero | 5/5
 TEXT: Flying, vigilance, indestructible / When The Sentry enters, target opponent creates The Void, a legendary 5/5 black Horror Villain creature token with flying, indestructible, and "The Void attacks each combat if able."
-SIM: keywords flying, vigilance, indestructible
+SIM: keywords flying, vigilance, indestructible; its creature token: legendary "The Void" "~ attacks each combat if able."
 On entering:
       itself: 5/5 flying, vigilance, indestructible
       -> Opp A gets 5/5 villain horror token 5/5 with flying, indestructible

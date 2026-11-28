@@ -502,6 +502,18 @@ pub struct GameExtra {
     /// Creatures whose base power is the number of cards in their controller's hand until
     /// end of turn (Ms. Marvel's Embiggen Fist).
     pub hand_power: Vec<u32>,
+    /// Permanents that gained "this creature's power and toughness are each equal to the
+    /// number of lands you control" for good (Beorn's Hospitality): see `Game::recalc`.
+    pub land_pt: Vec<u32>,
+    /// Drawing from an empty library doesn't lose the game right now ("draw two cards. If
+    /// your library has no cards in it, you win the game", Fblthp, Impossibly Lost).
+    pub no_deck_loss: bool,
+    /// The controller sacrificed a creature to the Edict just resolved ("if you sacrificed
+    /// a creature this way", Garruk, Veiled Butcher).
+    pub you_sacrificed: bool,
+    /// Opponents who didn't discard two nonland cards to the discard just resolved ("for
+    /// each opponent who didn't discard two nonland cards this way, you draw a card").
+    pub short_discards: i32,
     /// What the rest of the AI's turn plan costs (with a creature's power-up used the turn
     /// it is cast): a payment leaves the sources that pay it untapped when it can.
     pub follow: std::cell::Cell<Mana>,
@@ -869,11 +881,24 @@ impl<'a> Game<'a> {
     /// self-buffs, locks; then state-based actions.
     pub fn recalc(&mut self) {
         self.tick += 1;
+        // Lands each player controls, for "power and toughness are each equal to the number
+        // of lands you control" (counted only when something has that ability).
+        let mut lands = [0i16; 8];
+        if !self.ext.land_pt.is_empty() {
+            for x in self.perms.iter().filter(|x| x.is(T_LAND)) {
+                lands[x.ctrl as usize % 8] += 1;
+            }
+        }
         let (hand_power, players) = (&self.ext.hand_power, &self.players);
+        let land_pt = &self.ext.land_pt;
         for x in self.perms.iter_mut() {
-            let (mut bp, bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
+            let (mut bp, mut bt) = x.temp_base.unwrap_or((x.base_p, x.base_t));
             if hand_power.contains(&x.id) {
                 bp = players[x.ctrl as usize % players.len()].hand.len() as i16;
+            }
+            if land_pt.contains(&x.id) && !x.no_abilities {
+                bp = lands[x.ctrl as usize % 8];
+                bt = bp;
             }
             let (tp, tt) = x.till.map_or((0, 0), |t| (t.0, t.1));
             x.p = bp + x.counters + x.temp_p + tp;
@@ -1164,7 +1189,16 @@ impl<'a> Game<'a> {
         self.rules = rules;
         // Enduring story (Storied): three or more artifacts, legendaries and/or Sagas.
         for p in 0..self.players.len() {
-            if !self.players[p].enduring_story {
+            // (Only while the player controls a permanent with storied: without one, three
+            // such permanents give no enduring story - ruling 2026-06-29.)
+            if !self.players[p].enduring_story
+                && self.perms.iter().any(|x| {
+                    x.ctrl as usize == p
+                        && !x.no_abilities
+                        && !x.blank
+                        && x.card.is_some_and(|r| self.card(r).storied)
+                })
+            {
                 let n = self
                     .perms
                     .iter()
@@ -2012,7 +2046,7 @@ impl<'a> Game<'a> {
                         }
                         self.note(|| format!("P{} draws from an empty library", p));
                     }
-                    if !self.cant_lose(p) {
+                    if !self.cant_lose(p) && !self.ext.no_deck_loss {
                         self.players[p].alive = false;
                     }
                     return;

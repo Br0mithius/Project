@@ -3355,10 +3355,15 @@ fn token_card(card: &Card) -> Option<SimCard> {
     let text = crate::card::strip_reminder(&card.oracle_text);
     let text = text.split("// Back face:").next().unwrap_or("");
     for line in text.lines() {
-        let Some(c) = line.find("reate ") else {
+        // ("Create ...", or "target opponent creates The Void, a legendary ...".)
+        let Some(c) = line
+            .find("reate ")
+            .map(|c| c + 6)
+            .or_else(|| line.find("reates ").map(|c| c + 7))
+        else {
             continue;
         };
-        let rest = &line[c + 6..];
+        let rest = &line[c..];
         let Some(t) = rest.find(" token") else {
             continue;
         };
