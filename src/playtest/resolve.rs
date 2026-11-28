@@ -5282,6 +5282,9 @@ impl<'a> Game<'a> {
                     else {
                         return;
                     };
+                    // ("Untap that creature" after it - Super Suit - is this one.)
+                    self.targeted = true;
+                    self.last_targets = vec![self.perms[c].id];
                     if let Some(e) = equipment {
                         let cid = self.perms[c].id;
                         self.perms[e].attached = Some(cid);

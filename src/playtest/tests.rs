@@ -6951,3 +6951,49 @@ fn jiang_yanggu_alone_sees_a_lone_attacker() {
     g.run_pending();
     assert_eq!(perm(&g, b).counters + perm(&g, c).counters, 0);
 }
+
+/// Path of Ancestry: its mana spent on a creature spell that shares a creature type with
+/// the commander scries 1.
+#[test]
+fn path_of_ancestry_scries_for_a_kindred_creature_spell() {
+    let db = db();
+    let d = prep_db(&db, &["Path of Ancestry", "Axgard Cavalry", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    g.players[0].px.identity = 0b11111;
+    g.players[0].px.commander_types = vec!["elf".to_string()];
+    lands(&mut g, 0, 1, 'R');
+    let path = put(&mut g, 0, 0);
+    let i = g.idx(path).unwrap();
+    g.perms[i].tapped = false;
+    g.players[0].hand = vec![1];
+    g.players[0].scried_turn = false;
+    assert!(g.cast(0, Src::Hand(0), Default::default()));
+    assert!(
+        !g.players[0].scried_turn,
+        "an Elf commander: no shared type"
+    );
+    // A Dwarf commander: the Dwarf spell paid with the Path scries.
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    g.players[0].px.commander_types = vec!["dwarf".to_string()];
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), Default::default()));
+    assert!(g.players[0].scried_turn, "scry 1");
+}
+
+/// Super Suit: "attach it to target creature you control. Untap that creature" untaps the
+/// creature it was attached to.
+#[test]
+fn super_suit_untaps_the_creature_it_is_attached_to() {
+    let db = db();
+    let d = prep_db(&db, &["Super Suit"]);
+    let mut g = game(&[&d, &d]);
+    let a = token(&mut g, 0, 3);
+    let i = g.idx(a).unwrap();
+    g.perms[i].tapped = true;
+    let suit = put(&mut g, 0, 0);
+    assert_eq!(perm(&g, suit).attached, Some(a));
+    assert!(!perm(&g, a).tapped);
+}
