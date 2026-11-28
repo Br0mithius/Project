@@ -2108,6 +2108,16 @@ impl<'a> Game<'a> {
                 } else {
                     ai::choose_friends(self, me, &cands, 1)
                 };
+                let pick: Vec<usize> = self
+                    .h_pick(
+                        me,
+                        &cands,
+                        "Attach the Aura to which creature?",
+                        pick.first().copied(),
+                        false,
+                    )
+                    .into_iter()
+                    .collect();
                 if let (Some(&t), Some(j)) = (pick.first(), self.idx(id)) {
                     let tid = self.perms[t].id;
                     self.attach_aura(j, tid);
@@ -2767,7 +2777,16 @@ impl<'a> Game<'a> {
                     .contains("that creature deals damage")
                     .then(|| self.last_targets.iter().find_map(|&id| self.idx(id)))
                     .flatten();
-                let Some(b) = chosen.or_else(|| ai::best_fighter(self, me)) else {
+                let Some(b) = chosen.or_else(|| {
+                    let mine = self.own_creatures(me, None);
+                    self.h_pick(
+                        me,
+                        &mine,
+                        "Which of your creatures deals the damage?",
+                        ai::best_fighter(self, me),
+                        false,
+                    )
+                }) else {
                     return;
                 };
                 let p = self.perms[b].p.max(0) as i32;
@@ -2995,11 +3014,27 @@ impl<'a> Game<'a> {
                 let other_fighter = text.contains("another target creature you control fight")
                     || text.contains("target creature you control fight");
                 let mine = if other_fighter {
-                    ai::best_fighter_except(self, me, ctx.src)
+                    let mine = self.own_creatures(me, ctx.src);
+                    self.h_pick(
+                        me,
+                        &mine,
+                        "Which of your creatures fights?",
+                        ai::best_fighter_except(self, me, ctx.src),
+                        false,
+                    )
                 } else {
                     self.src_idx(ctx)
                         .filter(|&i| self.perms[i].is_creature())
-                        .or_else(|| ai::best_fighter(self, me))
+                        .or_else(|| {
+                            let mine = self.own_creatures(me, None);
+                            self.h_pick(
+                                me,
+                                &mine,
+                                "Which of your creatures fights?",
+                                ai::best_fighter(self, me),
+                                false,
+                            )
+                        })
                 };
                 let Some(mi) = mine else { return };
                 let my_id = self.perms[mi].id;
@@ -3028,7 +3063,9 @@ impl<'a> Game<'a> {
                         .filter(|&i| ai::perm_value(self, i) >= mine_value)
                         .collect();
                     let pool = if safe.is_empty() { trades } else { safe };
-                    ai::choose_victims(self, me, &pool, 1)
+                    let ai_pick = ai::choose_victims(self, me, &pool, 1).first().copied();
+                    let all = self.candidates(ctx, t, true);
+                    self.h_pick(me, &all, "Fight which creature? (or none)", ai_pick, true)
                         .into_iter()
                         .map(|i| self.perms[i].id)
                         .collect()
@@ -4252,6 +4289,7 @@ impl<'a> Game<'a> {
                     }
                     let pick = ai::untap_choice(self, me, &cands)
                         .or_else(|| ai::choose_friends(self, me, &cands, 1).first().copied());
+                    let pick = self.h_pick(me, &cands, "Untap which permanent?", pick, false);
                     let ids: Vec<u32> = pick.map(|i| self.perms[i].id).into_iter().collect();
                     self.targeted = true;
                     self.last_targets = ids.clone();
@@ -4262,7 +4300,8 @@ impl<'a> Game<'a> {
                         ..*t
                     };
                     let cands = self.candidates(ctx, &t2, false);
-                    ai::untap_choice(self, me, &cands)
+                    let pick = ai::untap_choice(self, me, &cands);
+                    self.h_pick(me, &cands, "Untap which permanent? (or none)", pick, true)
                         .map(|i| self.perms[i].id)
                         .into_iter()
                         .collect()
@@ -4564,34 +4603,29 @@ impl<'a> Game<'a> {
                         // itself.
                         let src = ctx.src.filter(|_| text.contains("target"));
                         let types = blink_types(text);
-                        if delayed {
-                            ai::blink_choice(self, me, src, types)
-                        } else {
-                            ai::blink_choice_now(self, me, src, types)
-                        }
-                        .filter(|&i| !done.contains(&self.perms[i].id))
-                        .or_else(|| {
-                            // "Two target ...": two of them whenever two are legal - the
-                            // other one a tapped land (it comes back untapped) if nothing
-                            // gains more.
-                            (times == 2).then_some(())?;
-                            (0..self.perms.len())
-                                .filter(|&i| {
-                                    let x = &self.perms[i];
-                                    x.ctrl as usize == me
-                                        && x.tok == Tok::None
-                                        && x.commander == 0
-                                        && x.card.is_some()
-                                        && Some(x.id) != src
-                                        && !done.contains(&x.id)
-                                        && (x.is(types)
-                                            || types & T_CREATURE != 0 && x.is_creature())
-                                })
-                                .max_by_key(|&i| {
-                                    let x = &self.perms[i];
-                                    (x.tapped && x.is(T_LAND), !x.is_creature())
-                                })
-                        })
+                        self.h_blink(me, src, types, !delayed, text.contains("up to one"), &done)
+                            .or_else(|| {
+                                // "Two target ...": two of them whenever two are legal - the
+                                // other one a tapped land (it comes back untapped) if nothing
+                                // gains more.
+                                (times == 2).then_some(())?;
+                                (0..self.perms.len())
+                                    .filter(|&i| {
+                                        let x = &self.perms[i];
+                                        x.ctrl as usize == me
+                                            && x.tok == Tok::None
+                                            && x.commander == 0
+                                            && x.card.is_some()
+                                            && Some(x.id) != src
+                                            && !done.contains(&x.id)
+                                            && (x.is(types)
+                                                || types & T_CREATURE != 0 && x.is_creature())
+                                    })
+                                    .max_by_key(|&i| {
+                                        let x = &self.perms[i];
+                                        (x.tapped && x.is(T_LAND), !x.is_creature())
+                                    })
+                            })
                     };
                     let Some(i) = target else { return };
                     let x = self.perms[i].clone();
@@ -4805,7 +4839,10 @@ impl<'a> Game<'a> {
                         ..t
                     };
                     let cands = self.candidates(ctx, &t, false);
-                    let Some(&c) = ai::choose_friends(self, me, &cands, 1).first() else {
+                    let ai_pick = ai::choose_friends(self, me, &cands, 1).first().copied();
+                    let Some(c) =
+                        self.h_pick(me, &cands, "Attach it to which creature?", ai_pick, false)
+                    else {
                         return;
                     };
                     if let Some(e) = equipment {
@@ -4816,7 +4853,16 @@ impl<'a> Game<'a> {
                 }
                 if let Some(e) = equipment {
                     let eid = self.perms[e].id;
-                    if let Some(c) = made.or_else(|| ai::equip_target(self, me, eid)) {
+                    if let Some(c) = made.or_else(|| {
+                        let mine = self.own_creatures(me, None);
+                        self.h_pick(
+                            me,
+                            &mine,
+                            "Attach it to which creature?",
+                            ai::equip_target(self, me, eid),
+                            false,
+                        )
+                    }) {
                         let cid = self.perms[c].id;
                         if let Some(e) = self.idx(eid) {
                             self.perms[e].attached = Some(cid);

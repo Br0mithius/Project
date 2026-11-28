@@ -2178,6 +2178,77 @@ impl<'a> Game<'a> {
         )
     }
 
+    /// Which permanent a flicker ("exile ... you control, then return it") takes. The player
+    /// at the table picks among everything legal, or nothing when the text says "up to one".
+    pub(crate) fn h_blink(
+        &self,
+        me: usize,
+        src: Option<u32>,
+        types: u16,
+        now: bool,
+        optional: bool,
+        skip: &[u32],
+    ) -> Option<usize> {
+        let ai_pick = if now {
+            ai::blink_choice_now(self, me, src, types)
+        } else {
+            ai::blink_choice(self, me, src, types)
+        }
+        .filter(|&i| !skip.contains(&self.perms[i].id));
+        if !self.is_human(me) {
+            return ai_pick;
+        }
+        let cands: Vec<usize> = (0..self.perms.len())
+            .filter(|&i| {
+                let x = &self.perms[i];
+                x.ctrl as usize == me
+                    && Some(x.id) != src
+                    && !skip.contains(&x.id)
+                    && (x.commander == 0 || now && x.owner as usize == me)
+                    && (x.is(types) || types & T_CREATURE != 0 && x.is_creature())
+            })
+            .collect();
+        if cands.is_empty() {
+            return None;
+        }
+        self.pick_perm(
+            &cands,
+            if optional {
+                "Exile and return which permanent? (or none)"
+            } else {
+                "Exile and return which permanent?"
+            },
+            ai_pick,
+            optional,
+        )
+    }
+
+    /// A choice among permanents (`cands`, board indices) that the bots make by rule: the
+    /// player at the table is asked, with the bot's pick suggested.
+    pub(crate) fn h_pick(
+        &self,
+        me: usize,
+        cands: &[usize],
+        prompt: &str,
+        ai_pick: Option<usize>,
+        optional: bool,
+    ) -> Option<usize> {
+        if !self.is_human(me) || cands.is_empty() {
+            return ai_pick;
+        }
+        self.pick_perm(cands, prompt, ai_pick, optional)
+    }
+
+    /// `p`'s creatures (board indices), optionally without the permanent `not`.
+    pub(crate) fn own_creatures(&self, p: usize, not: Option<u32>) -> Vec<usize> {
+        (0..self.perms.len())
+            .filter(|&i| {
+                let x = &self.perms[i];
+                x.ctrl as usize == p && x.is_creature() && Some(x.id) != not
+            })
+            .collect()
+    }
+
     fn pick_perm(
         &self,
         cands: &[usize],

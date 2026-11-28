@@ -1460,6 +1460,12 @@ pub mod exp {
     /// against the other two players. Off; `MSH_AI_EXP=16` makes every seat swing wide, to
     /// test a card's value against opponents who attack through blockers.
     pub const WIDE_SWING: u32 = 16;
+    /// A permanent's "at the beginning of your ..." engine is worth more the earlier it is
+    /// cast (it fires every turn that is left): the cast order rates it up to round 7 and
+    /// down after round 10. Without it the rating is the same all game, and an engine like
+    /// Alien Invasion (a growing token every turn) waits behind every creature: in 60 logged
+    /// games it was cast in round 12 on average, never before round 7.
+    pub const EARLY_ENGINE: u32 = 32;
 }
 
 /// A response window is likely on the opponents' turns: some opponent controls an
@@ -2532,6 +2538,21 @@ pub(crate) fn spell_value(g: &Game, p: usize, idx: u16, back: bool, commander: b
             v += 2.5 + c.loyalty as f32 * 0.5;
         }
         v += engine_value(&c.abilities);
+        if exp_on(g, p, exp::EARLY_ENGINE) {
+            let yearly: f32 = c
+                .abilities
+                .iter()
+                .filter(|a| matches!(a.trig, Trig::Phase { .. }))
+                .map(|a| engine_value(std::slice::from_ref(a)))
+                .sum();
+            let stage = match g.round {
+                0..=4 => 1.2,
+                5..=7 => 0.6,
+                8..=10 => 0.0,
+                _ => -0.3,
+            };
+            v += yearly.max(0.0) * stage;
+        }
         // Abilities about Equipment (Ronin's mana for Equipment, "sacrifice an Equipment
         // attached to ~") do nothing for a player without any.
         let no_gear = true
