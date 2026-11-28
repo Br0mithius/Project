@@ -441,9 +441,12 @@ pub struct HumanLink {
     phase: RefCell<String>,
     /// Every answer the engine used, in order (replays the game with the same seed).
     pub transcript: RefCell<Vec<Answer>>,
-    /// Decision review (`review`): once more than this many answers are in, the game takes
-    /// a new random seed and every library is reshuffled - the same position played out
-    /// with different luck (`Game::fork_check`).
+    /// Decision review (`review`): once this many answers are in - right before the next
+    /// question, where the seat is about to act - the game takes a new random seed and every
+    /// library is reshuffled: the same position played out with different luck
+    /// (`Game::fork_check`). Before the decision, so that whatever each choice draws or
+    /// rolls comes after the reshuffle in every line (after it, a line that draws this turn
+    /// would draw the recorded game's cards every time and the others random ones).
     pub fork: Cell<Option<(usize, u64)>>,
 }
 
@@ -567,7 +570,7 @@ impl<'a> Game<'a> {
         let Some((k, seed)) = h.fork.get() else {
             return;
         };
-        if h.transcript.borrow().len() <= k {
+        if h.transcript.borrow().len() < k {
             return;
         }
         h.fork.set(None);
@@ -1601,6 +1604,7 @@ impl<'a> Game<'a> {
             if !self.players[p].alive || self.alive_count() <= 1 {
                 break;
             }
+            self.fork_check();
             let acts = self.human_actions(p, true);
             let a = self.ask(
                 Ask::Act {
@@ -1652,6 +1656,7 @@ impl<'a> Game<'a> {
             if !self.players[p].alive || self.alive_count() <= 1 {
                 break;
             }
+            self.fork_check();
             let acts = self.human_actions(p, false);
             let pool_empty = self.pool_get().iter().all(|&n| n == 0);
             if acts.is_empty() && pool_empty && !self.link().opts.stop_every_window {

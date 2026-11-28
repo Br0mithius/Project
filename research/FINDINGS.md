@@ -148,3 +148,10 @@ One 90-point case checked by hand (game 257, round 8): reproduced, 2 of 60 again
 cast Red Hulk; with the other land it did, kept a blocker home, and survived the next
 attack. Positions like this are knife-edge, so single gaps are large; the patterns need
 more games and other decks before any rule changes.
+- CORRECTION to the first run: the libraries were reshuffled after the decision, so a line
+  that drew cards that turn drew the recorded game's cards in every play-out and the
+  others random ones; listing only the cases where an alternative beat the bot turned that
+  noise into findings ("pass first" above all). The reshuffle now comes right before the
+  decision, and `bot_regret` writes every option of every sampled point (`GAP=0`: no
+  selection), so a kind of choice is rated by its average over all positions. The table
+  above is not to be used; rerun pending.

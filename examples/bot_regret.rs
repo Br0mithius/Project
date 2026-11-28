@@ -37,6 +37,12 @@ fn main() {
         env("CONFIRM", 160) as u32,
         env("SEED", 9000),
     );
+    let mut all = std::fs::File::create(format!("{}.all.tsv", a[2])).expect("out file");
+    writeln!(
+        all,
+        "game\tseat\tround\tkind\twhat\tplayouts\tis_bot\twins\tbot_wins\tchoice\tchoice_turn\tbot_turn"
+    )
+    .unwrap();
     writeln!(
         out,
         "game\tseat\tround\tkind\twhat\tbot_pct\tbest_pct\tgap\tse\tplayouts\tbot_turn\tbest_choice\tbest_turn"
@@ -77,9 +83,37 @@ fn main() {
             &db,
             screen,
             Some((points, seed0 + g)),
-            Some((gap, confirm)),
+            (gap > 0.0).then_some((gap, confirm)),
             &ReviewProgress::default(),
         );
+        // Every option of every sampled point (`GAP=0`: no selection, so averages over these
+        // rows are unbiased - the way to rate a kind of choice, not single cases).
+        for d in &ds {
+            let Some(bot) = d.bot() else { continue };
+            for c in &d.choices {
+                writeln!(
+                    all,
+                    "{}\t{}\t{}\t{:?}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    g,
+                    seat,
+                    d.round,
+                    d.kind,
+                    d.what,
+                    d.playouts,
+                    c.bot as u8,
+                    c.wins,
+                    bot.wins,
+                    c.label,
+                    c.then,
+                    bot.then
+                )
+                .unwrap();
+            }
+        }
+        all.flush().unwrap();
+        if gap <= 0.0 {
+            continue;
+        }
         for d in ds {
             let (Some(bot), Some(best)) = (d.bot(), d.best()) else {
                 continue;

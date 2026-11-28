@@ -9,6 +9,11 @@
 //! for each play-out. The difference in games won is what the choice was worth - as far as
 //! bots playing the rest can tell.
 //!
+//! The reshuffle comes right before the decision where the engine can do it there (main
+//! phase, response, attack and block questions). A choice asked while something resolves
+//! (a target, a yes/no) is reshuffled at the next such point instead, so a choice that
+//! draws cards is compared on the recorded game's draw: read those with care.
+//!
 //! Decisions reviewed: each main phase as a whole (what was played, against what the bot
 //! would have played), attack and block declarations, and answers given outside a main
 //! phase where the bot suggested something else. Mulligans are not (the line after a
@@ -565,7 +570,9 @@ pub fn review_with(
             .iter()
             .all(|c| c.same_game_win == choices[0].same_game_win)
             && choices.iter().all(|c| c.wins == choices[0].wins);
-        if flat {
+        // (At scale every sampled point is kept: averages over all of them are what is
+        // unbiased, the ones with no difference included.)
+        if flat && sample.is_none() {
             continue;
         }
         out.push(Decision {
