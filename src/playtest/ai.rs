@@ -2996,6 +2996,7 @@ pub(crate) fn other_zone_land(g: &Game, p: usize) -> Option<(bool, usize)> {
             x.card.0 as usize == p
                 && pl.cards[x.card.1 as usize].is(T_LAND)
                 && (!x.own_turn || g.active == p)
+                && g.playable_ok(p, k)
         })
         .map(|k| (false, k))
 }

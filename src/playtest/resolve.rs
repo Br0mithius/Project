@@ -283,6 +283,12 @@ impl<'a> Game<'a> {
                         && !a.text.contains("artifact tokens would be created")
                         && (!a.text.contains("equipped creature")
                             || src.is_some() && x.attached == src)
+                        // "If a creature you control would deal damage" (Gratuitous
+                        // Violence): creatures only, not spells or other permanents.
+                        && (!a.text.contains("if a creature you control would deal damage")
+                            || src
+                                .and_then(|id| self.idx(id))
+                                .is_some_and(|i| self.perms[i].is_creature()))
                 })
         })
     }
@@ -843,6 +849,16 @@ impl<'a> Game<'a> {
         // "Each of up to two other targets" (Drakuseth): not what the ability already hit.
         if !self.ext.not_targets.is_empty() {
             c.retain(|&i| !self.ext.not_targets.contains(&self.perms[i].id));
+        }
+        // "Whenever ~ deals combat damage to a player, ... target artifact or enchantment
+        // that player controls" (Trygon Predator): a player it dealt combat damage to this
+        // turn, not any opponent.
+        if !t.mass
+            && ctx.text.contains("that player controls")
+            && trigger_part(ctx.text).contains("deals combat damage to a player")
+        {
+            let hit = self.src_perm(ctx).map_or(0, |s| s.hit_turn);
+            c.retain(|&i| hit & (1 << self.perms[i].ctrl.min(7)) != 0);
         }
         // "Each creature except for tokens you control" (Ajani Unrelenting).
         if t.mass && ctx.text.contains("except for tokens you control") {
@@ -3592,6 +3608,7 @@ impl<'a> Game<'a> {
                             until,
                             own_turn: false,
                             pay_life: false,
+                            needs_type: None,
                         });
                     }
                 }
@@ -5536,15 +5553,33 @@ impl<'a> Game<'a> {
                                 && (!permanent || c.is_permanent())
                         })
                         .collect();
-                    // "You may put a permanent card from among them into your hand": the best.
-                    if !all && picks.len() > 1 {
+                    // "You may put a permanent card from among them into your hand": the best;
+                    // "put up to two land cards from among them" (Silvan Rally): the best two.
+                    let most = text
+                        .split("put up to ")
+                        .nth(1)
+                        .filter(|r| {
+                            r.split("from among")
+                                .next()
+                                .is_some_and(|c| !c.contains('.'))
+                        })
+                        .and_then(|r| r.split_whitespace().next())
+                        .and_then(|w| match w {
+                            "two" => Some(2),
+                            "three" => Some(3),
+                            "four" => Some(4),
+                            _ => w.parse().ok(),
+                        })
+                        .unwrap_or(1usize);
+                    if !all && picks.len() > most {
                         let value = |k: usize| self.players[me].cards[gy[k] as usize].value;
-                        let best = picks.iter().copied().max_by(|&a, &b| {
-                            value(a)
-                                .partial_cmp(&value(b))
+                        picks.sort_by(|&a, &b| {
+                            value(b)
+                                .partial_cmp(&value(a))
                                 .unwrap_or(std::cmp::Ordering::Equal)
                         });
-                        picks = best.into_iter().collect();
+                        picks.truncate(most);
+                        picks.sort_unstable();
                     }
                     for k in picks.into_iter().rev() {
                         let c = self.players[me].graveyard.remove(k);
@@ -5687,6 +5722,10 @@ impl<'a> Game<'a> {
                         || text.contains(&format!("{} counter on ~ for each", kind))
                     {
                         self.x_value(ctx, &Amount { n: 3, x: true }).clamp(0, 30)
+                    } else if text.contains("deals combat damage to a player, put that many") {
+                        // "Whenever ~ deals combat damage to a player, put that many
+                        // incubation counters on it" (Drake Hatcher): the damage it dealt.
+                        self.src_perm(ctx).map_or(1, |s| s.hit_amount.max(1) as i32)
                     } else {
                         1
                     };
@@ -7275,6 +7314,7 @@ impl<'a> Game<'a> {
                 until: (self.round, self.active as u8),
                 own_turn: false,
                 pay_life: false,
+                needs_type: None,
             });
             let k = self.players[me].playable.len() - 1;
             self.cast(
@@ -7341,6 +7381,7 @@ impl<'a> Game<'a> {
                     until,
                     own_turn: false,
                     pay_life: false,
+                    needs_type: None,
                 });
                 self.emit(Ev::LeavesGraveyard, me, None);
             }
@@ -7384,12 +7425,25 @@ impl<'a> Game<'a> {
         if let Some(&c) = cards.first() {
             self.focus_card = Some((from as u8, c));
         }
+        // "... you may play them if you control a Wizard" (Flameshape).
+        let needs_type: Option<u8> = ctx
+            .text
+            .split("you may play them if you control a ")
+            .nth(1)
+            .and_then(|r| r.split(['.', ',', ' ']).next())
+            .map(|w| {
+                CHANGELING_TYPES
+                    .iter()
+                    .position(|t| *t == w)
+                    .map_or(255, |k| k as u8)
+            });
         for c in cards {
             self.players[me].playable.push(Playable {
                 card: (from as u8, c),
                 until,
                 own_turn: false,
                 pay_life: imp.pay_life,
+                needs_type,
             });
         }
     }

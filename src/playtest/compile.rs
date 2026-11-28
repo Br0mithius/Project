@@ -1137,6 +1137,11 @@ pub struct SimCard {
     pub changeling: bool,
     /// "... and is all creature types" while a condition holds (Undercover Skrull).
     pub all_types_static: bool,
+    /// "If ~ would be put into a graveyard from anywhere, ... shuffle it into its owner's
+    /// library instead" (Darksteel Colossus).
+    pub shuffles_from_graveyard: bool,
+    /// "As ~ enters, choose a color" (Heraldic Banner, Uncharted Haven).
+    pub chooses_color: bool,
     pub cant_be_countered: bool,
     /// An Aura that hurts what it enchants (cast on an opponent's creature).
     pub harmful_aura: bool,
@@ -4045,6 +4050,9 @@ pub fn compile(card: &Card) -> SimCard {
         living_weapon: kw_words.iter().any(|k| k == "living weapon"),
         changeling: kw_words.iter().any(|k| k == "changeling"),
         all_types_static: own_text.contains("is all creature types"),
+        shuffles_from_graveyard: own_text.contains("would be put into a graveyard from anywhere")
+            && own_text.contains("shuffle it into its owner's library instead"),
+        chooses_color: own_text.contains("enters, choose a color"),
         cant_be_countered: own_text.contains("~ can't be countered"),
         harmful_aura,
         chapters,

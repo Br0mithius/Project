@@ -7498,3 +7498,256 @@ fn fleeting_flight_prevents_combat_damage_to_its_target() {
     );
     assert_eq!(perm(&g, ogre).damage, 2, "it still deals its own");
 }
+
+/// Gratuitous Violence doubles the damage of creatures you control, not of your spells.
+#[test]
+fn gratuitous_violence_doubles_only_creatures_damage() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &["Gratuitous Violence", "Lightning Strike", "Mountain"],
+    );
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    put(&mut g, 0, 0);
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![1];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[1].life, 27, "Lightning Strike: 3, not 6");
+    let bear = token(&mut g, 0, 2);
+    let at = vec![Attack {
+        attacker: bear,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.recalc();
+    g.damage_step(0, &at, false);
+    assert_eq!(g.players[1].life, 23, "a creature's 2 is doubled");
+}
+
+/// The Lonely Mountain: "this ability costs {1} less to activate for each Equipment you
+/// control".
+#[test]
+fn the_lonely_mountain_costs_less_for_each_equipment() {
+    let db = db();
+    let d = prep_db(&db, &["The Lonely Mountain", "Basilisk Collar"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let m = put(&mut g, 0, 0);
+    let i = g.idx(m).unwrap();
+    g.perms[i].tapped = false;
+    let k = ability(&d, 0, "create a 2/2 red dwarf");
+    assert_eq!(g.activation_cost(0, i, k).map(|c| c.total()), Some(5));
+    put(&mut g, 0, 1);
+    put(&mut g, 0, 1);
+    let i = g.idx(m).unwrap();
+    assert_eq!(
+        g.activation_cost(0, i, k).map(|c| c.total()),
+        Some(3),
+        "{{2}}{{R}} with two Equipment"
+    );
+}
+
+/// Drake Hatcher: "put that many incubation counters on it" - the combat damage dealt.
+#[test]
+fn drake_hatcher_gets_a_counter_for_each_damage() {
+    let db = db();
+    let d = prep_db(&db, &["Drake Hatcher"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let h = put(&mut g, 0, 0);
+    let i = g.idx(h).unwrap();
+    g.perms[i].counters = 2;
+    g.recalc();
+    assert_eq!(perm(&g, h).p, 3);
+    let at = vec![Attack {
+        attacker: h,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(0, &at, false);
+    g.run_pending();
+    assert_eq!(perm(&g, h).other_counters, 3, "3 damage: three counters");
+}
+
+/// Silvan Rally (Thranduil's Adventure): "put up to two land cards from among them into
+/// your hand".
+#[test]
+fn silvan_rally_takes_up_to_two_lands() {
+    let db = db();
+    let d = prep_db(&db, &["Thranduil, Sindarin Liege", "Forest", "Island"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 3, 'G');
+    g.players[0].library = vec![1, 1, 2, 2, 1, 2];
+    g.players[0].hand = vec![0];
+    assert!(g.cast(
+        0,
+        Src::Hand(0),
+        CastOpts {
+            back: true,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(g.players[0].hand.len(), 2, "two of the four milled lands");
+    assert_eq!(g.players[0].graveyard.len(), 2);
+}
+
+/// Trygon Predator: "target artifact or enchantment that player controls" - the player it
+/// dealt combat damage to, not any opponent.
+#[test]
+fn trygon_predator_destroys_only_the_damaged_players_permanent() {
+    let db = db();
+    let d = prep(&[
+        db.get("Trygon Predator").unwrap().clone(),
+        card("Relic", "{1}", "Artifact", "", None),
+    ]);
+    let mut g = game(&[&d, &d, &d]);
+    g.active = 0;
+    let t = put(&mut g, 0, 0);
+    let relic2 = put(&mut g, 2, 1);
+    let at = vec![Attack {
+        attacker: t,
+        def: Def::Player(1),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(0, &at, false);
+    g.run_pending();
+    assert!(g.idx(relic2).is_some(), "player 2 wasn't dealt damage");
+    let relic1 = put(&mut g, 1, 1);
+    g.damage_step(0, &at, false);
+    g.run_pending();
+    assert!(g.idx(relic1).is_none(), "player 1's artifact");
+    assert!(g.idx(relic2).is_some());
+}
+
+/// Flameshape (Gandalf, Goblins' Bane): "you may play them if you control a Wizard".
+#[test]
+fn flameshape_cards_need_a_wizard() {
+    let db = db();
+    let d = prep(&[
+        db.get("Gandalf, Goblins' Bane").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+        card(
+            "Mage",
+            "{R}",
+            "Creature — Human Wizard",
+            "",
+            Some(("1", "1")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 5, 'R');
+    g.players[0].library = vec![1, 1, 2, 2];
+    g.players[0].hand = vec![0];
+    assert!(g.cast(
+        0,
+        Src::Hand(0),
+        CastOpts {
+            back: true,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(g.players[0].playable.len(), 2);
+    assert!(
+        g.cast_cost(0, Src::Exile(0), CastOpts::default()).is_none(),
+        "no Wizard: the exiled cards can't be played"
+    );
+    put(&mut g, 0, 3);
+    assert!(g.cast_cost(0, Src::Exile(0), CastOpts::default()).is_some());
+}
+
+/// Darksteel Colossus: put into a graveyard from anywhere, it is shuffled into its owner's
+/// library instead.
+#[test]
+fn darksteel_colossus_is_shuffled_into_the_library() {
+    let db = db();
+    let d = prep_db(&db, &["Darksteel Colossus"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![];
+    let c = put(&mut g, 0, 0);
+    let i = g.idx(c).unwrap();
+    g.sacrifice(i);
+    g.run_pending();
+    assert!(g.players[0].graveyard.is_empty(), "never in the graveyard");
+    assert_eq!(g.players[0].library, vec![0]);
+    // Discarded: the same.
+    g.players[0].library.clear();
+    g.players[0].hand = vec![0];
+    g.discard(0);
+    assert!(g.players[0].graveyard.is_empty());
+    assert_eq!(g.players[0].library, vec![0]);
+    // Milled: the same.
+    g.mill(0, 1);
+    assert!(g.players[0].graveyard.is_empty());
+    assert_eq!(g.players[0].library, vec![0]);
+}
+
+/// Old Fat Spider Can't See Me, chapter I: hexproof "for as long as this Saga remains on the
+/// battlefield".
+#[test]
+fn old_fat_spider_hexproof_ends_with_the_saga() {
+    let db = db();
+    let d = prep(&[
+        db.get("Old Fat Spider Can't See Me").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let bear = put(&mut g, 0, 1);
+    let saga = put(&mut g, 0, 0);
+    assert!(perm(&g, bear).has(HEXPROOF), "chapter I");
+    let i = g.idx(saga).unwrap();
+    g.sacrifice(i);
+    g.run_pending();
+    g.recalc();
+    assert!(!perm(&g, bear).has(HEXPROOF), "the Saga left");
+}
+
+/// Heraldic Banner: one colour, chosen as it enters, for its mana and for its +1/+0.
+#[test]
+fn heraldic_banner_keeps_the_colour_chosen_as_it_enters() {
+    let db = db();
+    let d = prep(&[
+        db.get("Heraldic Banner").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+        db.get("Uncharted Haven").unwrap().clone(),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let bear = put(&mut g, 0, 1);
+    let banner = put(&mut g, 0, 0);
+    assert_eq!(
+        perm(&g, banner).chosen_color,
+        1 << 4,
+        "green: the Bear's colour"
+    );
+    assert_eq!(perm(&g, bear).p, 3);
+    assert!(g.can_pay(0, &Mana::parse("{G}")));
+    assert!(!g.can_pay(0, &Mana::parse("{B}")), "only the chosen colour");
+    // Two Rats later: still green.
+    let rat = put(&mut g, 0, 2);
+    put(&mut g, 0, 2);
+    assert_eq!(perm(&g, bear).p, 3);
+    assert_eq!(perm(&g, rat).p, 1, "black isn't the chosen colour");
+    assert!(!g.can_pay(0, &Mana::parse("{B}")));
+    // Uncharted Haven: one colour too.
+    let mut g = game(&[&d, &d]);
+    let haven = put(&mut g, 0, 3);
+    let i = g.idx(haven).unwrap();
+    g.perms[i].tapped = false;
+    let made = (0..5)
+        .filter(|&c| {
+            let mut m = Mana::default();
+            m.pips[c] = 1;
+            g.can_pay(0, &m)
+        })
+        .count();
+    assert_eq!(made, 1, "one chosen colour");
+}

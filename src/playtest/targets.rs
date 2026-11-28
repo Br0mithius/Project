@@ -60,7 +60,13 @@ impl<'a> Game<'a> {
             d.chosen_type = self.chosen_type(p, src);
         }
         if r.has(restrict::CHOSEN_COLOR) {
-            d.chosen_color = self.chosen_color(p);
+            // The colour its source chose as it entered (Heraldic Banner); with no such
+            // choice on record, the colour most of the player's creatures have.
+            d.chosen_color = src
+                .and_then(|id| self.idx(id))
+                .map(|i| self.perms[i].chosen_color)
+                .filter(|&c| c != 0)
+                .unwrap_or_else(|| self.chosen_color(p));
         }
         d
     }
@@ -83,6 +89,58 @@ impl<'a> Game<'a> {
             }
         }
         counts.iter().max_by_key(|c| c.1).map(|c| c.0)
+    }
+
+    /// The colour player `p` names for card `c` "as ~ enters, choose a color": for a card
+    /// about creatures of that colour (Heraldic Banner) the one most of their creatures
+    /// have; otherwise - a mana source (Uncharted Haven) - the colour their deck asks for
+    /// most for each source of it they already control.
+    pub fn color_for(&self, p: usize, c: &SimCard) -> u8 {
+        let about_creatures = c
+            .abilities
+            .iter()
+            .any(|a| a.text.contains("creatures you control of the chosen color"));
+        if about_creatures || !c.mana_ability && !c.is(T_LAND) {
+            let col = self.chosen_color(p);
+            let any = self
+                .perms
+                .iter()
+                .any(|x| x.ctrl as usize == p && x.is_creature() && x.colors & col != 0);
+            if any {
+                return col;
+            }
+        }
+        let pl = &self.players[p];
+        let mut need = [0u32; 5];
+        for &k in pl
+            .hand
+            .iter()
+            .chain(pl.library.iter())
+            .chain(pl.command.iter().map(|(k, _)| k))
+        {
+            let cost = &pl.cards[k as usize].cost;
+            for (i, n) in need.iter_mut().enumerate() {
+                *n += cost.pips[i] as u32;
+            }
+        }
+        let mut have = [0u32; 5];
+        for x in self.perms.iter().filter(|x| x.ctrl as usize == p) {
+            let Some(r) = x.card else { continue };
+            let made = if self.card(r).chooses_color {
+                x.chosen_color
+            } else {
+                self.card(r).produces
+            };
+            for (i, n) in have.iter_mut().enumerate() {
+                if made & (1 << i) != 0 {
+                    *n += 1;
+                }
+            }
+        }
+        (0..5)
+            .max_by_key(|&i| (need[i] * 16 / (1 + have[i]), need[i]))
+            .map(|i| 1u8 << i)
+            .unwrap_or(1)
     }
 
     /// "Choose a color": the one most of `p`'s creatures have.

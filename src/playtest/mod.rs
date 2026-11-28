@@ -505,7 +505,9 @@ impl<'a> Game<'a> {
         }
         // Stashed cards: only during your turn (and not once their owner has left the game).
         if let Src::Exile(k) = src {
-            if self.players[p].playable[k].own_turn && self.active != p || !self.players[list].alive
+            if self.players[p].playable[k].own_turn && self.active != p
+                || !self.players[list].alive
+                || !self.playable_ok(p, k)
             {
                 return None;
             }
@@ -1276,7 +1278,10 @@ impl<'a> Game<'a> {
             match src {
                 Src::Prepared(_) => {}
                 _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
-                _ => self.players[list].graveyard.push(idx),
+                _ => {
+                    self.players[list].graveyard.push(idx);
+                    self.shuffle_away_from_graveyard(list, idx);
+                }
             }
             self.run_pending();
             (self.casting, self.cur_x) = outer;
@@ -1305,7 +1310,10 @@ impl<'a> Game<'a> {
                 match src {
                     Src::Prepared(_) => {}
                     _ if commander_slot > 0 => self.players[p].command.push((idx, commander_slot)),
-                    _ => self.players[list].graveyard.push(idx),
+                    _ => {
+                        self.players[list].graveyard.push(idx);
+                        self.shuffle_away_from_graveyard(list, idx);
+                    }
                 }
                 self.run_pending();
                 (self.casting, self.cur_x) = outer;
@@ -1754,6 +1762,16 @@ impl<'a> Game<'a> {
                     let v = self.choose_x(p, i, ab, *mana as u32, extra.x)?;
                     cost = cost.plus_generic(v as u32 * extra.x as u32);
                     x_paid = Some(v);
+                }
+                // "This ability costs {1} less to activate for each Equipment you control"
+                // (The Lonely Mountain).
+                if let Some(n) = ab
+                    .text
+                    .split("this ability costs {1} less to activate for each ")
+                    .nth(1)
+                    .and_then(|what| self.count_of(p, Some(x.id), what))
+                {
+                    cost = cost.minus_generic(n.max(0) as u32);
                 }
                 Some((cost, x_paid))
             }

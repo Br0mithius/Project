@@ -1982,6 +1982,32 @@ impl<'a> Game<'a> {
     }
 
     /// "Target opponent" / "choose an opponent".
+    /// "As ~ enters, choose a color": the bot's colour, or the one a person picks.
+    pub(crate) fn h_choose_color(&self, me: usize, c: &SimCard) -> u8 {
+        let ai_pick = self.color_for(me, c);
+        if !self.is_human(me) {
+            return ai_pick;
+        }
+        let options: Vec<String> = ["White", "Blue", "Black", "Red", "Green"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let suggested = vec![ai_pick.trailing_zeros() as usize % 5];
+        match self.ask(
+            Ask::Pick {
+                prompt: format!("{}: choose a color", c.name),
+                options,
+                min: 1,
+                max: 1,
+                suggested,
+            },
+            false,
+        ) {
+            Answer::Pick(v) => v.first().map_or(ai_pick, |&k| 1u8 << (k % 5)),
+            _ => ai_pick,
+        }
+    }
+
     pub(crate) fn h_choose_opponent(&self, me: usize, n: i32) -> Option<usize> {
         let ai_pick = ai::choose_opponent(self, me, n);
         if !self.is_human(me) {

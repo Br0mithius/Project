@@ -101,6 +101,11 @@ pub struct Perm {
     pub sac_at_end: bool,
     /// Modes already chosen ("choose one that hasn't been chosen"), a bit per mode.
     pub modes_used: u32,
+    /// The colour chosen "as ~ enters" (Heraldic Banner, Uncharted Haven): one WUBRG bit.
+    pub chosen_color: u8,
+    /// Combat damage it dealt to a player in the last combat damage step ("put that many
+    /// incubation counters on it": Drake Hatcher).
+    pub hit_amount: i16,
     /// Modes chosen this turn ("choose one that hasn't been chosen this turn": The Vision).
     pub modes_this_turn: u32,
     /// "Is all creature types" while a condition holds (Undercover Skrull): on now.
@@ -277,6 +282,9 @@ pub struct Playable {
     pub own_turn: bool,
     /// "Pay life equal to its mana value rather than pay its mana cost" (Inside Information).
     pub pay_life: bool,
+    /// "You may play them if you control a Wizard" (Flameshape): the type to control, as
+    /// its place in `CHANGELING_TYPES` (255: a type the engine doesn't know - never).
+    pub needs_type: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -1588,6 +1596,11 @@ impl<'a> Game<'a> {
                 } else {
                     c.produces
                 };
+                // "Add one mana of the chosen color" (Uncharted Haven, Heraldic Banner): the
+                // colour chosen as it entered.
+                if c.chooses_color && x.chosen_color != 0 {
+                    colors = colors & !0b11111 | x.chosen_color;
+                }
                 // Command Tower: the commanders' colours only (none for a colourless
                 // commander - CR 903.4f).
                 if c.mana_identity {
@@ -1680,6 +1693,21 @@ impl<'a> Game<'a> {
         srcs: &[(usize, u8, u8, bool)],
     ) -> Option<(Vec<usize>, u8, u32)> {
         self.plan_payment_from(p, cost, srcs)
+    }
+
+    /// May player `p` play the card in slot `k` of their cards playable from exile now ("if
+    /// you control a Wizard")?
+    pub fn playable_ok(&self, p: usize, k: usize) -> bool {
+        match self.players[p].playable.get(k) {
+            Some(x) => x.needs_type.is_none_or(|t| {
+                CHANGELING_TYPES.get(t as usize).is_some_and(|t| {
+                    self.perms
+                        .iter()
+                        .any(|y| y.ctrl as usize == p && y.subtypes.iter().any(|s| s == t))
+                })
+            }),
+            None => false,
+        }
     }
 
     /// May restricted mana pay for what's being paid for now (`GameExtra::paying`)?
@@ -2254,6 +2282,19 @@ impl<'a> Game<'a> {
         } else {
             to
         };
+        // "If ~ would be put into a graveyard from anywhere, ... shuffle it into its owner's
+        // library instead" (Darksteel Colossus): it doesn't die.
+        let shuffled_away = matches!(to, Zone::Graveyard)
+            && perm.tok == Tok::None
+            && perm.commander == 0
+            && perm
+                .card
+                .is_some_and(|r| self.card(r).shuffles_from_graveyard);
+        let to = if shuffled_away {
+            Zone::Library(true)
+        } else {
+            to
+        };
         // Head of the Hunt: "... exile it instead. When you do, create a 2/2 green Wolf
         // creature token" - for each opponent whose permanent replaced the death this way.
         let wolves: Vec<(usize, i32, i32, String)> =
@@ -2399,6 +2440,13 @@ impl<'a> Game<'a> {
         }
         if let Some((owner, c)) = in_graveyard {
             self.to_graveyard(owner, &[c]);
+        }
+        if shuffled_away {
+            let owner = perm.owner as usize;
+            let mut lib = std::mem::take(&mut self.players[owner].library);
+            self.rng.shuffle(&mut lib);
+            self.players[owner].library = lib;
+            self.note(|| format!("  (shuffled into P{}'s library instead)", owner));
         }
         for (ctrl, p, t, kind) in wolves {
             if self.players[ctrl].alive {
@@ -2601,6 +2649,8 @@ impl<'a> Game<'a> {
             modes_used: 0,
             all_types: false,
             modes_this_turn: 0,
+            chosen_color: 0,
+            hit_amount: 0,
             fired: 0,
             mv,
             attacking: false,
@@ -2684,6 +2734,10 @@ impl<'a> Game<'a> {
         }
         if c.is(T_PLANESWALKER) {
             self.perms[i].loyalty = c.loyalty;
+        }
+        // "As ~ enters, choose a color" (Heraldic Banner, Uncharted Haven): chosen once.
+        if c.chooses_color {
+            self.perms[i].chosen_color = self.h_choose_color(ctrl, c);
         }
         let x = self.entering_x.take();
         let kicked = std::mem::take(&mut self.entering_kicked);
@@ -2909,6 +2963,7 @@ impl<'a> Game<'a> {
                             until: (u32::MAX, q as u8),
                             own_turn: true,
                             pay_life: false,
+                            needs_type: None,
                         });
                     }
                 }
@@ -2936,10 +2991,47 @@ impl<'a> Game<'a> {
         self.emit_inner(ev, p, Some(subject));
     }
 
+    /// Card `c`, just put into player `p`'s graveyard, is shuffled into their library instead
+    /// if it says so (Darksteel Colossus). True if it was.
+    pub fn shuffle_away_from_graveyard(&mut self, p: usize, c: u16) -> bool {
+        if !self.players[p].cards[c as usize].shuffles_from_graveyard {
+            return false;
+        }
+        let Some(k) = self.players[p].graveyard.iter().rposition(|&x| x == c) else {
+            return false;
+        };
+        self.players[p].graveyard.remove(k);
+        let mut lib = std::mem::take(&mut self.players[p].library);
+        lib.push(c);
+        self.rng.shuffle(&mut lib);
+        self.players[p].library = lib;
+        if self.log.is_some() {
+            let name = self.players[p].cards[c as usize].name.clone();
+            self.note(|| format!("  {} is shuffled into P{}'s library instead", name, p));
+        }
+        true
+    }
+
     /// Cards `cards` of player `p` were just put into their graveyard (died, discarded,
     /// milled): one event for all of them ("whenever one or more creature cards are put into
     /// your graveyard from anywhere"), about a creature card among them if there is one.
     pub fn to_graveyard(&mut self, p: usize, cards: &[u16]) {
+        // "If ~ would be put into a graveyard from anywhere, ... shuffle it into its owner's
+        // library instead" (Darksteel Colossus): it never gets there.
+        let kept: Vec<u16>;
+        let cards = if cards
+            .iter()
+            .any(|&c| self.players[p].cards[c as usize].shuffles_from_graveyard)
+        {
+            kept = cards
+                .iter()
+                .copied()
+                .filter(|&c| !self.shuffle_away_from_graveyard(p, c))
+                .collect();
+            &kept[..]
+        } else {
+            cards
+        };
         if cards.is_empty() {
             return;
         }
@@ -3486,6 +3578,8 @@ impl<'a> Game<'a> {
             modes_used: 0,
             all_types: false,
             modes_this_turn: 0,
+            chosen_color: 0,
+            hit_amount: 0,
             fired: 0,
             mv: 0,
             attacking: false,

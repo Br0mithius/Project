@@ -12499,7 +12499,7 @@ ABILITIES:
   Event(Landfall, Filter { yours: Some(true), types: 16, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever a land you control enters, create a 1/1 green elf creature token."
       -> You gets 1/1 elf token 2/2
   Back: Spell: "mill four cards, then put up to two land cards from among them into your hand."
-      -> You: hand +1, library -4, graveyard +3
+      -> You: hand +2, library -4, graveyard +2
 
 Thranduil, the Elvenking | {2}{B}{G}{U} | Legendary Creature — Elf Noble | 5/6
 TEXT: Thranduil has all activated abilities of all Elf cards in your graveyard. / Whenever another legendary Elf you control enters, draw two cards, then discard a card.
@@ -12868,8 +12868,7 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   CombatDamage [may]: "whenever ~ deals combat damage to a player, you may destroy target artifact or enchantment that player controls."
-      -> Opp A: graveyard +1
-      -> Opp A's Relic left the battlefield
+      -> (nothing changes)
 
 Twinblade Blessing | {1}{W}{W} | Enchantment — Aura
 TEXT: Flash (You may cast this spell any time you could cast an instant.) / Enchant creature / Enchanted creature has double strike. (It deals both first-strike and regular combat damage.)

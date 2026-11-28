@@ -748,6 +748,7 @@ impl<'a> Game<'a> {
             if let Some(si) = self.idx(src) {
                 self.perms[si].hit_turn |= 1 << p.min(7);
                 self.perms[si].ever_hit = true;
+                self.perms[si].hit_amount = n.clamp(0, i16::MAX as i32) as i16;
             }
             dealt.push(src);
         }
