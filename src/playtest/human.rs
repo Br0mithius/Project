@@ -1683,7 +1683,17 @@ impl<'a> Game<'a> {
                     && self.perms[i].is_creature()
                     && self.can_attack(i)
             })
-            .map(|i| (self.perms[i].id, self.perm_desc(&self.perms[i])))
+            .map(|i| {
+                let must = if self.must_attack(i) {
+                    " (must attack)"
+                } else {
+                    ""
+                };
+                (
+                    self.perms[i].id,
+                    format!("{}{}", self.perm_desc(&self.perms[i]), must),
+                )
+            })
             .collect();
         if cands.is_empty() {
             return Vec::new();
@@ -1712,6 +1722,22 @@ impl<'a> Game<'a> {
             .iter()
             .filter_map(|(id, d)| defs.iter().position(|x| x == d).map(|k| (*id, k)))
             .collect();
+        // "Attacks each combat if able" (and goaded creatures): these attack whatever the
+        // player declares - where the player sends them, or where the bot would if left out.
+        // (The bot's declaration leaves one home only when it isn't able: an attack tax.)
+        let forced: Vec<(u32, Def)> = ai_pick
+            .iter()
+            .filter(|(id, _)| self.idx(*id).is_some_and(|i| self.must_attack(i)))
+            .copied()
+            .collect();
+        let with_forced = |mut v: Vec<(u32, Def)>| {
+            for f in &forced {
+                if !v.iter().any(|x| x.0 == f.0) {
+                    v.push(*f);
+                }
+            }
+            v
+        };
         loop {
             match self.ask(
                 Ask::Attack {
@@ -1722,14 +1748,15 @@ impl<'a> Game<'a> {
                 true,
             ) {
                 Answer::Attacks(v) => {
-                    return v
-                        .into_iter()
-                        .filter(|(id, _)| cands.iter().any(|c| c.0 == *id))
-                        .filter_map(|(id, k)| defs.get(k).map(|&d| (id, d)))
-                        .collect();
+                    return with_forced(
+                        v.into_iter()
+                            .filter(|(id, _)| cands.iter().any(|c| c.0 == *id))
+                            .filter_map(|(id, k)| defs.get(k).map(|&d| (id, d)))
+                            .collect(),
+                    );
                 }
                 Answer::Auto => return ai_pick,
-                Answer::Pass | Answer::Cancel | Answer::Continue => return Vec::new(),
+                Answer::Pass | Answer::Cancel | Answer::Continue => return with_forced(Vec::new()),
                 x => {
                     if !self.side_answer(a, &x) {
                         return Vec::new();
