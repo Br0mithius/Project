@@ -7260,3 +7260,241 @@ fn stolen_stark_tech_has_flash() {
     let c = compile(db.get("Stolen Stark Tech").unwrap());
     assert!(c.kw & FLASH != 0);
 }
+
+/// Ayli's exile ability and Elenda's second bonus need "at least 10 life more than your
+/// starting life total" - not just more than it.
+#[test]
+fn ten_life_above_the_starting_total() {
+    let db = db();
+    let d = prep_db(&db, &["Ayli, Eternal Pilgrim", "Elenda, Saint of Dusk"]);
+    let mut g = game(&[&d, &d]);
+    let ayli = put(&mut g, 0, 0);
+    let elenda = put(&mut g, 0, 1);
+    let k = ability(&d, 0, "exile target nonland permanent");
+    let cond = d.cards[0].abilities[k].cond.clone();
+    let i = g.idx(ayli);
+    g.players[0].life = 31;
+    g.recalc();
+    assert!(!g.cond_holds(&cond, 0, i), "31 of 30: not ten more");
+    assert_eq!((perm(&g, elenda).p, perm(&g, elenda).t), (5, 5), "+1/+1");
+    assert!(perm(&g, elenda).has(MENACE));
+    g.players[0].life = 39;
+    g.recalc();
+    assert!(!g.cond_holds(&cond, 0, i));
+    assert_eq!((perm(&g, elenda).p, perm(&g, elenda).t), (5, 5));
+    g.players[0].life = 40;
+    g.recalc();
+    assert!(g.cond_holds(&cond, 0, i), "40 of 30");
+    assert_eq!(
+        (perm(&g, elenda).p, perm(&g, elenda).t),
+        (10, 10),
+        "an additional +5/+5"
+    );
+    g.players[0].life = 30;
+    g.recalc();
+    assert_eq!((perm(&g, elenda).p, perm(&g, elenda).t), (4, 4));
+}
+
+/// The Vision: "choose one that hasn't been chosen this turn" - all three again next turn.
+#[test]
+fn the_vision_chooses_again_each_turn() {
+    let db = db();
+    let d = prep_db(&db, &["The Vision"]);
+    let mut g = game(&[&d, &d]);
+    let v = put(&mut g, 0, 0);
+    let k = ability(&d, 0, "hasn't been chosen");
+    for _ in 0..3 {
+        fire_card(&mut g, 0, k, Some(v));
+    }
+    assert_eq!(perm(&g, v).modes_this_turn, 0b111);
+    assert_eq!(g.players[0].hand.len(), 1, "Technopathy once");
+    g.take_turn(1, false);
+    assert_eq!(perm(&g, v).modes_this_turn, 0, "a new turn");
+    let hand = g.players[0].hand.len();
+    for _ in 0..3 {
+        fire_card(&mut g, 0, k, Some(v));
+    }
+    assert_eq!(g.players[0].hand.len(), hand + 1, "Technopathy again");
+}
+
+/// Wiccan: "another target nonland, nontoken permanent" - never a land.
+#[test]
+fn wiccan_does_not_exile_lands() {
+    let db = db();
+    let c = compile(db.get("Wiccan, Rising Magician").unwrap());
+    let a = c
+        .abilities
+        .iter()
+        .find(|a| a.text.contains("exile another target"))
+        .unwrap();
+    assert_eq!(blink_types(&a.text) & T_LAND, 0);
+    assert!(blink_types(&a.text) & T_CREATURE != 0);
+}
+
+/// Drakuseth: 4 damage to any target and 3 damage to each of up to two OTHER targets -
+/// three different targets.
+#[test]
+fn drakuseth_hits_three_different_targets() {
+    let db = db();
+    let d = prep(&[
+        db.get("Drakuseth, Maw of Flames").unwrap().clone(),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let drak = put(&mut g, 0, 0);
+    let k = ability(&d, 0, "attacks");
+    let ogres = [put(&mut g, 1, 1), put(&mut g, 1, 1), put(&mut g, 1, 1)];
+    fire_card(&mut g, 0, k, Some(drak));
+    assert!(
+        ogres.iter().all(|&o| g.idx(o).is_none()),
+        "4 to one 3/3, 3 to each of the other two"
+    );
+    assert_eq!(g.players[1].life, 30);
+    // One creature: 4 to it, one 3 to its controller - the last 3 has no other target left
+    // (the creature and the player are taken).
+    let a = put(&mut g, 1, 1);
+    fire_card(&mut g, 0, k, Some(drak));
+    assert!(g.idx(a).is_none());
+    assert_eq!(g.players[1].life, 27, "3 to the player once");
+    // Nothing but the player: 4, and no 3 at the same player again.
+    fire_card(&mut g, 0, k, Some(drak));
+    assert_eq!(g.players[1].life, 23);
+}
+
+/// Emrakul, the Exigent Doom: "when you cast this spell, untap all lands you control".
+#[test]
+fn emrakul_untaps_your_lands_when_cast() {
+    let db = db();
+    let d = prep_db(&db, &["Emrakul, the Exigent Doom", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 10, 'G');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert!(g.perms.iter().any(|x| x.ctrl == 0 && x.is_creature()));
+    assert!(
+        g.perms.iter().filter(|x| x.is(T_LAND)).all(|x| !x.tapped),
+        "all ten lands untap"
+    );
+}
+
+/// Ajani Unrelenting's -3: 4 damage to each creature "except for tokens you control".
+#[test]
+fn ajani_unrelenting_spares_your_tokens() {
+    let db = db();
+    let d = prep(&[
+        db.get("Ajani Unrelenting").unwrap().clone(),
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let ajani = put(&mut g, 0, 0);
+    let k = ability(&d, 0, "[-3]");
+    let mine = token(&mut g, 0, 2);
+    let bear = put(&mut g, 0, 1);
+    let theirs = token(&mut g, 1, 2);
+    fire_card(&mut g, 0, k, Some(ajani));
+    assert!(g.idx(mine).is_some(), "your token is spared");
+    assert!(g.idx(bear).is_none(), "your nontoken creature isn't");
+    assert!(g.idx(theirs).is_none(), "nor an opponent's token");
+}
+
+/// The Super Hero Civil War, chapter I: up to two creatures with total mana value 6 or less,
+/// for as long as the Saga remains on the battlefield.
+#[test]
+fn super_hero_civil_war_takes_two_creatures_while_it_remains() {
+    let db = db();
+    let d0 = prep_db(&db, &["The Super Hero Civil War"]);
+    let d1 = prep(&[
+        card("Bear", "{1}{G}", "Creature — Bear", "", Some(("2", "2"))),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+        card(
+            "Knight",
+            "{3}{W}",
+            "Creature — Knight",
+            "",
+            Some(("4", "4")),
+        ),
+    ]);
+    let mut g = game(&[&d0, &d1]);
+    g.active = 0;
+    let ids = [put(&mut g, 1, 0), put(&mut g, 1, 1), put(&mut g, 1, 2)];
+    let saga = put(&mut g, 0, 0);
+    let taken: Vec<u32> = ids
+        .iter()
+        .copied()
+        .filter(|&id| perm(&g, id).ctrl == 0)
+        .collect();
+    assert_eq!(taken.len(), 2, "up to two targets");
+    let total: u32 = taken.iter().map(|&id| perm(&g, id).mv as u32).sum();
+    assert!(total <= 6, "total mana value {} is 6 or less", total);
+    // The Saga leaves: they go back.
+    let i = g.idx(saga).unwrap();
+    g.sacrifice(i);
+    g.run_pending();
+    assert!(ids.iter().all(|&id| perm(&g, id).ctrl == 1), "control ends");
+}
+
+/// Fog Bank: combat damage dealt to it and by it is prevented - not other damage.
+#[test]
+fn fog_bank_prevents_its_combat_damage() {
+    let db = db();
+    let d = prep_db(&db, &["Fog Bank", "Lightning Strike", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let fog = put(&mut g, 1, 0);
+    let ogre = token(&mut g, 0, 3);
+    let at = vec![Attack {
+        attacker: ogre,
+        def: Def::Player(1),
+        blockers: vec![fog],
+        blocked: true,
+    }];
+    g.damage_step(0, &at, false);
+    g.sba();
+    assert!(g.idx(fog).is_some(), "3 combat damage to it is prevented");
+    // Pumped: the damage it would deal is prevented too.
+    let i = g.idx(fog).unwrap();
+    g.perms[i].counters = 5;
+    g.recalc();
+    g.damage_step(0, &at, false);
+    g.sba();
+    assert!(g.idx(ogre).is_some(), "5 combat damage by it is prevented");
+    // Lightning Strike isn't combat damage.
+    let i = g.idx(fog).unwrap();
+    g.perms[i].counters = 0;
+    g.recalc();
+    lands(&mut g, 0, 2, 'R');
+    g.players[0].hand = vec![1];
+    g.focus = Some(fog);
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.focus = None;
+    assert!(g.idx(fog).is_none(), "3 noncombat damage kills the 0/2");
+}
+
+/// Fleeting Flight: "prevent all combat damage that would be dealt to it this turn".
+#[test]
+fn fleeting_flight_prevents_combat_damage_to_its_target() {
+    let db = db();
+    let d = prep_db(&db, &["Fleeting Flight", "Plains"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let mine = token(&mut g, 0, 1);
+    let ogre = token(&mut g, 1, 3);
+    lands(&mut g, 0, 1, 'W');
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(perm(&g, mine).counters, 1);
+    let at = vec![Attack {
+        attacker: ogre,
+        def: Def::Player(0),
+        blockers: vec![mine],
+        blocked: true,
+    }];
+    g.damage_step(1, &at, false);
+    g.sba();
+    assert!(
+        g.idx(mine).is_some(),
+        "3 combat damage to the 2/2 is prevented"
+    );
+    assert_eq!(perm(&g, ogre).damage, 2, "it still deals its own");
+}

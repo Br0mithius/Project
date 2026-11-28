@@ -38,6 +38,7 @@ pub struct Ctx<'a> {
 
 /// Labels of `Effect::Rule` the simulator acts on; the rest change nothing in its games.
 pub const RULES_MODELLED: &[&str] = &[
+    "prevents combat damage to or by one creature",
     "you control an opponent's next turn",
     "stops all life gain",
     "gives poison counters",
@@ -207,10 +208,6 @@ pub const RULES_NOT_PLAYED: &[(&str, &str)] = &[
     (
         "gives an opponent a token",
         "An Offer You Can't Refuse: the countered spell's controller gets two Treasures",
-    ),
-    (
-        "prevents combat damage to or by one creature",
-        "Fog Bank, Fleeting Flight: one creature's combat damage prevented",
     ),
     (
         "must be blocked",
@@ -842,6 +839,19 @@ impl<'a> Game<'a> {
     /// Permanents an effect could hit. `harmful`: for "any" targets, the AI points harmful
     /// effects at opponents and helpful ones at itself.
     pub fn candidates(&self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<usize> {
+        let mut c = self.candidates_all(ctx, t, harmful);
+        // "Each of up to two other targets" (Drakuseth): not what the ability already hit.
+        if !self.ext.not_targets.is_empty() {
+            c.retain(|&i| !self.ext.not_targets.contains(&self.perms[i].id));
+        }
+        // "Each creature except for tokens you control" (Ajani Unrelenting).
+        if t.mass && ctx.text.contains("except for tokens you control") {
+            c.retain(|&i| !(self.perms[i].is_token() && self.perms[i].ctrl as usize == ctx.ctrl));
+        }
+        c
+    }
+
+    fn candidates_all(&self, ctx: &Ctx, t: &Target, harmful: bool) -> Vec<usize> {
         let me = ctx.ctrl;
         let src_colors = ctx.card.map(|c| c.colors).unwrap_or(0);
         let src_id = ctx.src;
@@ -1473,16 +1483,24 @@ impl<'a> Game<'a> {
         self.last_targets.clear();
         self.last_ctrl = None;
         self.targeted = false;
+        self.ext.dmg_hits.clear();
+        self.ext.not_targets.clear();
         // (effect, the text and card restriction it resolves with): a mode reads its own.
         let mut chosen_modes: Option<String> = None;
         let picks: Vec<(usize, &str, crate::restrict::Restr)> = if ab.modal {
             let groups = ab.mode_groups();
             // "Choose one that hasn't been chosen" (Demonic Pact): each mode once.
             let fresh = ab.text.contains("hasn't been chosen");
+            // "... that hasn't been chosen this turn" (The Vision): each turn anew.
+            let this_turn = ab.text.contains("hasn't been chosen this turn");
             let used = if fresh {
-                pend.source
-                    .and_then(|id| self.idx(id))
-                    .map_or(0, |i| self.perms[i].modes_used)
+                pend.source.and_then(|id| self.idx(id)).map_or(0, |i| {
+                    if this_turn {
+                        self.perms[i].modes_this_turn
+                    } else {
+                        self.perms[i].modes_used
+                    }
+                })
             } else {
                 0
             };
@@ -1542,7 +1560,9 @@ impl<'a> Game<'a> {
             if fresh {
                 if let Some(i) = pend.source.and_then(|id| self.idx(id)) {
                     for &m in &modes {
-                        if m < 32 {
+                        if m < 32 && this_turn {
+                            self.perms[i].modes_this_turn |= 1 << m;
+                        } else if m < 32 {
                             self.perms[i].modes_used |= 1 << m;
                         }
                     }
@@ -3017,106 +3037,161 @@ impl<'a> Game<'a> {
                 }
                 if to.kind == Kind::AnyTarget || to.whose == Whose::Theirs || to.whose == Whose::Any
                 {
-                    // "It deals 1 damage to any target. If a Dragon is dealt damage this way,
-                    // destroy it" (The Black Arrow): the opponents' best Dragon, if any.
-                    let slays = text
-                        .split("if a ")
-                        .nth(1)
-                        .and_then(|r| r.split_once(" is dealt damage this way, destroy it"))
-                        .map(|(sub, _)| sub.to_string());
-                    let slay_target = slays.as_ref().and_then(|sub| {
-                        let t1 = Target { count: 1, ..*to };
-                        self.candidates(ctx, &t1, true)
-                            .into_iter()
-                            .filter(|&i| {
-                                self.perms[i].ctrl as usize != me
-                                    && self.perms[i].subtypes.iter().any(|s| s == sub)
-                                    && !self.perms[i].has(INDESTRUCTIBLE)
-                            })
-                            .max_by(|&a, &b| {
-                                ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
-                            })
-                            .map(|i| self.perms[i].id)
-                    });
-                    if let Some(id) = slay_target {
-                        let i = self.idx(id).unwrap();
-                        if self.pay_ward(me, i) {
-                            self.actor = ctx.ctrl as u8;
-                            self.emit_targeted(id);
-                            self.hurt(ctx, id, n);
-                            if let Some(i) = self.idx(id) {
-                                self.destroy(i);
-                            }
-                        }
-                        return;
-                    }
-                    let mut hit = self.h_damage_target(ctx, to, n);
-                    // An instance of Photon Blast Barrage: the creature its plan gives it
-                    // (`GameExtra::barrage`), while that one is still a legal target.
-                    if ctx.card.is_some_and(ai::copies_x_times) {
-                        let t1 = Target { count: 1, ..*to };
-                        let cands = self.candidates(ctx, &t1, true);
-                        while !self.ext.barrage.is_empty() {
-                            let id = self.ext.barrage.remove(0);
-                            let ok = cands.iter().any(|&i| {
-                                let x = &self.perms[i];
-                                x.id == id && x.damage < x.t
-                            });
-                            if ok {
-                                hit = ai::Hit::Perm(id);
-                                break;
-                            }
-                        }
-                    }
-                    // A required target (CR 601.2c: chosen on casting, so there is one): when
-                    // nothing dies to it, the best of the opponents' legal targets still takes
-                    // the damage (Magnificent End's tapped creature, Helicarrier Strike's
-                    // attacker).
-                    if matches!(hit, ai::Hit::None) && !text.contains("up to ") {
-                        let t1 = Target { count: 1, ..*to };
-                        let best = self
-                            .candidates(ctx, &t1, true)
-                            .into_iter()
-                            .filter(|&i| self.perms[i].ctrl as usize != me)
-                            .max_by(|&a, &b| {
-                                ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
-                            });
-                        if let Some(i) = best {
-                            hit = ai::Hit::Perm(self.perms[i].id);
-                        }
-                    }
-                    match hit {
-                        ai::Hit::Player(o) => {
-                            self.spell_target_chosen(None, Some(o));
-                            self.note(|| format!("    {} damage aimed at P{}", n, o));
-                            self.hurt_player(ctx, o, n)
-                        }
-                        ai::Hit::Perm(id) => {
-                            if self.auditing() {
-                                self.audit_targets(me, &[id], true, &[]);
-                            }
-                            let t1 = Target { count: 1, ..*to };
-                            // Go through `choose` for ward/protection/targeted triggers.
-                            if self
-                                .candidates(ctx, &t1, true)
+                    // "4 damage to any target and 3 damage to each of up to two other targets"
+                    // (Drakuseth): one target for each, none of them twice.
+                    // ("Damage divided as you choose among one or two targets" is one amount.)
+                    let rounds = if to.kind == Kind::AnyTarget
+                        && to.count > 1
+                        && text.contains("damage to each of")
+                    {
+                        to.count as usize
+                    } else {
+                        1
+                    };
+                    let others = text.contains("other target");
+                    for _ in 0..rounds {
+                        if others {
+                            self.ext.not_targets = self
+                                .ext
+                                .dmg_hits
                                 .iter()
-                                .any(|&i| self.perms[i].id == id)
-                            {
-                                let paid = match self.idx(id) {
-                                    Some(i) if self.perms[i].ctrl as usize != me => {
-                                        self.pay_ward(me, i)
-                                    }
-                                    _ => true,
-                                };
-                                if paid {
-                                    self.actor = ctx.ctrl as u8;
-                                    self.emit_targeted(id);
-                                    self.hurt(ctx, id, n);
+                                .filter_map(|h| match h {
+                                    ai::Hit::Perm(id) => Some(*id),
+                                    _ => None,
+                                })
+                                .collect();
+                        }
+                        // Every living opponent already hit: no player is another target.
+                        let no_face = others
+                            && self
+                                .opponents(me)
+                                .iter()
+                                .all(|&o| self.ext.dmg_hits.contains(&ai::Hit::Player(o)));
+                        let one = Target {
+                            kind: if no_face && to.kind == Kind::AnyTarget {
+                                Kind::CreatureOrPlaneswalker
+                            } else {
+                                to.kind
+                            },
+                            ..*to
+                        };
+                        let to = &one;
+                        // "It deals 1 damage to any target. If a Dragon is dealt damage this way,
+                        // destroy it" (The Black Arrow): the opponents' best Dragon, if any.
+                        let slays = text
+                            .split("if a ")
+                            .nth(1)
+                            .and_then(|r| r.split_once(" is dealt damage this way, destroy it"))
+                            .map(|(sub, _)| sub.to_string());
+                        let slay_target = slays.as_ref().and_then(|sub| {
+                            let t1 = Target { count: 1, ..*to };
+                            self.candidates(ctx, &t1, true)
+                                .into_iter()
+                                .filter(|&i| {
+                                    self.perms[i].ctrl as usize != me
+                                        && self.perms[i].subtypes.iter().any(|s| s == sub)
+                                        && !self.perms[i].has(INDESTRUCTIBLE)
+                                })
+                                .max_by(|&a, &b| {
+                                    ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
+                                })
+                                .map(|i| self.perms[i].id)
+                        });
+                        if let Some(id) = slay_target {
+                            let i = self.idx(id).unwrap();
+                            if self.pay_ward(me, i) {
+                                self.actor = ctx.ctrl as u8;
+                                self.emit_targeted(id);
+                                self.hurt(ctx, id, n);
+                                if let Some(i) = self.idx(id) {
+                                    self.destroy(i);
+                                }
+                            }
+                            return;
+                        }
+                        let mut hit = self.h_damage_target(ctx, to, n);
+                        // (A player this ability already hit isn't an "other target": the next
+                        // opponent, if there is one.)
+                        if let ai::Hit::Player(o) = hit {
+                            if others && self.ext.dmg_hits.contains(&ai::Hit::Player(o)) {
+                                hit = self
+                                    .opponents(me)
+                                    .into_iter()
+                                    .find(|&q| !self.ext.dmg_hits.contains(&ai::Hit::Player(q)))
+                                    .map_or(ai::Hit::None, ai::Hit::Player);
+                            }
+                        }
+                        // An instance of Photon Blast Barrage: the creature its plan gives it
+                        // (`GameExtra::barrage`), while that one is still a legal target.
+                        if ctx.card.is_some_and(ai::copies_x_times) {
+                            let t1 = Target { count: 1, ..*to };
+                            let cands = self.candidates(ctx, &t1, true);
+                            while !self.ext.barrage.is_empty() {
+                                let id = self.ext.barrage.remove(0);
+                                let ok = cands.iter().any(|&i| {
+                                    let x = &self.perms[i];
+                                    x.id == id && x.damage < x.t
+                                });
+                                if ok {
+                                    hit = ai::Hit::Perm(id);
+                                    break;
                                 }
                             }
                         }
-                        ai::Hit::None => {}
+                        // A required target (CR 601.2c: chosen on casting, so there is one): when
+                        // nothing dies to it, the best of the opponents' legal targets still takes
+                        // the damage (Magnificent End's tapped creature, Helicarrier Strike's
+                        // attacker).
+                        if matches!(hit, ai::Hit::None) && !text.contains("up to ") {
+                            let t1 = Target { count: 1, ..*to };
+                            let best = self
+                                .candidates(ctx, &t1, true)
+                                .into_iter()
+                                .filter(|&i| self.perms[i].ctrl as usize != me)
+                                .max_by(|&a, &b| {
+                                    ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b))
+                                });
+                            if let Some(i) = best {
+                                hit = ai::Hit::Perm(self.perms[i].id);
+                            }
+                        }
+                        if hit != ai::Hit::None {
+                            self.ext.dmg_hits.push(hit);
+                        }
+                        match hit {
+                            ai::Hit::Player(o) => {
+                                self.spell_target_chosen(None, Some(o));
+                                self.note(|| format!("    {} damage aimed at P{}", n, o));
+                                self.hurt_player(ctx, o, n)
+                            }
+                            ai::Hit::Perm(id) => {
+                                if self.auditing() {
+                                    self.audit_targets(me, &[id], true, &[]);
+                                }
+                                let t1 = Target { count: 1, ..*to };
+                                // Go through `choose` for ward/protection/targeted triggers.
+                                if self
+                                    .candidates(ctx, &t1, true)
+                                    .iter()
+                                    .any(|&i| self.perms[i].id == id)
+                                {
+                                    let paid = match self.idx(id) {
+                                        Some(i) if self.perms[i].ctrl as usize != me => {
+                                            self.pay_ward(me, i)
+                                        }
+                                        _ => true,
+                                    };
+                                    if paid {
+                                        self.actor = ctx.ctrl as u8;
+                                        self.emit_targeted(id);
+                                        self.hurt(ctx, id, n);
+                                    }
+                                }
+                            }
+                            ai::Hit::None => {}
+                        }
                     }
+                    self.ext.not_targets.clear();
                 } else {
                     for id in self.choose(ctx, to, false) {
                         self.hurt(ctx, id, n);
@@ -4152,12 +4227,26 @@ impl<'a> Game<'a> {
                 } else {
                     keyword_bits(keywords)
                 };
+                // "... gains hexproof for as long as ~ remains on the battlefield" (Old Fat
+                // Spider Can't See Me): lost again when the source leaves.
+                let while_on = text.contains("for as long as ~ remains on the battlefield");
+                let src = ctx.src.filter(|&s| self.idx(s).is_some());
+                if while_on && src.is_none() {
+                    return;
+                }
                 let ids = self.pick(ctx, to, false);
                 for id in ids {
                     let Some(i) = self.idx(id) else { continue };
                     if *until_eot || ctx.until_eot {
                         self.perms[i].temp_kw |= bits;
                     } else {
+                        if let (true, Some(src)) = (while_on, src) {
+                            self.ext.while_on.push(WhileOn {
+                                src,
+                                target: id,
+                                what: WhileWhat::Kw(bits & !self.perms[i].kw),
+                            });
+                        }
                         self.perms[i].kw |= bits;
                     }
                 }
@@ -4629,7 +4718,48 @@ impl<'a> Game<'a> {
                 }
             }
             Effect::GainControl(t) => {
-                for id in self.choose(ctx, t, true) {
+                // "Up to two target creatures with total mana value 6 or less" (The Super
+                // Hero Civil War): a second one within what the first leaves of the total.
+                let total = text
+                    .split("target creatures with total mana value ")
+                    .nth(1)
+                    .and_then(|r| r.split_whitespace().next())
+                    .and_then(|w| w.parse::<u32>().ok());
+                let mut ids = self.choose(ctx, &Target { count: 1, ..*t }, true);
+                if let (Some(total), Some(&first)) = (total, ids.first()) {
+                    let left = total
+                        .saturating_sub(self.idx(first).map_or(0, |i| self.perms[i].mv) as u32);
+                    let rest: Vec<usize> = self
+                        .candidates(ctx, t, true)
+                        .into_iter()
+                        .filter(|&i| self.perms[i].id != first && self.perms[i].mv as u32 <= left)
+                        .collect();
+                    let second = self
+                        .h_targets(ctx, &rest, 1, true)
+                        .first()
+                        .map(|&i| self.perms[i].id);
+                    if let Some(id) = second {
+                        let paid = match self.idx(id) {
+                            Some(i) if self.perms[i].ctrl as usize != me => self.pay_ward(me, i),
+                            _ => true,
+                        };
+                        if paid {
+                            self.actor = me as u8;
+                            self.emit_targeted(id);
+                            ids.push(id);
+                        }
+                    }
+                } else if total.is_none() && t.count > 1 {
+                    ids = self.choose(ctx, t, true);
+                }
+                // "... for as long as ~ remains on the battlefield": it ends when the source
+                // leaves (and never starts if it is already gone).
+                let while_on = text.contains("for as long as ~ remains on the battlefield");
+                let src = ctx.src.filter(|&s| self.idx(s).is_some());
+                if while_on && src.is_none() {
+                    return;
+                }
+                for id in ids {
                     let Some(i) = self.idx(id) else { continue };
                     let old = self.perms[i].ctrl;
                     let x = &mut self.perms[i];
@@ -4640,6 +4770,13 @@ impl<'a> Game<'a> {
                         x.temp_kw |= HASTE;
                     } else {
                         x.sick = true;
+                    }
+                    if let (true, Some(src)) = (while_on, src) {
+                        self.ext.while_on.push(WhileOn {
+                            src,
+                            target: id,
+                            what: WhileWhat::Control(old),
+                        });
                     }
                 }
             }
@@ -6112,6 +6249,19 @@ impl<'a> Game<'a> {
             "returns itself to hand" => {
                 if let Some(i) = self.src_idx(ctx) {
                     self.leave(i, Zone::Hand, false);
+                }
+            }
+            // "Prevent all combat damage that would be dealt to it this turn" (Fleeting
+            // Flight): the creature just targeted. (Fog Bank's own is a keyword of the card:
+            // `compile::NO_COMBAT_DAMAGE_TO`.)
+            "prevents combat damage to or by one creature" => {
+                if text.contains("combat damage that would be dealt to it this turn") {
+                    for id in self.last_targets.clone() {
+                        if let Some(i) = self.idx(id) {
+                            self.perms[i].temp_kw |= NO_COMBAT_DAMAGE_TO;
+                        }
+                    }
+                    self.recalc();
                 }
             }
             "weakens a creature's attack" | "weakens attackers" => {

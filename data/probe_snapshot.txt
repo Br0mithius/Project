@@ -965,7 +965,7 @@ On entering:
 ABILITIES:
   Activated (1 mana, sacrifice another): "{1}, sacrifice another creature: you gain life equal to the sacrificed creature's toughness."
       -> You: life +3
-  Activated (3 mana, sacrifice another) [only if LifeAboveStart]: "{1}{w}{b}, sacrifice another creature: exile target nonland permanent. activate only if you have at least 10 life more than your starting life total."
+  Activated (3 mana, sacrifice another) [only if LifeAboveStart(10)]: "{1}{w}{b}, sacrifice another creature: exile target nonland permanent. activate only if you have at least 10 life more than your starting life total."
       -> (nothing changes)
       if the condition holds -> Opp A: exile +1
       if the condition holds -> Opp A's Dragon left the battlefield
@@ -3434,7 +3434,9 @@ On entering:
       -> (nothing changes)
 ABILITIES:
   Attacks: "whenever ~ attacks, it deals 4 damage to any target and 3 damage to each of up to two other targets."
+      -> Opp A: graveyard +1
       -> Opp B: graveyard +2
+      -> Opp A's Ogre left the battlefield
       -> Opp B's Ogre left the battlefield
       -> Opp B's Knight left the battlefield
 
@@ -3793,7 +3795,9 @@ On entering:
       itself: 4/4 lifelink
       -> (nothing changes)
 ABILITIES:
-  Static [only if LifeAboveStart]: "as long as your life total is greater than your starting life total, ~ gets +1/+1 and has menace. ~ gets an additional +5/+5 as long as your life total is at least 10 greater than your starting life total."
+  Static [only if LifeAboveStart(1)]: "as long as your life total is greater than your starting life total, ~ gets +1/+1 and has menace. ~ gets an additional +5/+5 as long as your life total is at least 10 greater than your starting life total."
+      (static: shown under "On entering")
+  Static [only if LifeAboveStart(10)]: "~ gets an additional +5/+5 as long as your life total is at least 10 greater than your starting life total."
       (static: shown under "On entering")
 
 Elfsworn Giant | {3}{G}{G} | Creature — Giant | 5/3
@@ -4509,7 +4513,7 @@ Fleeting Flight | {W} | Instant
 TEXT: Put a +1/+1 counter on target creature. It gains flying until end of turn. Prevent all combat damage that would be dealt to it this turn.
 ABILITIES:
   Spell: "put a +1/+1 counter on target creature. it gains flying until end of turn. prevent all combat damage that would be dealt to it this turn."
-      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1
+      -> Your Dragon: 6/6 -> 7/7, +1/+1 counters +1, gains combat damage to it prevented
 
 Flickering Hound | {3}{W} | Creature — Dog | 2/2
 TEXT: Whenever you cast a creature spell, exile up to one other target creature you control, then return that card to the battlefield under its owner's control.
@@ -4529,9 +4533,9 @@ ABILITIES:
 
 Fog Bank | {1}{U} | Creature — Wall | 0/2
 TEXT: Defender, flying / Prevent all combat damage that would be dealt to and dealt by Fog Bank.
-SIM: keywords flying, defender
+SIM: keywords flying, defender, combat damage to it prevented, combat damage by it prevented
 On entering:
-      itself: 0/2 flying, defender
+      itself: 0/2 flying, defender, combat damage to it prevented, combat damage by it prevented
       -> (nothing changes)
 ABILITIES:
   Static: "prevent all combat damage that would be dealt to and dealt by ~."

@@ -30,6 +30,9 @@ pub const CANT_BLOCK: u32 = 1 << 20;
 pub const SHROUD: u32 = 1 << 21;
 /// "Prevent all damage that would be dealt to ~" (Black Panther).
 pub const NO_DAMAGE: u32 = 1 << 22;
+/// "Prevent all combat damage that would be dealt to ~" / "... dealt by ~" (Fog Bank: both).
+pub const NO_COMBAT_DAMAGE_TO: u32 = 1 << 23;
+pub const NO_COMBAT_DAMAGE_BY: u32 = 1 << 24;
 
 // Rule-changing statics a permanent has (`SimCard::rules`): what its controller's game
 // does differently while it's on the battlefield.
@@ -802,7 +805,9 @@ pub enum Cond {
     NoPlaneswalker,
     HasPlaneswalker,
     LifeAtLeast(i32),
-    LifeAboveStart,
+    /// Your life total is at least this much more than your starting life total ("greater
+    /// than": 1; "at least 10 life more than": 10).
+    LifeAboveStart(i32),
     OpponentLostLife,
     DrawnThisTurn(u8),
     GainedLife,
@@ -1944,7 +1949,17 @@ fn cond_from(t: &str) -> Cond {
         return Cond::LifeAtLeast(number_before(t, " or more life").unwrap_or(20) as i32);
     }
     if t.contains("starting life total") {
-        return Cond::LifeAboveStart;
+        // "At least 10 life more than your starting life total" (Ayli), "at least 10
+        // greater than" - or just "greater than" it (Elenda's first sentence comes first).
+        let first = t.split("starting life total").next().unwrap_or("");
+        let n = first
+            .rsplit("at least ")
+            .next()
+            .filter(|_| first.contains("at least "))
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|w| w.parse::<i32>().ok())
+            .unwrap_or(1);
+        return Cond::LifeAboveStart(n);
     }
     if t.contains("opponent lost life") || t.contains("been dealt noncombat damage") {
         return Cond::OpponentLostLife;
@@ -2300,7 +2315,8 @@ pub fn blink_types(text: &str) -> u16 {
         .split([',', '.'])
         .next()
         .unwrap_or("");
-    if clause.contains("nonland permanent") {
+    // ("Another target nonland, nontoken permanent" - Wiccan - is cut at the comma.)
+    if clause.contains("nonland") {
         return 0xFFFF & !T_LAND;
     }
     let mut t = 0;
@@ -3169,6 +3185,47 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
             a.cond = Cond::Always;
         }
     }
+    // "... ~ gets +1/+1 and has menace. ~ gets an additional +5/+5 as long as your life total
+    // is at least 10 greater than your starting life total" (Elenda): the second sentence is
+    // a static of its own, with its own condition.
+    let mut more = Vec::new();
+    for a in out.iter().filter(|a| a.trig == Trig::Static) {
+        let Some(rest) = a.text.split(". ~ gets an additional +").nth(1) else {
+            continue;
+        };
+        let Some((pt, cond_text)) = rest.split_once(" as long as ") else {
+            continue;
+        };
+        let Some((p, t)) = pt.split_once("/+") else {
+            continue;
+        };
+        let (Ok(p), Ok(t)) = (p.parse::<i32>(), t.parse::<i32>()) else {
+            continue;
+        };
+        let Some(to) = a.effects.iter().find_map(|e| match e {
+            Effect::Pump {
+                to,
+                until_eot: false,
+                ..
+            } if !to.mass => Some(*to),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let text = format!("~ gets an additional +{}", rest);
+        more.push(SimAbility {
+            cond: cond_of(&format!("as long as {}", cond_text), true),
+            effects: vec![Effect::Pump {
+                power: p,
+                toughness: t,
+                to,
+                until_eot: false,
+            }],
+            text,
+            ..a.clone()
+        });
+    }
+    out.extend(more);
     out
 }
 
@@ -3388,6 +3445,13 @@ fn text_kw(text: &str) -> u32 {
     let mut kw = 0;
     if text.contains("prevent all damage that would be dealt to ~") {
         kw |= NO_DAMAGE;
+    }
+    if text.contains("prevent all combat damage that would be dealt to and dealt by ~") {
+        kw |= NO_COMBAT_DAMAGE_TO | NO_COMBAT_DAMAGE_BY;
+    } else if text.contains("prevent all combat damage that would be dealt to ~") {
+        kw |= NO_COMBAT_DAMAGE_TO;
+    } else if text.contains("prevent all combat damage that would be dealt by ~") {
+        kw |= NO_COMBAT_DAMAGE_BY;
     }
     kw
 }

@@ -1207,6 +1207,34 @@ impl<'a> Game<'a> {
                 self.players[p].inst_sorc_this_turn.saturating_add(1);
         }
         self.on_cast(p, &probe_card);
+        // "When you cast this spell, ..." on a permanent spell (Emrakul, the Exigent Doom:
+        // untap all lands you control): a cast trigger, resolving before the spell - also
+        // when the spell is then countered.
+        if !back && c.is_permanent() {
+            for (k, a) in c.abilities.iter().enumerate() {
+                if a.trig == Trig::Spell
+                    && (a.text.starts_with("when you cast ~")
+                        || a.text.starts_with("when you cast this spell"))
+                {
+                    self.pending.push(Pending {
+                        ctrl: p as u8,
+                        source: None,
+                        card: (list as u8, idx),
+                        back: false,
+                        ability: k as u16,
+                        snapshot: None,
+                        subject: None,
+                        teamwork,
+                        gift: false,
+                        from_graveyard,
+                        kicked,
+                        overloaded: false,
+                        x,
+                        cast: false,
+                    });
+                }
+            }
+        }
         // For "whenever you cast a spell that targets ...": on while the spell's own
         // abilities choose its targets (`spell_target_chosen`).
         let watch = self.ext.cast_probe.clone().map(|probe| CastWatch {
@@ -2560,6 +2588,8 @@ impl<'a> Game<'a> {
                 x.till = None;
             }
             x.fired = 0;
+            // "Choose one that hasn't been chosen this turn" (The Vision): all of them again.
+            x.modes_this_turn = 0;
             x.taps = 0;
             x.hit_turn = 0;
             x.hurt_by = 0;

@@ -101,6 +101,8 @@ pub struct Perm {
     pub sac_at_end: bool,
     /// Modes already chosen ("choose one that hasn't been chosen"), a bit per mode.
     pub modes_used: u32,
+    /// Modes chosen this turn ("choose one that hasn't been chosen this turn": The Vision).
+    pub modes_this_turn: u32,
     /// "Is all creature types" while a condition holds (Undercover Skrull): on now.
     pub all_types: bool,
     /// Once-each-turn triggers that already fired this turn (bit per ability).
@@ -450,6 +452,22 @@ pub enum Purpose {
     Ability { src: u32 },
 }
 
+/// An effect that lasts "for as long as ~ remains on the battlefield" (`src`).
+#[derive(Debug, Clone, Copy)]
+pub struct WhileOn {
+    pub src: u32,
+    pub target: u32,
+    pub what: WhileWhat,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WhileWhat {
+    /// Control of the target was taken from this player.
+    Control(u8),
+    /// The target gained these keywords.
+    Kw(u32),
+}
+
 /// The spell being cast (see `GameExtra::cast_watch`).
 #[derive(Debug, Clone)]
 pub struct CastWatch {
@@ -487,6 +505,13 @@ pub struct GameExtra {
     /// How often an ability resolved this turn: (source id, ability, turn, count).
     pub resolutions: Vec<(u32, u16, u32, u8)>,
     pub delayed: Vec<Delayed>,
+    /// What the resolving ability's "any target" damage already hit ("3 damage to each of up
+    /// to two other targets": Drakuseth), and - while such "other targets" are chosen - the
+    /// permanents among them (`Game::candidates` leaves them out).
+    pub dmg_hits: Vec<super::ai::Hit>,
+    pub not_targets: Vec<u32>,
+    /// "For as long as ~ remains on the battlefield" effects, undone when it leaves.
+    pub while_on: Vec<WhileOn>,
     /// The spell being cast, while its own abilities resolve and choose its targets (for
     /// "whenever you cast a spell that targets ...": `Game::spell_target_chosen`).
     pub cast_watch: Option<CastWatch>,
@@ -1348,7 +1373,7 @@ impl<'a> Game<'a> {
             Cond::NoPlaneswalker => !mine().any(|x| x.is(T_PLANESWALKER)),
             Cond::HasPlaneswalker => mine().any(|x| x.is(T_PLANESWALKER)),
             Cond::LifeAtLeast(n) => pl.life >= *n,
-            Cond::LifeAboveStart => pl.life > self.start_life,
+            Cond::LifeAboveStart(n) => pl.life >= self.start_life + *n,
             Cond::OpponentLostLife => self
                 .players
                 .iter()
@@ -2215,6 +2240,9 @@ impl<'a> Game<'a> {
         let announced = std::mem::take(&mut self.ext.deaths_announced);
         let perm = self.perms.remove(i);
         self.last_left = Some(perm.clone());
+        if !self.ext.while_on.is_empty() {
+            self.end_while_on(perm.id);
+        }
         // A finality counter, or Garruk ("if a creature an opponent controls would die,
         // exile it instead"): dying exiles it instead (no dies triggers).
         let garruk = perm.is_creature()
@@ -2572,6 +2600,7 @@ impl<'a> Game<'a> {
             sac_at_end: false,
             modes_used: 0,
             all_types: false,
+            modes_this_turn: 0,
             fired: 0,
             mv,
             attacking: false,
@@ -3245,6 +3274,39 @@ impl<'a> Game<'a> {
         self.pending.extend(add);
     }
 
+    /// Permanent `id` left the battlefield: what lasted "for as long as ~ remains on the
+    /// battlefield" ends (control goes back, granted keywords are lost).
+    fn end_while_on(&mut self, id: u32) {
+        let list = std::mem::take(&mut self.ext.while_on);
+        let (ended, kept): (Vec<WhileOn>, Vec<WhileOn>) =
+            list.into_iter().partition(|w| w.src == id);
+        self.ext.while_on = kept.into_iter().filter(|w| w.target != id).collect();
+        for w in ended {
+            let Some(i) = self.idx(w.target) else {
+                continue;
+            };
+            match w.what {
+                WhileWhat::Control(old) => {
+                    if self.players.get(old as usize).is_some_and(|p| p.alive)
+                        && self.perms[i].ctrl != old
+                    {
+                        self.perms[i].ctrl = old;
+                        self.perms[i].sick = true;
+                        let d = self.log.is_some().then(|| self.perm_desc(&self.perms[i]));
+                        if let Some(d) = d {
+                            self.note(|| format!("  {} goes back to P{}", d, old));
+                        }
+                    }
+                }
+                WhileWhat::Kw(bits) => {
+                    let printed = self.perms[i].card.map_or(0, |r| self.card(r).kw);
+                    let x = &mut self.perms[i];
+                    x.kw = x.kw & !bits | printed & bits;
+                }
+            }
+        }
+    }
+
     /// The spell being cast targets this permanent or player: sets off "whenever you cast a
     /// spell that targets ..." (Colleen Wing, Fin Fang Foom, Speedball) by what the spell
     /// really targets. The engine chooses a spell's targets as its abilities resolve, so the
@@ -3423,6 +3485,7 @@ impl<'a> Game<'a> {
             sac_at_end: false,
             modes_used: 0,
             all_types: false,
+            modes_this_turn: 0,
             fired: 0,
             mv: 0,
             attacking: false,

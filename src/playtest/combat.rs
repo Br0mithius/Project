@@ -627,6 +627,14 @@ impl<'a> Game<'a> {
             };
             let n = doubled(self, ctrl, src, n);
             let Some(ti) = self.idx(target) else { continue };
+            // "Prevent all combat damage that would be dealt to and dealt by ~" (Fog Bank).
+            if kw & NO_COMBAT_DAMAGE_BY != 0 || self.perms[ti].has(NO_COMBAT_DAMAGE_TO) {
+                if self.log.is_some() {
+                    let (s, t) = (self.id_desc(src), self.id_desc(target));
+                    self.note(|| format!("  {} -> {}: {} combat damage prevented", s, t, n));
+                }
+                continue;
+            }
             if self.perms[ti].protection & colors != 0 {
                 if self.log.is_some() {
                     let (s, t) = (self.id_desc(src), self.id_desc(target));
@@ -674,7 +682,7 @@ impl<'a> Game<'a> {
             };
             let n = doubled(self, ctrl, src, n);
             let Some(wi) = self.idx(w) else { continue };
-            if self.perms[wi].protection & colors != 0 {
+            if self.perms[wi].protection & colors != 0 || kw & NO_COMBAT_DAMAGE_BY != 0 {
                 continue;
             }
             let dealt = self.damage_perm(wi, n, false);
@@ -700,6 +708,9 @@ impl<'a> Game<'a> {
             let Some(&(ctrl, kw, _, cmd, toxic, owner)) = src_info.get(&src) else {
                 continue;
             };
+            if kw & NO_COMBAT_DAMAGE_BY != 0 {
+                continue;
+            }
             let n = if self.doubles_from(ctrl as usize, "damage", Some(src)) {
                 n * 2
             } else {
