@@ -155,3 +155,29 @@ more games and other decks before any rule changes.
   decision, and `bot_regret` writes every option of every sampled point (`GAP=0`: no
   selection), so a kind of choice is rated by its average over all positions. The table
   above is not to be used; rerun pending.
+
+## 2026-11-28: bot self-review, corrected method, 40 life (first unbiased result)
+
+534 bot-against-bot games (Thanos Session 5 list, Drake's and Will's decks as the reviewed
+seat, the other decks as opponents), 5,299 decision points, 18,796 options, 30 play-outs
+each, libraries reshuffled before the decision, every option kept
+(`research/data/bot_review_40life_*.tsv.gz`). Average gain of each kind of alternative over
+the bot's own choice, in win-rate points:
+
+  attack: none                         +1.2 ± 0.3   (751 decisions)
+  response: pass                       +0.2 ± 0.4
+  main: play this land first           -0.1 ± 0.2
+  attack: everything at one target     -0.3 ± 0.2
+  block: none                          -0.8 ± 0.4
+  main: pass (cast after combat)       -0.8 ± 0.2   (the first run's "pass first" was the artifact)
+  other targets / yes-no / none        -1.0 to -1.2
+
+So the bot's choices beat every blanket alternative except one: NOT ATTACKING. Where the
+bot attacked (675 decisions) staying home was +1.3 ± 0.3:
+  by deck:   Thanos +2.3 ± 0.4, Will +2.1 ± 0.7, Drake -2.2 ± 0.7 (the token deck should attack)
+  by round:  1-4 0.0 ± 1.1, 5-7 +2.0 ± 0.6, 8-10 +3.4 ± 0.6, 11+ -1.5 ± 0.5
+  by size:   1 attacker +1.7 ± 0.5, 2-3 +1.7 ± 0.5, 4+ -0.8 ± 0.6
+Reading: slower decks lose games by making small attacks in the middle rounds; going wide,
+and attacking late, is right. To do: read logs for why (tapped blockers and the crack-back,
+or drawing the table's attacks), then a rule tested with `policy_ab` on several decks.
+These games were on the rules before the audit fixes; rerun after them.
