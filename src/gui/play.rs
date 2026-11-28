@@ -327,6 +327,7 @@ impl GuiApp {
                     self.play.note_changes(&view);
                     self.play.view = Some(*view);
                     self.play.over = Some(winner);
+                    self.save_game_record(winner, &transcript);
                     self.play.transcript = transcript;
                     self.play.ask = None;
                 }
@@ -386,6 +387,45 @@ impl GuiApp {
             ..Default::default()
         };
         self.status = "Game started: you are P0 (bottom). Tap lands for mana, then cast.".into();
+    }
+
+    /// Saves a finished game to `games/` in the data folder: its seed, decks and every
+    /// answer replay it exactly, which is what the decision review works from
+    /// (`playtest::review`, `examples/decision_review`).
+    fn save_game_record(&mut self, winner: usize, answers: &[Answer]) {
+        let Some(setup) = self.play.setup.clone() else {
+            return;
+        };
+        let player = std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "player".into());
+        let rec = crate::playtest::review::GameRecord {
+            version: crate::playtest::review::RECORD_VERSION,
+            player,
+            date: crate::ratings::today(),
+            app: env!("CARGO_PKG_VERSION").into(),
+            sim: crate::playtest::simvalues::SIM_VERSION,
+            winner,
+            report: Report {
+                note: String::new(),
+                setup,
+                answers: answers.to_vec(),
+            },
+        };
+        let dir = self.data_dir.join("games");
+        let path = dir.join(format!(
+            "game-{}-{}.json",
+            crate::ratings::today(),
+            now_secs() % 1_000_000
+        ));
+        if let Ok(text) = serde_json::to_string(&rec) {
+            if std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::write(&path, text))
+                .is_ok()
+            {
+                self.status = format!("Game saved for review: {}", path.display());
+            }
+        }
     }
 
     /// Writes the bug report file (`answers`: the engine's record, which replays the game).
