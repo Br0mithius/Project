@@ -1,0 +1,73 @@
+# Card power measured by playtests (see src/playtest/simvalues.rs): win-rate points
+# over a vanilla 3-drop, one row per card and deck. Re-measure from the app.
+card	deck	value	se	games	sim	date
+Arbiter of Woe	Thanos, the Mad Titan	1.980	0.705	6000	3	2026-11-28
+Arcane Signet	Thanos, the Mad Titan	2.860	0.728	6000	3	2026-11-28
+Attercop	Thanos, the Mad Titan	2.433	0.683	6000	3	2026-11-28
+Avengers: Under Siege	Thanos, the Mad Titan	1.470	0.699	6000	3	2026-11-28
+Captain Marvel, Earth's Protector	Thanos, the Mad Titan	5.483	0.733	6000	3	2026-11-28
+Celebrate the Mountain-king	Thanos, the Mad Titan	3.563	0.742	6000	3	2026-11-28
+Cloudblazer	Thanos, the Mad Titan	2.657	0.720	6000	3	2026-11-28
+Doc Samson, Super Psychiatrist	Thanos, the Mad Titan	0.643	0.718	6000	3	2026-11-28
+Doctor Doom	Thanos, the Mad Titan	2.757	0.754	6000	3	2026-11-28
+Dáin, Lord of the Iron Hills	Thanos, the Mad Titan	2.147	0.663	6000	3	2026-11-28
+Fumigate	Thanos, the Mad Titan	2.170	0.773	6000	3	2026-11-28
+Futurist Forge	Thanos, the Mad Titan	2.080	0.711	6000	3	2026-11-28
+Massacre Wurm	Thanos, the Mad Titan	1.110	0.722	6000	3	2026-11-28
+Murdock's Crusade	Thanos, the Mad Titan	1.210	0.739	6000	3	2026-11-28
+Panther Pounce	Thanos, the Mad Titan	2.000	0.729	6000	3	2026-11-28
+Political Triumph	Thanos, the Mad Titan	2.423	0.738	6000	3	2026-11-28
+Rapid Rescue	Thanos, the Mad Titan	1.290	0.742	6000	3	2026-11-28
+Red Hulk	Thanos, the Mad Titan	2.320	0.722	6000	3	2026-11-28
+Sol Ring	Thanos, the Mad Titan	4.063	0.765	6000	3	2026-11-28
+Stasis Snare	Thanos, the Mad Titan	2.167	0.571	6000	3	2026-11-28
+Storm, Windrider	Thanos, the Mad Titan	9.147	0.720	6000	3	2026-11-28
+The Mind Stone	Thanos, the Mad Titan	4.360	0.750	6000	3	2026-11-28
+Thor Odinson	Thanos, the Mad Titan	2.663	0.646	6000	3	2026-11-28
+Thor, God of Thunder	Thanos, the Mad Titan	3.853	0.749	6000	3	2026-11-28
+Thought Vessel	Thanos, the Mad Titan	1.363	0.723	6000	3	2026-11-28
+Undercover Skrull	Thanos, the Mad Titan	0.197	0.692	6000	3	2026-11-28
+Vampire Nighthawk	Thanos, the Mad Titan	1.317	0.476	6000	3	2026-11-28
+Visions of Villainy	Thanos, the Mad Titan	1.200	0.523	6000	3	2026-11-28
+Web Up	Thanos, the Mad Titan	1.030	0.561	6000	3	2026-11-28
+Zetalpa, Primal Dawn	Thanos, the Mad Titan	7.217	0.733	6000	3	2026-11-28
+Aerial Doombot	Thanos, the Mad Titan	0.893	0.522	6000	3	2026-11-28
+Agents of HYDRA	Thanos, the Mad Titan	1.373	0.513	6000	3	2026-11-28
+Alien Invasion	Thanos, the Mad Titan	1.680	0.545	6000	3	2026-11-28
+Ant-Man's Army	Thanos, the Mad Titan	0.307	0.473	6000	3	2026-11-28
+Beorn's Hospitality	Thanos, the Mad Titan	3.023	0.534	6000	3	2026-11-28
+Borough Backup	Thanos, the Mad Titan	1.277	0.516	6000	3	2026-11-28
+Crossbones, Malicious Mercenary	Thanos, the Mad Titan	1.167	0.516	6000	3	2026-11-28
+Crowd of True Believers	Thanos, the Mad Titan	1.133	0.513	6000	3	2026-11-28
+Dependable Quinjet	Thanos, the Mad Titan	2.350	0.544	6000	3	2026-11-28
+HULK SMASH!	Thanos, the Mad Titan	1.960	0.535	6000	3	2026-11-28
+HYDRA Troopers	Thanos, the Mad Titan	-0.400	0.493	6000	3	2026-11-28
+Hero's Downfall	Thanos, the Mad Titan	1.133	0.544	6000	3	2026-11-28
+Hour of Defeat	Thanos, the Mad Titan	1.190	0.549	6000	3	2026-11-28
+Hydraulic Helper	Thanos, the Mad Titan	1.447	0.515	6000	3	2026-11-28
+Iron Man, Master of Machines	Thanos, the Mad Titan	1.813	0.507	6000	3	2026-11-28
+Kang, Temporal Tyrant	Thanos, the Mad Titan	1.260	0.517	6000	3	2026-11-28
+Kree Commandos	Thanos, the Mad Titan	1.087	0.418	6000	3	2026-11-28
+Kree Sentinel	Thanos, the Mad Titan	2.327	0.516	6000	3	2026-11-28
+Little Bear	Thanos, the Mad Titan	0.737	0.389	6000	3	2026-11-28
+Madame Hydra	Thanos, the Mad Titan	0.613	0.499	6000	3	2026-11-28
+Moonstone, Harsh Mistress	Thanos, the Mad Titan	1.613	0.496	6000	3	2026-11-28
+Mortify	Thanos, the Mad Titan	0.633	0.539	6000	3	2026-11-28
+Ninja of the Hand	Thanos, the Mad Titan	1.467	0.456	6000	3	2026-11-28
+Patient Instructor	Thanos, the Mad Titan	0.830	0.507	6000	3	2026-11-28
+Pet Avengers	Thanos, the Mad Titan	1.937	0.543	6000	3	2026-11-28
+Project Deathlok Soldier	Thanos, the Mad Titan	0.613	0.520	6000	3	2026-11-28
+Rage into the Valley	Thanos, the Mad Titan	1.360	0.525	6000	3	2026-11-28
+Ravening Warg	Thanos, the Mad Titan	1.500	0.493	6000	3	2026-11-28
+Roxxon Brutes	Thanos, the Mad Titan	0.797	0.517	6000	3	2026-11-28
+Serpent Specialist	Thanos, the Mad Titan	0.883	0.498	6000	3	2026-11-28
+She-Hulk, Jade Defender	Thanos, the Mad Titan	2.777	0.569	6000	3	2026-11-28
+Silvan Reveler	Thanos, the Mad Titan	0.833	0.531	6000	3	2026-11-28
+Stark Industries Executive	Thanos, the Mad Titan	0.527	0.524	6000	3	2026-11-28
+Stir Up Trouble	Thanos, the Mad Titan	-0.487	0.559	6000	3	2026-11-28
+Stony-Voiced Goblins	Thanos, the Mad Titan	1.710	0.543	6000	3	2026-11-28
+Super Suit	Thanos, the Mad Titan	0.663	0.526	6000	3	2026-11-28
+Super Villain Lockup	Thanos, the Mad Titan	0.783	0.542	6000	3	2026-11-28
+Ultron Drone	Thanos, the Mad Titan	0.577	0.417	6000	3	2026-11-28
+Vow to Erebor	Thanos, the Mad Titan	1.033	0.512	6000	3	2026-11-28
+Óin the Brave	Thanos, the Mad Titan	0.313	0.529	6000	3	2026-11-28
