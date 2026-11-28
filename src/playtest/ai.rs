@@ -1465,6 +1465,9 @@ pub mod exp {
     /// down after round 10. Without it the rating is the same all game, and an engine like
     /// Alien Invasion (a growing token every turn) waits behind every creature: in 60 logged
     /// games it was cast in round 12 on average, never before round 7.
+    /// Measured (`policy_ab`, the seat changed, 30,000 paired games): Session 5 Thanos list
+    /// +0.15 +/- 0.07, Session 6 list -0.07 +/- 0.06, Drake -0.05, Will +0.09, JD +0.02; and
+    /// it barely moves when Alien Invasion is cast ({1}{R}{R}{G} is the limit). Off.
     pub const EARLY_ENGINE: u32 = 32;
 }
 

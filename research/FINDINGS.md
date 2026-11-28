@@ -123,3 +123,10 @@ clearly worse at the real table - more than one standard error.)
   pool gains fixing (Session 5 packs, Dec 3). Refine at 20,000 games per swap did not pass
   the gate either (S5 -0.98, S6 -0.78, 11-14 minutes): stays at 6,000.
 - EARLY_ENGINE on our seat, current Session 5 list: +0.20 ± 0.08 (20,000 games); to confirm.
+- EARLY_ENGINE confirmation (30,000 games): S5 +0.15 ± 0.07, S6 -0.07 ± 0.06, Drake -0.05,
+  Will +0.09, JD +0.02. Not general: stays off.
+- Brom's own list against the tested Session 5 list (30,000 paired games): -4.59 ± 0.25
+  (table -6.38). Parts: Alien Invasion + two Mountains for Rapid Rescue, Plains, Swamp
+  -2.45; Mortify for the third Visions -0.78; Iron Man for Panther Pounce -0.43; HULK
+  SMASH! for Attercop -0.36; She-Hulk for Doc Samson -0.18 (table -1.17); the two
+  Mountains alone -0.05.
