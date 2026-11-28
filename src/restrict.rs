@@ -311,6 +311,8 @@ pub struct Restr {
     pub tough_max: Option<i8>,
     /// "power or toughness N or less".
     pub pt_or_max: Option<i8>,
+    /// "Nonattacking creature".
+    pub nonattacking: bool,
 }
 
 const FLAG_NAMES: &[(u32, &str)] = &[
@@ -435,6 +437,9 @@ impl std::fmt::Debug for Restr {
         }
         if let Some(n) = self.pt_or_max {
             parts.push(format!("power or toughness <= {}", n));
+        }
+        if self.nonattacking {
+            parts.push("nonattacking".into());
         }
         write!(f, "Restr({})", parts.join(", "))
     }
@@ -694,6 +699,7 @@ impl Restr {
                 "tapped" => r.flags |= TAPPED,
                 "untapped" => r.flags |= UNTAPPED,
                 "attacking" => r.flags |= ATTACKING,
+                "nonattacking" => r.nonattacking = true,
                 "blocking" => r.flags |= BLOCKING,
                 "token" | "tokens" => r.flags |= TOKEN,
                 "multicolored" => r.flags |= MULTICOLORED,
@@ -941,6 +947,9 @@ impl Restr {
         use crate::playtest::compile as k;
         let kw = |b: u32| o.kw & b != 0;
         if r.has(TAPPED) && !o.tapped || r.has(UNTAPPED) && o.tapped {
+            return false;
+        }
+        if r.nonattacking && o.attacking {
             return false;
         }
         let combat = r.flags & (ATTACKING | BLOCKING);

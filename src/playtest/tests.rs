@@ -6604,3 +6604,179 @@ fn fblthp_wins_with_an_empty_library() {
     );
     assert!(!g.players[1].alive, "you win the game");
 }
+
+/// The Mighty Thor, Jane Foster: the exiled card returns to the battlefield tapped.
+#[test]
+fn mighty_thor_returns_the_card_tapped() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &[
+            "The Mighty Thor, Jane Foster",
+            "The Sentry, Golden Guardian",
+        ],
+    );
+    let mut g = game(&[&d, &d]);
+    let thor = put(&mut g, 0, 0);
+    put(&mut g, 0, 1);
+    let born = g.perms.iter().map(|x| x.id).max().unwrap();
+    let k = ability_of(&g, thor, |a| a.text.contains("whenever ~ attacks"));
+    fire(&mut g, thor, k);
+    let sentry = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, 1)))
+        .expect("The Sentry is back");
+    assert!(sentry.id > born, "it left and came back");
+    assert!(sentry.tapped, "tapped");
+}
+
+/// Echo copies an ability on the stack: never one that resolved on an earlier turn.
+#[test]
+fn echo_forgets_abilities_of_earlier_turns() {
+    let db = db();
+    let d = prep_db(&db, &["The Sentry, Golden Guardian"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    assert!(g.players[0].last_ability.is_some());
+    g.begin_turn_extra();
+    assert!(g.players[0].last_ability.is_none());
+}
+
+/// Enlightened Confidant: a card surveilled into the graveyard with mana value up to the
+/// life gained this turn goes to hand.
+#[test]
+fn enlightened_confidant_takes_the_surveilled_card() {
+    let db = db();
+    let d = prep_db(&db, &["Enlightened Confidant", "Plains"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 12, 'W');
+    let c = put(&mut g, 0, 0);
+    g.players[0].hand = vec![1; 6];
+    g.players[0].library = vec![0, 0, 1]; // a thirteenth land on top: binned
+    g.players[0].life_gained_turn = 2;
+    let k = ability_of(&g, c, |a| a.text.contains("surveil"));
+    fire(&mut g, c, k);
+    assert!(
+        g.players[0].graveyard.is_empty(),
+        "nothing stays in the graveyard"
+    );
+    if g.players[0].library.len() == 2 {
+        assert_eq!(g.players[0].hand.len(), 7, "the binned card is in hand");
+    }
+}
+
+/// Dread Summons: a tapped Zombie for each creature card actually milled, from every
+/// library (it made X untapped ones).
+#[test]
+fn dread_summons_counts_the_creature_cards_milled() {
+    let db = db();
+    let d = prep_db(&db, &["Dread Summons", "Swamp", "Enlightened Confidant"]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![2, 1];
+    g.players[1].library = vec![2, 2, 1];
+    fire_card(&mut g, 0, 0, None);
+    let zombies: Vec<&Perm> = g.perms.iter().filter(|x| x.is_token()).collect();
+    assert_eq!(zombies.len(), 3, "three creature cards were milled");
+    assert!(zombies.iter().all(|x| x.tapped && x.ctrl == 0));
+}
+
+/// Overwrite the Multiverse: empower Jace by the number of creatures exiled.
+#[test]
+fn overwrite_the_multiverse_counts_the_exiled_creatures() {
+    let db = db();
+    let d = prep_db(&db, &["Overwrite the Multiverse", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    token(&mut g, 0, 2);
+    token(&mut g, 1, 2);
+    fire_card(&mut g, 0, 0, None);
+    let jace = g
+        .perms
+        .iter()
+        .find(|x| x.tok == Tok::Jace)
+        .expect("a Jace token");
+    assert_eq!(jace.loyalty, 2, "two creatures were exiled");
+}
+
+/// Cloak and Dagger: a card taken from the hand comes back to that hand when they leave.
+#[test]
+fn cloak_and_dagger_give_the_hand_card_back() {
+    let db = db();
+    let d = prep_db(
+        &db,
+        &["Cloak and Dagger, Entwined", "The Sentry, Golden Guardian"],
+    );
+    let mut g = game(&[&d, &d]);
+    g.players[1].hand = vec![1];
+    let cd = put(&mut g, 0, 0);
+    assert!(g.players[1].hand.is_empty() && g.players[1].exile == vec![1]);
+    g.destroy(g.idx(cd).unwrap());
+    g.run_pending();
+    assert_eq!(g.players[1].hand, vec![1], "back in hand");
+    assert!(g.players[1].exile.is_empty());
+}
+
+/// Prophesied End: the controller draws only if the creature wasn't attacking.
+#[test]
+fn prophesied_end_gives_no_card_for_an_attacker() {
+    let db = db();
+    let d = prep_db(&db, &["Prophesied End", "Plains"]);
+    let mut g = game(&[&d, &d]);
+    let a = token(&mut g, 1, 4);
+    let i = g.idx(a).unwrap();
+    g.perms[i].attacking = true;
+    fire_card(&mut g, 0, 0, None);
+    assert!(g.idx(a).is_none(), "destroyed");
+    assert!(g.players[1].hand.is_empty(), "it was attacking: no card");
+    token(&mut g, 1, 4);
+    fire_card(&mut g, 0, 0, None);
+    assert_eq!(g.players[1].hand.len(), 1, "not attacking: a card");
+}
+
+/// Spider-Man, To the Rescue: "you may tap him. When you do, another target nonattacking
+/// creature you control gains indestructible" - he taps, and an attacker is no target.
+#[test]
+fn spider_man_taps_to_protect_a_nonattacking_creature() {
+    let db = db();
+    let d = prep_db(&db, &["Spider-Man, To the Rescue"]);
+    let mut g = game(&[&d, &d]);
+    let friend = token(&mut g, 0, 4);
+    let spidey = put(&mut g, 0, 0);
+    assert!(perm(&g, friend).has(INDESTRUCTIBLE));
+    assert!(perm(&g, spidey).tapped, "Spider-Man tapped for it");
+    let mut g = game(&[&d, &d]);
+    let friend = token(&mut g, 0, 4);
+    let i = g.idx(friend).unwrap();
+    g.perms[i].attacking = true;
+    put(&mut g, 0, 0);
+    assert!(
+        !perm(&g, friend).has(INDESTRUCTIBLE),
+        "an attacker is no target"
+    );
+}
+
+/// Crowd of True Believers needs a creature of yours attacking alone to be activated.
+#[test]
+fn crowd_of_true_believers_needs_a_lone_attacker() {
+    let db = db();
+    let d = prep_db(&db, &["Crowd of True Believers"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let crowd = put(&mut g, 0, 0);
+    let a = token(&mut g, 0, 2);
+    let b = token(&mut g, 0, 2);
+    let i = g.idx(crowd).unwrap();
+    assert!(g.activation_plan(0, i, 0).is_none(), "nothing attacks");
+    for id in [a, b] {
+        let j = g.idx(id).unwrap();
+        g.perms[j].attacking = true;
+    }
+    assert!(
+        g.activation_plan(0, i, 0).is_none(),
+        "two attackers: not alone"
+    );
+    let j = g.idx(b).unwrap();
+    g.perms[j].attacking = false;
+    assert!(g.activation_plan(0, i, 0).is_some(), "one attacker");
+}

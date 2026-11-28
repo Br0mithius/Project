@@ -1762,6 +1762,13 @@ impl<'a> Game<'a> {
                 self.leave(i, Zone::Exile, false);
                 Some(None)
             }
+            ResCost::TapSelf => {
+                let i = self.src_idx(ctx).filter(|&i| !self.perms[i].tapped)?;
+                self.perms[i].tapped = true;
+                let id = self.perms[i].id;
+                self.became_tapped(id);
+                Some(None)
+            }
             ResCost::ExileNamed(n) => {
                 let name = &ctx.card?.name;
                 let pl = &self.players[me];
@@ -2381,6 +2388,17 @@ impl<'a> Game<'a> {
         let c = self.players[o].hand.remove(h);
         if exile {
             self.players[o].exile.push(c);
+            // "... until ~ leave(s) the battlefield": it returns to its owner's hand then
+            // (at once if the source is already gone).
+            if text.contains("until ~ leave") {
+                match self.src_idx(ctx) {
+                    Some(s) => self.perms[s].holding_hand.push((o as u8, c)),
+                    None => {
+                        self.players[o].exile.pop();
+                        self.players[o].hand.push(c);
+                    }
+                }
+            }
         } else {
             self.put_discarded(o, c);
         }
@@ -2788,9 +2806,13 @@ impl<'a> Game<'a> {
                     }
                     return;
                 }
+                self.ext.exiled_creatures = 0;
                 for id in self.choose(ctx, target, harmful) {
                     let Some(i) = self.idx(id) else { continue };
                     let x = self.perms[i].clone();
+                    if x.is_creature() && !shuffle {
+                        self.ext.exiled_creatures += 1;
+                    }
                     if shuffle {
                         self.leave(i, Zone::Library(false), false);
                         let o = x.owner as usize;
@@ -3487,6 +3509,28 @@ impl<'a> Game<'a> {
                 ]
                 .iter()
                 .any(|w| text.contains(w));
+                // "Destroy target creature. If it wasn't attacking, its controller draws a
+                // card" (Prophesied End): no card for an attacker; otherwise its controller
+                // draws, you included.
+                if !*you && text.contains("if it wasn't attacking, its controller draws") {
+                    let it = self
+                        .last_targets
+                        .first()
+                        .and_then(|&id| self.idx(id))
+                        .map(|i| self.perms[i].clone())
+                        .or_else(|| {
+                            self.last_left
+                                .clone()
+                                .filter(|x| self.last_targets.contains(&x.id))
+                        });
+                    if let Some(x) = it {
+                        let o = x.ctrl as usize;
+                        if !x.attacking && self.players[o].alive {
+                            self.draw(o, n);
+                        }
+                    }
+                    return;
+                }
                 if !*you && theirs && self.last_ctrl.is_some_and(|o| o as usize != me) {
                     let o = self.last_ctrl.unwrap_or(0) as usize;
                     if self.players[o].alive {
@@ -3683,6 +3727,19 @@ impl<'a> Game<'a> {
                 let theirs = text.contains("opponent")
                     || text.contains("target player")
                     || text.contains("each player");
+                // Creature cards in all graveyards before, to count those milled.
+                let creature_cards = |g: &Game| -> i32 {
+                    g.players
+                        .iter()
+                        .map(|pl| {
+                            pl.graveyard
+                                .iter()
+                                .filter(|&&c| pl.cards[c as usize].is(T_CREATURE))
+                                .count() as i32
+                        })
+                        .sum()
+                };
+                let before = creature_cards(self);
                 if theirs {
                     let victims: Vec<usize> = if text.contains("each player mills") {
                         (0..self.players.len())
@@ -3699,6 +3756,7 @@ impl<'a> Game<'a> {
                 } else {
                     self.mill(me, n);
                 }
+                self.ext.milled_creatures = (creature_cards(self) - before).max(0);
             }
             // "Look at the top three cards of your library. You may put one of those cards back
             // on top of your library. Put the rest into your graveyard" (Gutless Plunderer).
@@ -3718,7 +3776,26 @@ impl<'a> Game<'a> {
             }
             Effect::Scry(n) => {
                 let k = self.x_value(ctx, n).max(1) as usize;
+                let before = self.players[me].graveyard.len();
                 self.h_scry(me, k, text.contains("surveil"));
+                // "If you put a card with mana value less than or equal to the amount of
+                // life you gained this turn into your graveyard this way, put that card
+                // into your hand" (Enlightened Confidant).
+                if text.contains("less than or equal to the amount of life you gained this turn into your graveyard this way, put that card into your hand")
+                {
+                    let pl = &mut self.players[me];
+                    let gained = pl.life_gained_turn;
+                    let mut k = before;
+                    while k < pl.graveyard.len() {
+                        let c = pl.graveyard[k];
+                        if (pl.cards[c as usize].mv as i32) <= gained {
+                            pl.graveyard.remove(k);
+                            pl.hand.push(c);
+                        } else {
+                            k += 1;
+                        }
+                    }
+                }
             }
             // Recruit's Human Soldier comes from the discard (`Loot`), not on its own.
             Effect::Tokens { .. } if text.contains("recruit") && !text.contains("create") => {}
@@ -3731,6 +3808,9 @@ impl<'a> Game<'a> {
                 // "A number of Goblins equal to the amount of excess damage dealt this way".
                 let mut n = if text.contains("tokens equal to the amount of excess damage") {
                     self.last_excess.max(0)
+                } else if text.contains("for each creature card put into a graveyard this way") {
+                    // (Dread Summons: the creature cards actually milled.)
+                    self.ext.milled_creatures.max(0)
                 } else {
                     self.x_value(ctx, amount).max(0)
                 };
@@ -3786,6 +3866,7 @@ impl<'a> Game<'a> {
                     }
                     made.push(self.perms[i].id);
                     if text.contains("tapped and attacking")
+                        || text.contains("create a tapped ")
                         || text.contains("tapped")
                             && text.contains("token")
                             && text.contains("enters tapped")
@@ -4638,6 +4719,8 @@ impl<'a> Game<'a> {
                 // excess damage": no excess, no Jace.
                 let k = if text.contains("that excess damage") {
                     self.last_excess.max(0) as i16
+                } else if text.contains("number of creatures exiled this way") {
+                    self.ext.exiled_creatures.max(0) as i16
                 } else {
                     self.x_value(ctx, n) as i16
                 };
@@ -4837,29 +4920,46 @@ impl<'a> Game<'a> {
                         // itself.
                         let src = ctx.src.filter(|_| text.contains("target"));
                         let types = blink_types(text);
-                        self.h_blink(me, src, types, !delayed, text.contains("up to one"), &done)
-                            .or_else(|| {
-                                // "Two target ...": two of them whenever two are legal - the
-                                // other one a tapped land (it comes back untapped) if nothing
-                                // gains more.
-                                (times == 2).then_some(())?;
-                                (0..self.perms.len())
-                                    .filter(|&i| {
-                                        let x = &self.perms[i];
-                                        x.ctrl as usize == me
-                                            && x.tok == Tok::None
-                                            && x.commander == 0
-                                            && x.card.is_some()
-                                            && Some(x.id) != src
-                                            && !done.contains(&x.id)
-                                            && (x.is(types)
-                                                || types & T_CREATURE != 0 && x.is_creature())
-                                    })
-                                    .max_by_key(|&i| {
-                                        let x = &self.perms[i];
-                                        (x.tapped && x.is(T_LAND), !x.is_creature())
-                                    })
-                            })
+                        // "Target nontoken artifact or creature" (The Mighty Thor): not only
+                        // your own - a player at the table may pick an opponent's (the bot
+                        // keeps to its own permanents).
+                        let any = !text
+                            .split("exile ")
+                            .nth(1)
+                            .and_then(|r| r.split([',', '.']).next())
+                            .unwrap_or("you control")
+                            .contains("you control");
+                        self.h_blink(
+                            me,
+                            src,
+                            types,
+                            !delayed,
+                            text.contains("up to one"),
+                            &done,
+                            any,
+                        )
+                        .or_else(|| {
+                            // "Two target ...": two of them whenever two are legal - the
+                            // other one a tapped land (it comes back untapped) if nothing
+                            // gains more.
+                            (times == 2).then_some(())?;
+                            (0..self.perms.len())
+                                .filter(|&i| {
+                                    let x = &self.perms[i];
+                                    x.ctrl as usize == me
+                                        && x.tok == Tok::None
+                                        && x.commander == 0
+                                        && x.card.is_some()
+                                        && Some(x.id) != src
+                                        && !done.contains(&x.id)
+                                        && (x.is(types)
+                                            || types & T_CREATURE != 0 && x.is_creature())
+                                })
+                                .max_by_key(|&i| {
+                                    let x = &self.perms[i];
+                                    (x.tapped && x.is(T_LAND), !x.is_creature())
+                                })
+                        })
                     };
                     let Some(i) = target else { return };
                     let x = self.perms[i].clone();
@@ -4902,6 +5002,10 @@ impl<'a> Game<'a> {
                         if let Some(j) = self.enter_card(owner, r.1, back_ctrl, false) {
                             self.perms[j].sick = x.sick;
                             self.perms[j].commander = commander;
+                            // "Return that card to the battlefield tapped".
+                            if text.contains("to the battlefield tapped") {
+                                self.perms[j].tapped = true;
+                            }
                             done.push(self.perms[j].id);
                         }
                     }

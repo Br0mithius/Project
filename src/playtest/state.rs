@@ -86,6 +86,9 @@ pub struct Perm {
     /// library for an artifact card, exile it" ... "put the exiled card into its owner's
     /// hand", Hoarding Dragon). They stay exiled when it leaves.
     pub exiled_with: Vec<(u8, CardRef)>,
+    /// Cards exiled from a hand "until ~ leaves the battlefield" (owner, card): they go
+    /// back to that hand (Cloak and Dagger, Entwined).
+    pub holding_hand: Vec<(u8, u16)>,
     /// How many times it became tapped this turn ("if it's the first time that creature
     /// has become tapped this turn", Captain America, Living Legend).
     pub taps: u8,
@@ -505,6 +508,12 @@ pub struct GameExtra {
     /// Permanents that gained "this creature's power and toughness are each equal to the
     /// number of lands you control" for good (Beorn's Hospitality): see `Game::recalc`.
     pub land_pt: Vec<u32>,
+    /// Creature cards the mill just resolved put into graveyards ("for each creature card
+    /// put into a graveyard this way", Dread Summons).
+    pub milled_creatures: i32,
+    /// Creatures the exile effect just resolved exiled ("X is the number of creatures
+    /// exiled this way", Overwrite the Multiverse).
+    pub exiled_creatures: i32,
     /// Drawing from an empty library doesn't lose the game right now ("draw two cards. If
     /// your library has no cards in it, you win the game", Fblthp, Impossibly Lost).
     pub no_deck_loss: bool,
@@ -2187,6 +2196,17 @@ impl<'a> Game<'a> {
             }
         }
         // What it was attached to.
+        // Cards taken from a hand "until ~ leaves" go back to that hand.
+        for &(owner, c) in &perm.holding_hand {
+            let pl = &mut self.players[owner as usize];
+            if !pl.alive {
+                continue;
+            }
+            if let Some(pos) = pl.exile.iter().position(|&x| x == c) {
+                pl.exile.remove(pos);
+                pl.hand.push(c);
+            }
+        }
         // Cards held "until ~ leaves" come back.
         for (owner, r) in &perm.holding {
             // (Not for a player who has left the game: their cards left with them.)
@@ -2459,6 +2479,7 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             exiled_with: Vec::new(),
+            holding_hand: Vec::new(),
             taps: 0,
             activations: 0,
             finality: false,
@@ -3188,6 +3209,7 @@ impl<'a> Game<'a> {
             threaten_from: None,
             holding: Vec::new(),
             exiled_with: Vec::new(),
+            holding_hand: Vec::new(),
             taps: 0,
             activations: 0,
             finality: false,
@@ -3394,6 +3416,11 @@ impl<'a> Game<'a> {
     /// Turn bookkeeping for `GameExtra` / `PlayerExtra` at the start of a turn.
     pub fn begin_turn_extra(&mut self) {
         self.ext.turn_no += 1;
+        // Echo copies an ability on the stack: at most one that resolved this turn, never
+        // one from an earlier turn.
+        for pl in self.players.iter_mut() {
+            pl.last_ability = None;
+        }
         self.ext.resolutions.clear();
         for pl in self.players.iter_mut() {
             pl.px.noncombat_damaged_turn = false;

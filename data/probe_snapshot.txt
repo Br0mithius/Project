@@ -3449,6 +3449,9 @@ ABILITIES:
       -> You gets 2/2 zombie token 2/2
       -> You gets 2/2 zombie token 2/2
       -> You gets 2/2 zombie token 2/2
+      -> You gets 2/2 zombie token 2/2
+      -> You gets 2/2 zombie token 2/2
+      -> You gets 2/2 zombie token 2/2
 
 Dreaded Bat-Cloud | {4}{B} | Creature — Bat | 4/2
 TEXT: This spell costs {3} less to cast if a creature died this turn. / Flying, deathtouch
@@ -10857,8 +10860,9 @@ On entering:
       itself: 3/2 reach, vigilance, flash
       -> Your Dragon: gains indestructible
 ABILITIES:
-  Enters [may; may pays Free for effects 0..]: "when ~ enters, you may tap him. when you do, another target nonattacking creature you control gains indestructible until end of turn."
+  Enters [may; may pays TapSelf for effects 0..]: "when ~ enters, you may tap him. when you do, another target nonattacking creature you control gains indestructible until end of turn."
       -> Your Dragon: gains indestructible
+      -> Your Spider-Man, To the Rescue: tapped
       if the cost is paid -> Your Dragon: gains indestructible
 
 Spider-Woman, Secret Agent | {3}{W/U} | Legendary Creature — Spider Human Spy Hero | 1/4

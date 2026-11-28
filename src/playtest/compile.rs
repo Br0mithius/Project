@@ -612,6 +612,8 @@ pub enum ResCost {
     ExileSelf,
     /// "Exile this spell and N cards named ~ from your graveyard".
     ExileNamed(u8),
+    /// "You may tap him. When you do, ...": the source must be untapped, and taps.
+    TapSelf,
     /// A choice that costs nothing ("you may exile the top card of your library").
     Free,
 }
@@ -2498,6 +2500,8 @@ fn pay_of(text: &str) -> Option<PayCost> {
         ResCost::ExileNamed(number_before(phrase, " cards named").unwrap_or(4))
     } else if phrase == "exile it" || phrase == "exile ~" {
         ResCost::ExileSelf
+    } else if matches!(phrase, "tap him" | "tap her" | "tap it" | "tap ~") {
+        ResCost::TapSelf
     } else if optional {
         ResCost::Free
     } else {

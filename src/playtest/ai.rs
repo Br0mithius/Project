@@ -2446,6 +2446,14 @@ fn pay_price(g: &Game, p: usize, src_id: Option<u32>, pc: &PayCost) -> Option<Op
         ResCost::Free | ResCost::SacrificeSelf | ResCost::ExileSelf | ResCost::ExileNamed(_) => {
             return Some(None);
         }
+        // "You may tap him": only while untapped (weighed as free, as before).
+        ResCost::TapSelf => {
+            return g
+                .perms
+                .iter()
+                .any(|x| x.id == src && !x.tapped)
+                .then_some(None);
+        }
         ResCost::Sacrifice { types, other } => {
             perm_value(
                 g,

@@ -2251,6 +2251,7 @@ impl<'a> Game<'a> {
         now: bool,
         optional: bool,
         skip: &[u32],
+        any_owner: bool,
     ) -> Option<usize> {
         let ai_pick = if now {
             ai::blink_choice_now(self, me, src, types)
@@ -2264,7 +2265,7 @@ impl<'a> Game<'a> {
         let cands: Vec<usize> = (0..self.perms.len())
             .filter(|&i| {
                 let x = &self.perms[i];
-                x.ctrl as usize == me
+                (x.ctrl as usize == me || any_owner && x.tok == Tok::None && x.card.is_some())
                     && Some(x.id) != src
                     && !skip.contains(&x.id)
                     && (x.commander == 0 || now && x.owner as usize == me)

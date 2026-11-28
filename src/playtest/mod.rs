@@ -1643,6 +1643,15 @@ impl<'a> Game<'a> {
                 if !self.ability_targets_exist(p, x.card.map(|r| self.card(r)), Some(x.id), ab) {
                     return None;
                 }
+                // "Target creature you control that's attacking alone" (Crowd of True
+                // Believers): the only attacker.
+                if ab
+                    .text
+                    .contains("target creature you control that's attacking alone")
+                    && self.perms.iter().filter(|y| y.attacking).count() != 1
+                {
+                    return None;
+                }
                 // "Activate only if ..." (Boast: only if it attacked this turn).
                 if ab.text.contains("activate only if") && !self.cond_holds(&ab.cond, p, Some(i)) {
                     return None;
