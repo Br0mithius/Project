@@ -1,0 +1,27 @@
+### slot Undercover Skrull
+in place of Undercover Skrull (6000 games each; points of win rate, + = better than Undercover Skrull):
+Beorn's Hospitality                +1.61 ± 0.38  (table +0.93 ± 0.46, peer field +1.90 ± 0.51)
+She-Hulk, Jade Defender            +1.84 ± 0.40  (table +1.57 ± 0.48, peer field +1.95 ± 0.53)
+Kree Sentinel                      +1.08 ± 0.38  (table +1.08 ± 0.47, peer field +1.08 ± 0.51)
+HULK SMASH!                        +0.06 ± 0.39  (table +0.17 ± 0.46, peer field +0.02 ± 0.52)
+Pet Avengers                       +1.50 ± 0.39  (table +1.42 ± 0.47, peer field +1.53 ± 0.52)
+Alien Invasion                     +0.32 ± 0.40  (table -0.52 ± 0.48, peer field +0.68 ± 0.53)
+Iron Man, Master of Machines       +0.11 ± 0.39  (table +0.08 ± 0.47, peer field +0.12 ± 0.51)
+### slot Doc Samson, Super Psychiatrist
+in place of Doc Samson, Super Psychiatrist (6000 games each; points of win rate, + = better than Doc Samson, Super Psychiatrist):
+Beorn's Hospitality                +1.67 ± 0.40  (table +0.23 ± 0.46, peer field +2.28 ± 0.53)
+She-Hulk, Jade Defender            +0.77 ± 0.40  (table +0.55 ± 0.46, peer field +0.87 ± 0.54)
+Kree Sentinel                      +0.97 ± 0.38  (table -0.45 ± 0.44, peer field +1.58 ± 0.51)
+HULK SMASH!                        -0.15 ± 0.40  (table -0.65 ± 0.47, peer field +0.07 ± 0.53)
+Pet Avengers                       +1.33 ± 0.39  (table +0.18 ± 0.46, peer field +1.82 ± 0.52)
+Alien Invasion                     -0.27 ± 0.40  (table -1.08 ± 0.45, peer field +0.08 ± 0.53)
+Iron Man, Master of Machines       +0.78 ± 0.39  (table -0.55 ± 0.45, peer field +1.35 ± 0.52)
+### slot Rapid Rescue
+in place of Rapid Rescue (6000 games each; points of win rate, + = better than Rapid Rescue):
+Beorn's Hospitality                +0.38 ± 0.37  (table -0.50 ± 0.43, peer field +0.75 ± 0.49)
+She-Hulk, Jade Defender            -0.68 ± 0.40  (table -0.85 ± 0.48, peer field -0.60 ± 0.54)
+Kree Sentinel                      -0.46 ± 0.39  (table -1.23 ± 0.47, peer field -0.13 ± 0.53)
+HULK SMASH!                        -1.03 ± 0.38  (table -1.65 ± 0.47, peer field -0.77 ± 0.51)
+Pet Avengers                       -0.18 ± 0.39  (table -0.92 ± 0.48, peer field +0.13 ± 0.53)
+Alien Invasion                     -1.29 ± 0.39  (table -2.43 ± 0.46, peer field -0.80 ± 0.53)
+Iron Man, Master of Machines       -0.61 ± 0.39  (table -1.30 ± 0.46, peer field -0.32 ± 0.52)
