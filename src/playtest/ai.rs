@@ -1048,7 +1048,8 @@ pub fn land_to_fetch(g: &Game, p: usize, basic_only: bool) -> Option<usize> {
     (0..pl.library.len())
         .filter(|&k| {
             let c = &pl.cards[pl.library[k] as usize];
-            c.is(T_LAND) && (!basic_only || c.is(T_BASIC))
+            c.is(T_LAND)
+                && (!basic_only || c.is(T_BASIC) || g.ext.fetch_gates && c.has_subtype("gate"))
         })
         .max_by_key(|&k| {
             let c = &pl.cards[pl.library[k] as usize];

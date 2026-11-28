@@ -33,6 +33,9 @@ pub const NO_DAMAGE: u32 = 1 << 22;
 /// "Prevent all combat damage that would be dealt to ~" / "... dealt by ~" (Fog Bank: both).
 pub const NO_COMBAT_DAMAGE_TO: u32 = 1 << 23;
 pub const NO_COMBAT_DAMAGE_BY: u32 = 1 << 24;
+/// "Prevent all damage that would be dealt by ..." (Old Fat Spider Can't See Me): combat
+/// damage and any other.
+pub const NO_DAMAGE_BY: u32 = 1 << 25;
 
 // Rule-changing statics a permanent has (`SimCard::rules`): what its controller's game
 // does differently while it's on the battlefield.
@@ -437,6 +440,8 @@ impl Mana {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Phase {
     Upkeep,
+    /// "At the beginning of each opponent's draw step": after the draw for the turn.
+    Draw,
     /// "At the beginning of your (pre-combat / first) main phase".
     Main,
     Combat,
@@ -1056,6 +1061,9 @@ pub struct AttachedSets {
     pub blank: bool,
     /// It becomes a creature (in addition to its other types).
     pub creature: bool,
+    /// "Is a green and white Citizen creature" (not "in addition to its other types"): it
+    /// loses its other colours and creature types; these colours (WUBRG bits) instead.
+    pub retype: Option<u8>,
 }
 
 /// "This spell costs {N} less to cast if ..." / "for each ..." and affinity.
@@ -2042,6 +2050,8 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
         When::EachTurn => Trig::Phase {
             phase: if head.contains("end step") {
                 Phase::End
+            } else if head.contains("draw step") {
+                Phase::Draw
             } else if head.contains("beginning of combat")
                 || head.contains("beginning of each combat")
             {
@@ -2051,8 +2061,10 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
             } else {
                 Phase::Upkeep
             },
+            // ("At the beginning of the end step", Frostbite Pyromental: each turn's.)
             any_player: head.contains("each upkeep")
                 || head.contains("each end step")
+                || head.contains("beginning of the end step")
                 || head.contains("each combat")
                 || head.contains("each player's")
                 || head.contains("each opponent's"),
@@ -3023,7 +3035,12 @@ fn compile_abilities(parsed: &abilities::Parsed) -> Vec<SimAbility> {
             out.push(SimAbility {
                 trig,
                 cond: cond.clone(),
-                optional: a.optional,
+                // (A "may" only inside a quoted ability the effect grants - Mole Man's
+                // Moloid token - doesn't make the ability itself optional.)
+                optional: a.optional && {
+                    let outside: String = a.text.split('"').step_by(2).collect();
+                    !a.text.contains('"') || outside.contains(" may ")
+                },
                 once: a.once,
                 modal: a.modal,
                 modes,
@@ -3631,7 +3648,32 @@ fn attached_sets_of(own_text: &str) -> Option<AttachedSets> {
         toughness: t.parse().ok()?,
         blank: l.contains("loses all abilities"),
         creature: l.contains(" creature"),
+        retype: retype_of(l).map(|x| x.0),
     })
+}
+
+/// "Enchanted creature ... is a green and white Citizen creature with base power and
+/// toughness 1/1" (Witness Protection, Eaten by Piranhas): its new colours and creature
+/// type. None for "... in addition to its other types".
+pub fn retype_of(line: &str) -> Option<(u8, String)> {
+    if line.contains("in addition to its other types") {
+        return None;
+    }
+    let what = line.split(" is a ").nth(1)?.split(" creature").next()?;
+    let mut colors = 0u8;
+    let mut sub = None;
+    for w in what.split_whitespace() {
+        match w {
+            "white" => colors |= 1,
+            "blue" => colors |= 2,
+            "black" => colors |= 4,
+            "red" => colors |= 8,
+            "green" => colors |= 16,
+            "and" | "colorless" => {}
+            other => sub = Some(other.to_string()),
+        }
+    }
+    Some((colors, sub?))
 }
 
 /// Reads a card for the simulator.

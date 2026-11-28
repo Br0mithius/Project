@@ -1982,6 +1982,40 @@ impl<'a> Game<'a> {
     }
 
     /// "Target opponent" / "choose an opponent".
+    /// Any number of these permanents: the bot's choice, or what a person picks.
+    pub(crate) fn h_pick_many(
+        &self,
+        me: usize,
+        cands: &[usize],
+        prompt: &str,
+        ai_picks: &[usize],
+    ) -> Vec<usize> {
+        if !self.is_human(me) || cands.is_empty() {
+            return ai_picks.to_vec();
+        }
+        let options: Vec<String> = cands
+            .iter()
+            .map(|&i| self.perm_desc(&self.perms[i]))
+            .collect();
+        let suggested: Vec<usize> = ai_picks
+            .iter()
+            .filter_map(|i| cands.iter().position(|c| c == i))
+            .collect();
+        match self.ask(
+            Ask::Pick {
+                prompt: prompt.to_string(),
+                options,
+                min: 0,
+                max: cands.len(),
+                suggested,
+            },
+            false,
+        ) {
+            Answer::Pick(v) => v.iter().filter_map(|&k| cands.get(k).copied()).collect(),
+            _ => ai_picks.to_vec(),
+        }
+    }
+
     /// "As ~ enters, choose a color": the bot's colour, or the one a person picks.
     pub(crate) fn h_choose_color(&self, me: usize, c: &SimCard) -> u8 {
         let ai_pick = self.color_for(me, c);
@@ -2480,7 +2514,10 @@ impl<'a> Game<'a> {
         let cands = (0..pl.library.len())
             .filter(|&k| {
                 let c = &pl.cards[pl.library[k] as usize];
-                c.is(T_LAND) && (!basic_only || c.is(T_BASIC))
+                c.is(T_LAND)
+                    && (!basic_only
+                        || c.is(T_BASIC)
+                        || self.ext.fetch_gates && c.has_subtype("gate"))
             })
             .collect();
         self.pick_library(

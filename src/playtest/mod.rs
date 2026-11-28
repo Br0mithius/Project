@@ -1149,6 +1149,12 @@ impl<'a> Game<'a> {
                 if let Some(e) = owner.exile.iter().position(|&c| c == r.1) {
                     owner.exile.remove(e);
                 }
+                // 'Target land gains "{T}: Add {C}{C}" until this card is cast from exile'.
+                for x in self.perms.iter_mut() {
+                    if x.cc_until_cast == Some(r) {
+                        x.cc_until_cast = None;
+                    }
+                }
             }
             Src::Adventure(k) => {
                 self.players[p].adventure.remove(k);
@@ -2202,6 +2208,19 @@ impl<'a> Game<'a> {
         }
         if ab.text.contains("exile ~ from your hand") {
             self.players[p].exile.push(idx);
+            // "You may cast this card for as long as it remains exiled" (Emrakul).
+            if ab
+                .text
+                .contains("you may cast ~ for as long as it remains exiled")
+            {
+                self.players[p].playable.push(Playable {
+                    card: (p as u8, idx),
+                    until: (u32::MAX, p as u8),
+                    own_turn: false,
+                    pay_life: false,
+                    needs_type: None,
+                });
+            }
         } else {
             self.put_discarded(p, idx);
         }
@@ -2679,6 +2698,9 @@ impl<'a> Game<'a> {
             self.ext.draw_step_first = true;
             self.draw(a, 1);
             self.ext.draw_step_first = false;
+            // "At the beginning of each opponent's draw step" (The Theorist): in the draw
+            // step - not when it is skipped.
+            self.phase_triggers(a, Phase::Draw);
         }
         self.run_pending();
         self.sba();

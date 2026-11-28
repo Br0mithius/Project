@@ -1445,6 +1445,8 @@ impl<'a> Game<'a> {
         // A cost paid as it resolves ("you may sacrifice another creature. If you do, ..."):
         // the effects after it need the payment; the AI decides whether it's worth it.
         let mut paid_ok = true;
+        // The optional part was declined: only this many (mandatory) effects happen.
+        let mut mandatory_only: Option<usize> = None;
         if let Some(pc) = &ab.pay {
             let s = pend.source.and_then(|id| self.idx(id));
             let allowed = pc.cond.as_ref().is_none_or(|c| self.cond_holds(c, me, s));
@@ -1475,7 +1477,18 @@ impl<'a> Game<'a> {
             if ab.text.contains("discard your hand") {
                 self.last_discarded = 0;
             }
-            return;
+            // "Draw a card, then you may put a land card ..." (H.E.R.B.I.E. Scout Unit):
+            // only what follows "then you may" is optional - the card is drawn.
+            let body = &ab.text[trigger_part(&ab.text).len()..];
+            let draws_first = body
+                .split_once(", then you may ")
+                .is_some_and(|(first, _)| !first.contains(" may ") && first.contains("draw "))
+                && ab.effects.len() > 1
+                && matches!(ab.effects[0], Effect::Draw { .. });
+            if !draws_first {
+                return;
+            }
+            mandatory_only = Some(1usize);
         }
         // "When you cast this spell, copy it X times. You may choose new targets for the
         // copies" (Photon Blast Barrage): X copies, each resolving on its own (state-based
@@ -1501,6 +1514,7 @@ impl<'a> Game<'a> {
         self.targeted = false;
         self.ext.dmg_hits.clear();
         self.ext.not_targets.clear();
+        self.ext.resolving_kicked = pend.kicked;
         // (effect, the text and card restriction it resolves with): a mode reads its own.
         let mut chosen_modes: Option<String> = None;
         let picks: Vec<(usize, &str, crate::restrict::Restr)> = if ab.modal {
@@ -1598,6 +1612,7 @@ impl<'a> Game<'a> {
                 .collect()
         } else {
             (0..ab.effects.len())
+                .filter(|&k| mandatory_only.is_none_or(|n| k < n))
                 .filter(|&k| match &ab.pay {
                     Some(pc) => k < pc.skip_from as usize || paid_ok && k >= pc.first as usize,
                     None => true,
@@ -1670,6 +1685,44 @@ impl<'a> Game<'a> {
             if let Some(id) = self.reborn.take() {
                 ctx.src = Some(id);
                 ctx.snap = None;
+            }
+        }
+        // "Prevent all damage that would be dealt by up to one target creature for as long as
+        // ~ remains on the battlefield" (Old Fat Spider Can't See Me, chapter II - the reader
+        // has no effect for it): an opponent's best creature deals no damage meanwhile.
+        if ab.effects.is_empty()
+            && ab
+                .text
+                .contains("prevent all damage that would be dealt by up to one target creature")
+        {
+            let while_on = ab
+                .text
+                .contains("for as long as ~ remains on the battlefield");
+            let src = pend.source.filter(|&s| self.idx(s).is_some());
+            if !while_on || src.is_some() {
+                let t = Target {
+                    kind: Kind::Creature,
+                    whose: Whose::Any,
+                    mass: false,
+                    other: false,
+                    restricted: false,
+                    restr: Default::default(),
+                    count: 1,
+                };
+                for id in self.choose(&ctx, &t, true) {
+                    let Some(i) = self.idx(id) else { continue };
+                    if let (true, Some(src)) = (while_on, src) {
+                        self.ext.while_on.push(WhileOn {
+                            src,
+                            target: id,
+                            what: WhileWhat::Kw(NO_DAMAGE_BY & !self.perms[i].kw),
+                        });
+                        self.perms[i].kw |= NO_DAMAGE_BY;
+                    } else {
+                        self.perms[i].temp_kw |= NO_DAMAGE_BY;
+                    }
+                }
+                self.recalc();
             }
         }
         // Echo copies the last ability of a creature of ours.
@@ -2535,6 +2588,13 @@ impl<'a> Game<'a> {
 
     /// Deals noncombat damage from a source to a permanent.
     fn hurt(&mut self, ctx: &Ctx, id: u32, n: i32) {
+        // "Prevent all damage that would be dealt by" the source (Old Fat Spider).
+        if self
+            .src_idx(ctx)
+            .is_some_and(|s| self.perms[s].has(NO_DAMAGE_BY))
+        {
+            return;
+        }
         let Some(i) = self.idx(id) else { return };
         let owner = self.perms[i].ctrl as usize;
         // "If a source you control would deal noncombat damage to an opponent or a permanent
@@ -2630,6 +2690,12 @@ impl<'a> Game<'a> {
     }
 
     fn hurt_player(&mut self, ctx: &Ctx, o: usize, n: i32) {
+        if self
+            .src_idx(ctx)
+            .is_some_and(|s| self.perms[s].has(NO_DAMAGE_BY))
+        {
+            return;
+        }
         let n = n + self.damage_bonus(ctx.ctrl, o);
         let n = if self.doubles_from(ctx.ctrl, "damage", ctx.src) {
             n * 2
@@ -3351,9 +3417,37 @@ impl<'a> Game<'a> {
                             .unwrap()
                     });
                 self.ext.last_bounced = 0;
-                if let Some(i) = pick {
-                    self.leave(i, Zone::Hand, false);
-                    self.ext.last_bounced = 1;
+                // "If this spell was kicked, instead choose any number of target creatures
+                // you own": the bot adds its other small creatures (power plus toughness 4
+                // or less - each comes back with a 4/4 flier); a person picks any number.
+                let picks: Vec<u32> = if self.ext.resolving_kicked {
+                    let cands: Vec<usize> = (0..self.perms.len())
+                        .filter(|&i| {
+                            let x = &self.perms[i];
+                            x.owner as usize == me && x.is_creature() && x.commander == 0
+                        })
+                        .collect();
+                    let bot: Vec<usize> = cands
+                        .iter()
+                        .copied()
+                        .filter(|&i| {
+                            let x = &self.perms[i];
+                            Some(i) == pick
+                                || x.ctrl as usize == me && !x.is_token() && x.p + x.t <= 4
+                        })
+                        .collect();
+                    self.h_pick_many(me, &cands, "Return which creatures to your hand?", &bot)
+                        .into_iter()
+                        .map(|i| self.perms[i].id)
+                        .collect()
+                } else {
+                    pick.map(|i| self.perms[i].id).into_iter().collect()
+                };
+                for id in picks {
+                    if let Some(i) = self.idx(id) {
+                        self.leave(i, Zone::Hand, false);
+                        self.ext.last_bounced += 1;
+                    }
                 }
             }
             Effect::Bounce(t) => {
@@ -4345,6 +4439,31 @@ impl<'a> Game<'a> {
                     self.gain_life(me, total);
                 }
             }
+            // 'Target land gains "{T}: Add {C}{C}" until ~ is cast from exile' (Emrakul, the
+            // Exigent Doom, from the hand): one of our lands - one that only makes colourless
+            // if there is one, else the one whose colours the others cover best.
+            Effect::AddMana(_) if text.contains("until ~ is cast from exile") => {
+                let Some(card) = ctx.card_ref else { return };
+                let mine: Vec<usize> = (0..self.perms.len())
+                    .filter(|&i| {
+                        let x = &self.perms[i];
+                        x.ctrl as usize == me && x.is(T_LAND) && x.cc_until_cast.is_none()
+                    })
+                    .collect();
+                let made = |i: usize| self.perms[i].card.map_or(0, |r| self.card(r).produces);
+                let bot = mine.iter().copied().min_by_key(|&i| {
+                    let m = made(i) & 0b11111;
+                    let others = mine.iter().filter(|&&j| j != i && made(j) & m == m).count();
+                    (m.count_ones(), usize::MAX - others)
+                });
+                if let Some(i) =
+                    self.h_pick(me, &mine, "Which land gains {T}: Add {C}{C}?", bot, false)
+                {
+                    self.perms[i].cc_until_cast = Some(card);
+                    self.targeted = true;
+                    self.last_targets = vec![self.perms[i].id];
+                }
+            }
             Effect::AddMana(n) => {
                 // Mana abilities of permanents are mana sources; this is one-off mana (rituals,
                 // triggered "add" effects).
@@ -4457,9 +4576,11 @@ impl<'a> Game<'a> {
                 // Cultivate: "put one onto the battlefield tapped and the other into your hand".
                 let split = text.contains("and the other into your hand");
                 let tapped = text.contains("battlefield tapped") || text.contains("tapped and");
+                self.ext.fetch_gates = text.contains("and/or gate cards");
                 for k in 0..n {
                     self.fetch_land(me, *battlefield && (!split || k == 0), tapped, basic);
                 }
+                self.ext.fetch_gates = false;
             }
             // "Put onto the battlefield under your control all creature cards in your
             // opponents' graveyards that were put there from the battlefield this turn. They

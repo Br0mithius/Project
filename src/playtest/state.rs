@@ -101,6 +101,12 @@ pub struct Perm {
     pub sac_at_end: bool,
     /// Modes already chosen ("choose one that hasn't been chosen"), a bit per mode.
     pub modes_used: u32,
+    /// This land has "{T}: Add {C}{C}" until that card is cast from exile (Emrakul, the
+    /// Exigent Doom's hand ability). The engine taps it for the two colourless only.
+    pub cc_until_cast: Option<CardRef>,
+    /// Its colours and creature types are set by an Aura ("is a green and white Citizen":
+    /// Witness Protection) - the printed ones come back when it leaves.
+    pub retyped: bool,
     /// The colour chosen "as ~ enters" (Heraldic Banner, Uncharted Haven): one WUBRG bit.
     pub chosen_color: u8,
     /// Combat damage it dealt to a player in the last combat damage step ("put that many
@@ -518,6 +524,11 @@ pub struct GameExtra {
     /// permanents among them (`Game::candidates` leaves them out).
     pub dmg_hits: Vec<super::ai::Hit>,
     pub not_targets: Vec<u32>,
+    /// A search for "basic land cards and/or Gate cards" (Circuitous Route): Gates count.
+    pub fetch_gates: bool,
+    /// The resolving spell was kicked ("if this spell was kicked, instead choose any number
+    /// of target creatures you own": The Eagles Are Coming!).
+    pub resolving_kicked: bool,
     /// "For as long as ~ remains on the battlefield" effects, undone when it leaves.
     pub while_on: Vec<WhileOn>,
     /// The spell being cast, while its own abilities resolve and choose its targets (for
@@ -992,10 +1003,21 @@ impl<'a> Game<'a> {
         // creature no longer has.
         let mut sets = Vec::new();
         let mut blanked = Vec::new();
+        // "... is a green and white Citizen creature" (Witness Protection): (the permanent,
+        // its new colours and creature type).
+        let mut retypes: Vec<(u32, u8, String)> = Vec::new();
         for x in &self.perms {
             if let (Some(r), Some(a)) = (x.card, x.attached) {
                 if let Some(s) = self.card(r).attached_sets.filter(|_| !x.no_abilities) {
                     sets.push((a, s));
+                    if s.retype.is_some() {
+                        let found = self.card(r).abilities.iter().find_map(|ab| {
+                            retype_of(&ab.text).filter(|_| ab.text.starts_with("enchanted"))
+                        });
+                        if let Some((colors, sub)) = found {
+                            retypes.push((a, colors, sub));
+                        }
+                    }
                 }
                 // "Enchanted creature loses all abilities" (Enchanted River's Grasp).
                 if self.card(r).attached_blank && !x.no_abilities {
@@ -1027,6 +1049,32 @@ impl<'a> Game<'a> {
                 x.ward = 0;
                 x.protection = 0;
                 x.hexproof_from = 0;
+            }
+        }
+        // The printed colours and creature types are back once such an Aura is gone.
+        for i in 0..self.perms.len() {
+            let id = self.perms[i].id;
+            let now = retypes.iter().find(|r| r.0 == id);
+            match (now, self.perms[i].retyped) {
+                (Some((_, colors, sub)), false) => {
+                    let x = &mut self.perms[i];
+                    x.retyped = true;
+                    x.colors = *colors;
+                    x.subtypes = vec![sub.clone()];
+                }
+                (None, true) => {
+                    let printed = self.perms[i].card.map(|r| {
+                        let c = self.card(r);
+                        (c.colors, c.subtypes.clone())
+                    });
+                    let x = &mut self.perms[i];
+                    x.retyped = false;
+                    if let Some((colors, subtypes)) = printed {
+                        x.colors = colors;
+                        x.subtypes = subtypes;
+                    }
+                }
+                _ => {}
             }
         }
         // Collect static effects first (they read the board), then apply.
@@ -1572,6 +1620,11 @@ impl<'a> Game<'a> {
                 _ => {}
             }
             let Some(r) = x.card else { continue };
+            // (Emrakul's "{T}: Add {C}{C}" on this land.)
+            if x.cc_until_cast.is_some() && x.is(T_LAND) {
+                out.push((i, COLORLESS, 2, false));
+                continue;
+            }
             let c = self.card(r);
             let land = x.is(T_LAND);
             // 'Lands you control have "{T}: Add one mana of any color."' (Chromatic
@@ -2650,6 +2703,8 @@ impl<'a> Game<'a> {
             all_types: false,
             modes_this_turn: 0,
             chosen_color: 0,
+            cc_until_cast: None,
+            retyped: false,
             hit_amount: 0,
             fired: 0,
             mv,
@@ -3579,6 +3634,8 @@ impl<'a> Game<'a> {
             all_types: false,
             modes_this_turn: 0,
             chosen_color: 0,
+            cc_until_cast: None,
+            retyped: false,
             hit_amount: 0,
             fired: 0,
             mv: 0,

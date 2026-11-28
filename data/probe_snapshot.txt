@@ -1030,7 +1030,7 @@ On entering:
       itself: 6/1 trample, haste
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: End, any_player: false, opponents_only: false }: "at the beginning of the end step, sacrifice ~."
+  Phase { phase: End, any_player: true, opponents_only: false }: "at the beginning of the end step, sacrifice ~."
       -> You: graveyard +1
       -> Your Ball Lightning left the battlefield
 
@@ -3162,7 +3162,7 @@ On entering:
       itself: flash
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: Upkeep, any_player: true, opponents_only: false }: "at the beginning of each player's draw step, that player draws an additional card."
+  Phase { phase: Draw, any_player: true, opponents_only: false }: "at the beginning of each player's draw step, that player draws an additional card."
       -> You: hand +1, library -1
       -> Opp A: hand +1, library -1
       -> Opp B: hand +1, library -1
@@ -4590,7 +4590,7 @@ On entering:
 ABILITIES:
   CombatDamage: "whenever ~ deals combat damage to a player, draw two cards."
       -> You: hand +2, library -2
-  Phase { phase: End, any_player: false, opponents_only: false }: "at the beginning of the end step, sacrifice ~."
+  Phase { phase: End, any_player: true, opponents_only: false }: "at the beginning of the end step, sacrifice ~."
       -> You: graveyard +1
       -> Your Frostbite Pyromental left the battlefield
 
@@ -6803,7 +6803,7 @@ On entering:
       itself: 2/1 
       -> (nothing changes)
 ABILITIES:
-  Activated (2 mana) [only if SourceSubtype("scout"); may]: "{1}{r}: if ~ is a scout, it becomes a human faerie detective and gains "whenever ~ deals combat damage to a player, exile the top card of your library. you may play that card this turn.""
+  Activated (2 mana) [only if SourceSubtype("scout")]: "{1}{r}: if ~ is a scout, it becomes a human faerie detective and gains "whenever ~ deals combat damage to a player, exile the top card of your library. you may play that card this turn.""
       -> (nothing changes)
       if the condition holds -> (nothing changes)
   Activated (3 mana) [only if SourceSubtype("detective")]: "{2}{r}: if ~ is a detective, it becomes a 3/2 human faerie rogue and gains double strike."
@@ -8133,7 +8133,7 @@ On entering:
 ABILITIES:
   Static [may]: "you may play lands from your graveyard."
       (no effects read)
-  Event(Landfall, Filter { yours: Some(true), types: 16, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [may]: "whenever a land you control enters, create a 1/1 green minion creature token named moloid with "whenever ~ attacks, you may mill a card.""
+  Event(Landfall, Filter { yours: Some(true), types: 16, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever a land you control enters, create a 1/1 green minion creature token named moloid with "whenever ~ attacks, you may mill a card.""
       -> You gets 1/1 minion token 1/1
 
 Moment of Craving | {1}{B} | Instant
@@ -12232,7 +12232,7 @@ On entering:
       itself: 
       -> (nothing changes)
 ABILITIES:
-  Phase { phase: Upkeep, any_player: true, opponents_only: true }: "at the beginning of each opponent's draw step, you draw a card."
+  Phase { phase: Draw, any_player: true, opponents_only: true }: "at the beginning of each opponent's draw step, you draw a card."
       -> You: hand +1, library -1
   Loyalty(1): "[+1]: create a 1/1 blue illusion creature token."
       -> You gets 1/1 illusion token 1/1
@@ -13610,7 +13610,7 @@ On entering:
 ABILITIES:
   Enters: "when ~ enters, empower jace 5."
       -> You gets Jace token
-  Static [may]: "planeswalkers you control have "[-3]: when you next cast an instant or sorcery spell this turn, copy that spell. you may choose new targets for the copy.""
+  Static: "planeswalkers you control have "[-3]: when you next cast an instant or sorcery spell this turn, copy that spell. you may choose new targets for the copy.""
       (static: shown under "On entering")
 
 Way of the Deathbringer | {2}{B} | Legendary Enchantment
@@ -13621,7 +13621,7 @@ On entering:
 ABILITIES:
   Enters: "when ~ enters, empower jace 5."
       -> You gets Jace token
-  Static [may; may pays Sacrifice { types: 1, other: false } for effects 1..]: "planeswalkers you control have "[-2]: you may sacrifice a creature. if you do, create a 4/4 green beast creature token with trample.""
+  Static [may pays Sacrifice { types: 1, other: false } for effects 1..]: "planeswalkers you control have "[-2]: you may sacrifice a creature. if you do, create a 4/4 green beast creature token with trample.""
       (static: shown under "On entering")
 
 Way of the Healer | {3}{W} | Legendary Enchantment

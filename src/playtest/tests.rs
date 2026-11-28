@@ -2175,9 +2175,9 @@ fn trigger_timing_and_filters() {
     let mut g = game(&[&d, &d]);
     put(&mut g, 0, 4);
     let hand = g.players[0].hand.len();
-    g.phase_triggers(0, Phase::Upkeep);
+    g.phase_triggers(0, Phase::Draw);
     assert_eq!(g.players[0].hand.len(), hand);
-    g.phase_triggers(1, Phase::Upkeep);
+    g.phase_triggers(1, Phase::Draw);
     assert_eq!(g.players[0].hand.len(), hand + 1);
     // Gardenize: "at the beginning of your first main phase", not the upkeep.
     let k = ability(&d, 5, "main phase");
@@ -7750,4 +7750,235 @@ fn heraldic_banner_keeps_the_colour_chosen_as_it_enters() {
         })
         .count();
     assert_eq!(made, 1, "one chosen colour");
+}
+
+/// Garruk, Curse Breaker's -4: creatures attacking one of his controller's OPPONENTS get
+/// +2/+2 and trample - anyone's creatures, and not those attacking a planeswalker.
+#[test]
+fn garruk_bonus_is_for_creatures_attacking_his_controllers_opponents() {
+    let db = db();
+    let d = prep_db(&db, &["Garruk, Curse Breaker"]);
+    let mut g = game(&[&d, &d, &d]);
+    g.players[0].attack_bonus = Some((2, 2, TRAMPLE));
+    let walker = put(&mut g, 1, 0);
+    assert_eq!(g.attack_bonus_for(Def::Player(1)), Some((2, 2, TRAMPLE)));
+    assert_eq!(g.attack_bonus_for(Def::Player(2)), Some((2, 2, TRAMPLE)));
+    assert_eq!(g.attack_bonus_for(Def::Player(0)), None, "attacking him");
+    assert_eq!(g.attack_bonus_for(Def::Walker(walker)), None);
+}
+
+/// The Eagles Are Coming!, kicked: any number of creatures you own, a Bird for each.
+#[test]
+fn the_eagles_are_coming_kicked_returns_several_creatures() {
+    let db = db();
+    let d = prep(&[
+        db.get("The Eagles Are Coming!").unwrap().clone(),
+        Card::basic_land("Plains", 'W'),
+        card(
+            "Scout",
+            "{W}",
+            "Creature — Human Scout",
+            "",
+            Some(("1", "1")),
+        ),
+        card("Squire", "{1}{W}", "Creature — Human", "", Some(("2", "2"))),
+        card("Giant", "{5}{W}", "Creature — Giant", "", Some(("7", "7"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 6, 'W');
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 3);
+    let giant = put(&mut g, 0, 4);
+    g.players[0].hand = vec![0];
+    assert!(g.cast(
+        0,
+        Src::Hand(0),
+        CastOpts {
+            kicker: true,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(g.players[0].hand.len(), 2, "both small creatures come back");
+    assert!(g.idx(giant).is_some(), "the 7/7 stays");
+    g.phase_triggers(1, Phase::Upkeep);
+    let birds = g
+        .perms
+        .iter()
+        .filter(|x| x.ctrl == 0 && x.is_token())
+        .count();
+    assert_eq!(birds, 2, "a 4/4 Bird for each");
+    // Not kicked: one creature.
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 6, 'W');
+    put(&mut g, 0, 2);
+    put(&mut g, 0, 3);
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    assert_eq!(g.players[0].hand.len(), 1);
+}
+
+/// Old Fat Spider Can't See Me, chapter II: one creature deals no damage while the Saga
+/// remains on the battlefield.
+#[test]
+fn old_fat_spider_chapter_two_prevents_a_creatures_damage() {
+    let db = db();
+    let d = prep(&[
+        db.get("Old Fat Spider Can't See Me").unwrap().clone(),
+        card("Ogre", "{2}{R}", "Creature — Ogre", "", Some(("3", "3"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let ogre = put(&mut g, 1, 1);
+    let saga = put(&mut g, 0, 0);
+    let k = d.cards[0]
+        .abilities
+        .iter()
+        .position(|a| a.text.starts_with("ii "))
+        .unwrap();
+    fire_card(&mut g, 0, k, Some(saga));
+    let at = vec![Attack {
+        attacker: ogre,
+        def: Def::Player(0),
+        blockers: vec![],
+        blocked: false,
+    }];
+    g.damage_step(1, &at, false);
+    assert_eq!(g.players[0].life, 30, "its damage is prevented");
+    let i = g.idx(saga).unwrap();
+    g.sacrifice(i);
+    g.run_pending();
+    g.recalc();
+    g.damage_step(1, &at, false);
+    assert_eq!(g.players[0].life, 27, "the Saga left");
+}
+
+/// Emrakul, the Exigent Doom's hand ability: a land taps for {C}{C} until Emrakul is cast
+/// from exile, and Emrakul may be cast from exile.
+#[test]
+fn emrakul_exiled_from_the_hand_can_be_cast_and_a_land_makes_two() {
+    let db = db();
+    let d = prep_db(&db, &["Emrakul, the Exigent Doom", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 9, 'G');
+    g.players[0].hand = vec![0];
+    let k = ability(&d, 0, "exile ~ from your hand");
+    assert!(g.activate_from_hand(0, 0, k));
+    assert_eq!(g.players[0].exile, vec![0]);
+    assert_eq!(g.players[0].playable.len(), 1, "castable from exile");
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    g.players[0].pool = 0;
+    assert_eq!(g.mana_available(0), 10, "nine lands, one of them for two");
+    assert!(g.cast(0, Src::Exile(0), CastOpts::default()));
+    assert!(g.perms.iter().any(|x| x.ctrl == 0 && x.is_creature()));
+    for x in g.perms.iter_mut() {
+        x.tapped = false;
+    }
+    g.players[0].pool = 0;
+    assert_eq!(
+        g.mana_available(0),
+        9,
+        "cast from exile: the land is as it was"
+    );
+}
+
+/// "At the beginning of each opponent's draw step" (The Theorist) is the draw step;
+/// "at the beginning of the end step" (Frostbite Pyromental) is every turn's end step.
+#[test]
+fn draw_step_and_the_end_step_triggers() {
+    let db = db();
+    let d = prep_db(&db, &["The Theorist, Jace Beleren", "Frostbite Pyromental"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let hand = g.players[0].hand.len();
+    g.phase_triggers(1, Phase::Upkeep);
+    assert_eq!(g.players[0].hand.len(), hand, "not in the upkeep");
+    g.phase_triggers(1, Phase::Draw);
+    assert_eq!(g.players[0].hand.len(), hand + 1);
+    g.phase_triggers(0, Phase::Draw);
+    assert_eq!(g.players[0].hand.len(), hand + 1, "not its controller's");
+    let f = put(&mut g, 0, 1);
+    g.phase_triggers(1, Phase::End);
+    assert!(
+        g.idx(f).is_none(),
+        "sacrificed at an opponent's end step too"
+    );
+}
+
+/// Circuitous Route: "up to two basic land cards and/or Gate cards".
+#[test]
+fn circuitous_route_finds_gates() {
+    let db = db();
+    let d = prep_db(&db, &["Circuitous Route", "Forest", "Izzet Guildgate"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 4, 'G');
+    g.players[0].library = vec![2, 2, 0, 0];
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    let gates = g
+        .perms
+        .iter()
+        .filter(|x| x.subtypes.iter().any(|s| s == "gate"))
+        .count();
+    assert_eq!(gates, 2, "the only lands in the library are Gates");
+}
+
+/// Witness Protection: the creature is a green and white Citizen - it loses its other
+/// colours and creature types - until the Aura leaves.
+#[test]
+fn witness_protection_changes_colours_and_types() {
+    let db = db();
+    let d = prep(&[
+        db.get("Witness Protection").unwrap().clone(),
+        Card::basic_land("Island", 'U'),
+        card(
+            "Ogre",
+            "{2}{R}",
+            "Creature — Ogre Warrior",
+            "",
+            Some(("3", "3")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    lands(&mut g, 0, 1, 'U');
+    let ogre = put(&mut g, 1, 2);
+    g.players[0].hand = vec![0];
+    assert!(g.cast(0, Src::Hand(0), CastOpts::default()));
+    g.recalc();
+    let x = perm(&g, ogre);
+    assert_eq!((x.p, x.t), (1, 1));
+    assert_eq!(x.colors, 0b10001, "green and white");
+    assert_eq!(x.subtypes, vec!["citizen".to_string()]);
+    let aura = g
+        .perms
+        .iter()
+        .find(|y| y.attached == Some(ogre))
+        .unwrap()
+        .id;
+    let i = g.idx(aura).unwrap();
+    g.leave(i, Zone::Graveyard, false);
+    g.recalc();
+    let x = perm(&g, ogre);
+    assert_eq!(x.colors, 0b01000, "red again");
+    assert!(x.subtypes.iter().any(|s| s == "ogre"));
+}
+
+/// Mole Man: the "may" in the Moloid token's quoted ability doesn't make the landfall
+/// trigger optional.
+#[test]
+fn a_may_inside_a_quoted_ability_does_not_make_the_trigger_optional() {
+    let db = db();
+    let c = compile(db.get("Mole Man, Moloid Master").unwrap());
+    let a = c
+        .abilities
+        .iter()
+        .find(|a| a.text.contains("create a 1/1 green minion"))
+        .unwrap();
+    assert!(!a.optional);
 }

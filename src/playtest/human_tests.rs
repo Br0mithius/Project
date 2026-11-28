@@ -466,3 +466,72 @@ fn a_game_replays_exactly_from_its_answers() {
     );
     let _ = w;
 }
+
+/// Surveillance Room's filter by hand: tap the Mountain, then "{1}, {T}: Add one mana of
+/// any color" pays the Rat's {B}.
+#[test]
+fn a_filter_land_pays_an_off_colour_spell_by_hand() {
+    let db = db();
+    let d = prep(&[
+        db.get("Surveillance Room").unwrap().clone(),
+        Card::basic_land("Mountain", 'R'),
+        card("Rat", "{B}", "Creature — Rat", "", Some(("1", "1"))),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let room = put(&mut g, 0, 0);
+    let mountain = put(&mut g, 0, 1);
+    g.players[0].hand = vec![2];
+    let step = Rc::new(Cell::new(0));
+    let s2 = step.clone();
+    human(&mut g, move |ask, view| {
+        s2.set(s2.get() + 1);
+        match (s2.get(), ask) {
+            (1, _) => {
+                let s = view.sources.iter().find(|s| s.id == room).unwrap();
+                assert_eq!(s.filter, Some((1, 1)), "the Room is shown as a filter");
+                Answer::Tap {
+                    id: mountain,
+                    color: 3,
+                }
+            }
+            (2, _) => Answer::Filter {
+                id: room,
+                colors: vec![2],
+            },
+            (3, Ask::Act { actions, .. }) => {
+                let k = find(actions, "Cast Rat").unwrap();
+                assert!(actions[k].payable, "{{B}} is in the pool");
+                Answer::Pick(vec![k])
+            }
+            _ => Answer::Pass,
+        }
+    });
+    g.human_main(0, false);
+    assert_eq!(named(&g, 0, "Rat"), 1);
+    assert!(g.perms.iter().filter(|x| x.is(T_LAND)).all(|x| x.tapped));
+}
+
+/// H.E.R.B.I.E. Scout Unit: "draw a card, then you may put a land card ..." - saying no
+/// still draws the card.
+#[test]
+fn declining_herbies_land_still_draws() {
+    let db = db();
+    let d = prep(&[
+        db.get("H.E.R.B.I.E. Scout Unit").unwrap().clone(),
+        Card::basic_land("Forest", 'G'),
+    ]);
+    let mut g = game(&[&d, &d]);
+    g.players[0].library = vec![1; 10];
+    g.players[0].hand = vec![1];
+    human(&mut g, move |ask, _| match ask {
+        Ask::YesNo { .. } => Answer::Yes(false),
+        _ => Answer::Auto,
+    });
+    put(&mut g, 0, 0);
+    assert_eq!(g.players[0].hand.len(), 2, "the card is drawn");
+    assert_eq!(
+        named(&g, 0, "Forest"),
+        0,
+        "no land put onto the battlefield"
+    );
+}

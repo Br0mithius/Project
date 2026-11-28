@@ -261,8 +261,8 @@ impl<'a> Game<'a> {
             .iter()
             .filter_map(|at| self.def_player(at.def).map(|d| (at.attacker, d as u8)))
             .collect();
-        let bonus = self.players[a].attack_bonus;
         for at in &attacks {
+            let bonus = self.attack_bonus_for(at.def);
             // Jace: attackers of this player (or their planeswalkers) get -5/-0.
             let weaken = self
                 .def_player(at.def)
@@ -272,7 +272,8 @@ impl<'a> Game<'a> {
                 x.attacking = true;
                 x.attacked_turn = true;
                 x.temp_p += weaken;
-                // Garruk: our attackers get +2/+2 and trample.
+                // Garruk: creatures attacking one of his controller's opponents get +2/+2
+                // and trample.
                 if let Some((p, t, kw)) = bonus {
                     x.temp_p += p;
                     x.temp_t += t;
@@ -505,6 +506,27 @@ impl<'a> Game<'a> {
         self.sba();
     }
 
+    /// "Until your next turn, whenever one or more creatures attack one of your opponents,
+    /// those creatures get +2/+2 and gain trample" (Garruk, Curse Breaker): what a creature
+    /// attacking `def` gets - anyone's creature attacking a player who is an opponent of a
+    /// player with such a bonus; nothing for attacking a planeswalker.
+    pub fn attack_bonus_for(&self, def: Def) -> Option<(i16, i16, u32)> {
+        let Def::Player(d) = def else {
+            return None;
+        };
+        let mut sum: Option<(i16, i16, u32)> = None;
+        for (g, pl) in self.players.iter().enumerate() {
+            if g == d || !pl.alive {
+                continue;
+            }
+            if let Some((p, t, kw)) = pl.attack_bonus {
+                let s = sum.get_or_insert((0, 0, 0));
+                *s = (s.0 + p, s.1 + t, s.2 | kw);
+            }
+        }
+        sum
+    }
+
     /// Creatures stop attacking and blocking when combat ends.
     pub fn end_combat(&mut self) {
         self.ext.attack_def.clear();
@@ -628,7 +650,9 @@ impl<'a> Game<'a> {
             let n = doubled(self, ctrl, src, n);
             let Some(ti) = self.idx(target) else { continue };
             // "Prevent all combat damage that would be dealt to and dealt by ~" (Fog Bank).
-            if kw & NO_COMBAT_DAMAGE_BY != 0 || self.perms[ti].has(NO_COMBAT_DAMAGE_TO) {
+            if kw & (NO_COMBAT_DAMAGE_BY | NO_DAMAGE_BY) != 0
+                || self.perms[ti].has(NO_COMBAT_DAMAGE_TO)
+            {
                 if self.log.is_some() {
                     let (s, t) = (self.id_desc(src), self.id_desc(target));
                     self.note(|| format!("  {} -> {}: {} combat damage prevented", s, t, n));
@@ -682,7 +706,9 @@ impl<'a> Game<'a> {
             };
             let n = doubled(self, ctrl, src, n);
             let Some(wi) = self.idx(w) else { continue };
-            if self.perms[wi].protection & colors != 0 || kw & NO_COMBAT_DAMAGE_BY != 0 {
+            if self.perms[wi].protection & colors != 0
+                || kw & (NO_COMBAT_DAMAGE_BY | NO_DAMAGE_BY) != 0
+            {
                 continue;
             }
             let dealt = self.damage_perm(wi, n, false);
@@ -708,7 +734,7 @@ impl<'a> Game<'a> {
             let Some(&(ctrl, kw, _, cmd, toxic, owner)) = src_info.get(&src) else {
                 continue;
             };
-            if kw & NO_COMBAT_DAMAGE_BY != 0 {
+            if kw & (NO_COMBAT_DAMAGE_BY | NO_DAMAGE_BY) != 0 {
                 continue;
             }
             let n = if self.doubles_from(ctrl as usize, "damage", Some(src)) {

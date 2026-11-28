@@ -256,6 +256,7 @@ pub(crate) fn kw_names(bits: u32) -> String {
                 ("damage to it prevented", NO_DAMAGE),
                 ("combat damage to it prevented", NO_COMBAT_DAMAGE_TO),
                 ("combat damage by it prevented", NO_COMBAT_DAMAGE_BY),
+                ("damage by it prevented", NO_DAMAGE_BY),
             ]
             .iter(),
         )
