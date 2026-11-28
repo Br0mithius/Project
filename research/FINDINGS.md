@@ -181,3 +181,21 @@ Reading: slower decks lose games by making small attacks in the middle rounds; g
 and attacking late, is right. To do: read logs for why (tapped blockers and the crack-back,
 or drawing the table's attacks), then a rule tested with `policy_ab` on several decks.
 These games were on the rules before the audit fixes; rerun after them.
+
+## 2026-11-28: first bot rule from the self-review - no small attacks in the middle rounds
+
+Rule: in rounds 5-10 an attack with one to three tapping attackers that can't kill a player
+is not made (vigilance and must-attack creatures still go). `policy_ab`, only that seat
+changed, 12,000 paired games each (`research/data/hold_mid_policy_ab.txt`):
+Thanos list +1.98 ± 0.35 (table +2.64), Will +1.50 ± 0.25, Drake +1.32 ± 0.16, JD
++1.27 ± 0.29, Andrew +1.04 ± 0.14. Tuning on 8,000 games (`hold_mid_tuning.txt`): rounds
+4-10 and up to five attackers the same; rounds 5-12, 3-14 and up to two attackers worse;
+every round (1-99) -2.4 for the Thanos list. On by default; `ai::exp::NO_HOLD_MID` (64)
+turns it off for a seat. Next: with every seat holding, does a seat that stops holding
+lose? Then the self-review again on the new bots.
+
+Card audit: 424 in-play cards reviewed against printed text and Scryfall rulings by six
+reviewer agents, 76 findings; two fixer agents fixed 67 (suite 274 -> 343 tests), 7 not
+fixed (Shuri, Absorbing Man, Fishing Pole, Theorist's Proxy, Ronin, Captain America's
+player hexproof, Wiccan's bot choice), 2 not engine bugs (Surveillance Room already
+worked; Affectionate Indrik is a bot choice).

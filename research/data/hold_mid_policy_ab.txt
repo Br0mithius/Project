@@ -1,0 +1,20 @@
+## Brom - Thanos Session 5 (tested)
+table (12000 games): base win rate 61.84%
+peer field (12000 games): base win rate 39.24%
+flags 64: +1.98 ± 0.35 win-rate pts  (table +2.64 ± 0.45, peer field +1.69 ± 0.45)
+## Will
+table (12000 games): base win rate 27.62%
+peer field (12000 games): base win rate 9.71%
+flags 64: +1.50 ± 0.25 win-rate pts  (table +2.26 ± 0.43, peer field +1.17 ± 0.30)
+## Drake
+table (12000 games): base win rate 14.33%
+peer field (12000 games): base win rate 2.50%
+flags 64: +1.32 ± 0.16 win-rate pts  (table +3.12 ± 0.37, peer field +0.55 ± 0.17)
+## JD
+table (12000 games): base win rate 35.98%
+peer field (12000 games): base win rate 21.08%
+flags 64: +1.27 ± 0.29 win-rate pts  (table +1.85 ± 0.43, peer field +1.02 ± 0.37)
+## Andrew
+table (12000 games): base win rate 4.92%
+peer field (12000 games): base win rate 2.04%
+flags 64: +1.04 ± 0.14 win-rate pts  (table +1.67 ± 0.25, peer field +0.77 ± 0.16)

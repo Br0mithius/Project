@@ -1470,6 +1470,16 @@ pub mod exp {
     /// +0.15 +/- 0.07, Session 6 list -0.07 +/- 0.06, Drake -0.05, Will +0.09, JD +0.02; and
     /// it barely moves when Alien Invasion is cast ({1}{R}{R}{G} is the limit). Off.
     pub const EARLY_ENGINE: u32 = 32;
+    /// Turns OFF the middle-rounds hold (on by default): in rounds 5-10 an attack with one
+    /// to three tapping attackers that can't kill a player is not made (vigilance and
+    /// must-attack creatures still go). Found by the bot self-review at 40 life (675 attacks:
+    /// staying home +1.3 +/- 0.3 points on average, +2.0 to +3.4 in rounds 5-10 and with one
+    /// to three attackers; worse with four or more and from round 11). Measured as a rule
+    /// (`policy_ab`, the seat changed, 12,000 paired games): Thanos list +1.98 +/- 0.35, Will
+    /// +1.50 +/- 0.25, Drake +1.32 +/- 0.16, JD +1.27 +/- 0.29, Andrew +1.04 +/- 0.14. Rounds
+    /// 4-10 and up to five attackers measure the same; rounds 3-14 or 5-12 and up to two
+    /// attackers measure worse (`MSH_HOLD_MID=from,to,most`).
+    pub const NO_HOLD_MID: u32 = 64;
 }
 
 /// A response window is likely on the opponents' turns: some opponent controls an
@@ -6390,6 +6400,62 @@ pub fn declare_attacks(g: &Game, me: usize) -> Vec<(u32, Def)> {
 
 /// `declare_attacks`, with the reasons written to `why` (for the game log).
 pub fn declare_attacks_why(
+    g: &Game,
+    me: usize,
+    mut why: Option<&mut Vec<String>>,
+) -> Vec<(u32, Def)> {
+    let out = declare_attacks_inner(g, me, why.as_deref_mut());
+    if exp_on(g, me, exp::NO_HOLD_MID) {
+        return out;
+    }
+    // (from, to, most attackers): `MSH_HOLD_MID=5,10,3`.
+    static P: std::sync::OnceLock<(u32, u32, usize)> = std::sync::OnceLock::new();
+    let (from, to, most) = *P.get_or_init(|| {
+        let v: Vec<u32> = std::env::var("MSH_HOLD_MID")
+            .ok()
+            .map(|s| s.split(',').filter_map(|x| x.parse().ok()).collect())
+            .unwrap_or_default();
+        (
+            v.first().copied().unwrap_or(5),
+            v.get(1).copied().unwrap_or(10),
+            v.get(2).copied().unwrap_or(3) as usize,
+        )
+    });
+    if g.round < from || g.round > to {
+        return out;
+    }
+    // The attackers that tap (vigilance stays to block) and aren't forced.
+    let taps = |id: u32| {
+        g.idx(id)
+            .is_some_and(|i| !g.perms[i].has(VIGILANCE) && !g.must_attack(i))
+    };
+    let n = out.iter().filter(|(id, _)| taps(*id)).count();
+    if n == 0 || n > most {
+        return out;
+    }
+    // An attack that can kill its player goes ahead.
+    let kills = g.opponents(me).iter().any(|&o| {
+        let dmg: i32 = out
+            .iter()
+            .filter(|(_, d)| g.def_player(*d) == Some(o))
+            .filter_map(|(id, _)| g.idx(*id))
+            .map(|i| g.perms[i].p.max(0) as i32)
+            .sum();
+        dmg >= g.players[o].life
+    });
+    if kills {
+        return out;
+    }
+    if let Some(wh) = why.as_deref_mut() {
+        wh.push(format!(
+            "holds back: {} attacker(s) in round {} would only chip",
+            n, g.round
+        ));
+    }
+    out.into_iter().filter(|(id, _)| !taps(*id)).collect()
+}
+
+fn declare_attacks_inner(
     g: &Game,
     me: usize,
     mut why: Option<&mut Vec<String>>,
