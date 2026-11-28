@@ -3614,6 +3614,8 @@ pub fn compile(card: &Card) -> SimCard {
             .to_string(),
         ..card.clone()
     };
+    // (Not one that sacrifices something else each time - "{T}, Sacrifice another Goblin:
+    // Add {B}{R}", Bolg's Company - which is no free source of mana.)
     let mana_ability = abilities.iter().any(|a| {
         matches!(
             a.trig,
@@ -3621,6 +3623,7 @@ pub fn compile(card: &Card) -> SimCard {
                 tap: true,
                 mana: 0,
                 sac_self: false,
+                sac_other: false,
                 ..
             }
         ) && a.effects.iter().any(|e| matches!(e, Effect::AddMana(_)))

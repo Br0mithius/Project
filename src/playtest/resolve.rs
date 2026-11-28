@@ -2526,12 +2526,28 @@ impl<'a> Game<'a> {
         self.perms
             .iter()
             .filter(|x| x.ctrl as usize == from)
-            .flat_map(|x| self.abilities_of(x).iter())
-            .filter(|a| {
-                a.trig == Trig::Static
-                    && a.text.contains("it deals that much damage plus 1 instead")
+            .map(|x| {
+                self.abilities_of(x)
+                    .iter()
+                    .filter(|a| a.trig == Trig::Static)
+                    .map(|a| {
+                        if a.text.contains("it deals that much damage plus 1 instead") {
+                            1
+                        } else if a
+                            .text
+                            .contains("would deal noncombat damage to an opponent")
+                            && a.text
+                                .contains("it deals that much damage plus x, where x is ~'s power")
+                        {
+                            // Hawkeye, Young Avenger: his power now.
+                            x.p.max(0) as i32
+                        } else {
+                            0
+                        }
+                    })
+                    .sum::<i32>()
             })
-            .count() as i32
+            .sum()
     }
 
     fn hurt_player(&mut self, ctx: &Ctx, o: usize, n: i32) {
@@ -4662,6 +4678,57 @@ impl<'a> Game<'a> {
                     if let Some(i) = self.idx(id) {
                         self.perms[i].goad = Some(me as u8);
                     }
+                }
+            }
+            // "For each kind of counter on target permanent or player, give that permanent
+            // or player another counter of that kind" (Powerful Broker): one target only.
+            Effect::Proliferate if text.contains("another counter of that kind") => {
+                let kinds = |x: &Perm| {
+                    (x.counters > 0) as i32
+                        + (x.is(T_PLANESWALKER) && x.loyalty > 0) as i32
+                        + (x.hone > 0) as i32
+                        + (x.other_counters > 0 && !x.is(T_SAGA)) as i32
+                };
+                let cands: Vec<usize> = (0..self.perms.len())
+                    .filter(|&i| self.perms[i].ctrl as usize == me && kinds(&self.perms[i]) > 0)
+                    .collect();
+                let best = cands.iter().copied().max_by(|&a, &b| {
+                    (kinds(&self.perms[a]), ai::perm_value(self, a))
+                        .partial_cmp(&(kinds(&self.perms[b]), ai::perm_value(self, b)))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let pick = self.h_pick(
+                    me,
+                    &cands,
+                    "Another counter of each kind on which?",
+                    best,
+                    false,
+                );
+                if let Some(i) = pick {
+                    self.targeted = true;
+                    self.last_targets = vec![self.perms[i].id];
+                    let x = &mut self.perms[i];
+                    if x.counters > 0 {
+                        x.counters += 1;
+                    }
+                    if x.is(T_PLANESWALKER) && x.loyalty > 0 {
+                        x.loyalty += 1;
+                    }
+                    if x.hone > 0 {
+                        x.hone += 1;
+                    }
+                    if x.other_counters > 0 && !x.is(T_SAGA) {
+                        self.add_other_counters(i, 1);
+                    }
+                    self.recalc();
+                } else if let Some(o) = self
+                    .opponents(me)
+                    .into_iter()
+                    .filter(|&o| self.players[o].poison > 0)
+                    .max_by_key(|&o| self.players[o].poison)
+                {
+                    // No permanent of ours has a counter: a poisoned opponent.
+                    self.players[o].poison += 1;
                 }
             }
             Effect::Proliferate => {

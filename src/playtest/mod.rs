@@ -1370,6 +1370,27 @@ impl<'a> Game<'a> {
         } else {
             0xFFFF & !T_LAND
         };
+        // "Sacrifice another Goblin" (on a Goblin): only another permanent of that kind.
+        if let Some(kind) = text
+            .split("sacrifice another ")
+            .nth(1)
+            .and_then(|r| r.split([' ', ':', ',', '.']).next())
+            .filter(|k| {
+                self.perms
+                    .iter()
+                    .any(|x| x.id == src_id && x.subtypes.iter().any(|s| s == k))
+            })
+        {
+            return (0..self.perms.len())
+                .filter(|&i| {
+                    let x = &self.perms[i];
+                    x.ctrl as usize == p
+                        && x.id != src_id
+                        && x.commander == 0
+                        && x.subtypes.iter().any(|s| s == kind)
+                })
+                .min_by(|&a, &b| ai::perm_value(self, a).total_cmp(&ai::perm_value(self, b)));
+        }
         ai::fodder(self, p, types, src_id)
     }
 

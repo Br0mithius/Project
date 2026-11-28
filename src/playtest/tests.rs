@@ -6445,3 +6445,51 @@ fn untap_it_is_the_creature_already_named() {
     assert!(!perm(&g, small).tapped, "the equipped creature untaps");
     assert!(perm(&g, big).tapped, "nothing else does");
 }
+
+/// Bolg's Company: "{T}, Sacrifice another Goblin: Add {B}{R}" is not a free mana source
+/// (it tapped for two mana every turn and sacrificed nothing).
+#[test]
+fn bolgs_company_is_not_free_mana() {
+    let db = db();
+    let d = prep_db(&db, &["Bolg's Company", "Mountain"]);
+    assert!(!d.cards[0].mana_ability);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    put(&mut g, 0, 0);
+    assert_eq!(g.mana_available(0), 2, "only the two lands");
+}
+
+/// Powerful Broker: one target gets another counter of each kind, not every permanent.
+#[test]
+fn powerful_broker_adds_counters_to_one_target() {
+    let db = db();
+    let d = prep_db(&db, &["Powerful Broker", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    let broker = put(&mut g, 0, 0);
+    let a = token(&mut g, 0, 2);
+    let b = token(&mut g, 0, 2);
+    for id in [a, b] {
+        let i = g.idx(id).unwrap();
+        g.perms[i].counters = 1;
+    }
+    g.players[1].poison = 1;
+    fire(&mut g, broker, 0);
+    let total = perm(&g, a).counters + perm(&g, b).counters;
+    assert_eq!(total, 3, "one of the two gets a counter");
+    assert_eq!(g.players[1].poison, 1, "and the poisoned opponent none");
+}
+
+/// Hawkeye, Young Avenger: noncombat damage from your sources to opponents and their
+/// permanents is increased by his power.
+#[test]
+fn hawkeye_young_avenger_adds_his_power_to_noncombat_damage() {
+    let db = db();
+    let d = prep_db(&db, &["Hawkeye, Young Avenger", "Lightning Strike"]);
+    let mut g = game(&[&d, &d]);
+    put(&mut g, 0, 0);
+    let wall = token(&mut g, 1, 9);
+    g.recalc();
+    fire_card(&mut g, 1, 0, None);
+    let dealt = (30 - g.players[1].life) + perm(&g, wall).damage as i32;
+    assert_eq!(dealt, 5, "3 + Hawkeye's power 2");
+}

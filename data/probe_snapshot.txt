@@ -1659,7 +1659,6 @@ ABILITIES:
 
 Bolg's Company | {B}{R} | Creature — Goblin Soldier | 2/2
 TEXT: This creature has haste as long as you control another Goblin. / {T}, Sacrifice another Goblin: Add {B}{R}.
-SIM: makes mana (colour mask 0b001100, 2 at a time)
 On entering:
       itself: 2/2 
       -> (nothing changes)
