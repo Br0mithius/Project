@@ -342,6 +342,8 @@ pub struct ScriptIo {
     pub log: RefCell<Vec<String>>,
     /// With `stop_when_done`: the full state dump taken where the answers ran out.
     pub dump: RefCell<Option<String>>,
+    /// The log's length when each question was asked (one entry per ask).
+    pub log_at: RefCell<Vec<usize>>,
 }
 
 impl ScriptIo {
@@ -358,6 +360,7 @@ impl HumanIo for ScriptIo {
         match msg {
             FromEngine::Ask { ask, view, .. } => {
                 self.log.borrow_mut().extend(view.new_log.iter().cloned());
+                self.log_at.borrow_mut().push(self.log.borrow().len());
                 self.asks.borrow_mut().push(ask);
                 *self.last_view.borrow_mut() = Some(*view);
             }
@@ -438,6 +441,10 @@ pub struct HumanLink {
     phase: RefCell<String>,
     /// Every answer the engine used, in order (replays the game with the same seed).
     pub transcript: RefCell<Vec<Answer>>,
+    /// Decision review (`review`): once more than this many answers are in, the game takes
+    /// a new random seed and every library is reshuffled - the same position played out
+    /// with different luck (`Game::fork_check`).
+    pub fork: Cell<Option<(usize, u64)>>,
 }
 
 impl HumanLink {
@@ -451,6 +458,7 @@ impl HumanLink {
             auto_pay: Cell::new(false),
             phase: RefCell::new("Start of game".into()),
             transcript: RefCell::new(Vec::new()),
+            fork: Cell::new(None),
         }
     }
 }
@@ -550,6 +558,25 @@ pub fn cover(pool: [u8; 6], floating: u8, cost: &Mana) -> ([u8; 6], u8, Mana) {
 impl<'a> Game<'a> {
     pub fn is_human(&self, p: usize) -> bool {
         self.human.as_ref().is_some_and(|h| h.seat == p)
+    }
+
+    /// See `HumanLink::fork`. Called where the human seat is about to act and at the start
+    /// of every turn.
+    pub(crate) fn fork_check(&mut self) {
+        let Some(h) = &self.human else { return };
+        let Some((k, seed)) = h.fork.get() else {
+            return;
+        };
+        if h.transcript.borrow().len() <= k {
+            return;
+        }
+        h.fork.set(None);
+        self.rng = Rng::new(seed);
+        for p in 0..self.players.len() {
+            let mut lib = std::mem::take(&mut self.players[p].library);
+            self.rng.shuffle(&mut lib);
+            self.players[p].library = lib;
+        }
     }
 
     fn link(&self) -> &HumanLink {
@@ -1567,6 +1594,7 @@ impl<'a> Game<'a> {
 
     /// The human's main phase (`post`: after combat).
     pub(crate) fn human_main(&mut self, p: usize, post: bool) {
+        self.fork_check();
         let phase = if post { "Main phase 2" } else { "Main phase 1" };
         self.set_phase(phase);
         for _ in 0..500 {
@@ -1617,6 +1645,7 @@ impl<'a> Game<'a> {
     /// An instant-speed window for the human (`what`: "end of P2's turn"). `bot` is what the
     /// AI would do in this window, for "let the bot decide".
     pub(crate) fn human_window(&mut self, p: usize, what: &str, bot: impl FnOnce(&mut Game<'a>)) {
+        self.fork_check();
         self.set_phase(what);
         let mut bot = Some(bot);
         for _ in 0..200 {
@@ -1676,6 +1705,7 @@ impl<'a> Game<'a> {
     // ------------------------------------------------------------ combat
 
     pub(crate) fn human_attacks(&mut self, a: usize) -> Vec<(u32, Def)> {
+        self.fork_check();
         self.set_phase("Declare attackers");
         let cands: Vec<(u32, String)> = (0..self.perms.len())
             .filter(|&i| {
@@ -1784,6 +1814,7 @@ impl<'a> Game<'a> {
     }
 
     pub(crate) fn human_blocks(&mut self, d: usize, attacks: &[Attack]) -> Vec<(u32, u32)> {
+        self.fork_check();
         self.set_phase("Declare blockers");
         let atts: Vec<(u32, String)> = attacks
             .iter()
@@ -2718,6 +2749,16 @@ pub fn play_with(
     db: &CardDb,
     io: Box<dyn HumanIo>,
 ) -> (usize, Vec<Answer>, Option<GameView>) {
+    play_forked(setup, db, io, None)
+}
+
+/// `play_with`, with the game re-randomised after answer number `fork.0` (`HumanLink::fork`).
+pub fn play_forked(
+    setup: &Setup,
+    db: &CardDb,
+    io: Box<dyn HumanIo>,
+    fork: Option<(usize, u64)>,
+) -> (usize, Vec<Answer>, Option<GameView>) {
     let decks: Vec<Deck> = setup
         .decks
         .iter()
@@ -2726,6 +2767,7 @@ pub fn play_with(
     let prepared: Vec<Prepared> = decks.iter().map(|d| Prepared::new(d, db)).collect();
     let refs: Vec<&Prepared> = prepared.iter().collect();
     let link = HumanLink::new(setup.seat, setup.opts.clone(), io);
+    link.fork.set(fork);
     let mut g = Game::new_human(&refs, &setup.rules, Rng::new(setup.seed), link);
     let w = super::play(&mut g);
     let view = g.human.as_ref().map(|_| g.view());

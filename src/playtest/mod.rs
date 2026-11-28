@@ -24,6 +24,7 @@ pub mod probe;
 pub mod resolve;
 #[cfg(test)]
 mod restrict_tests;
+pub mod review;
 pub mod simvalues;
 pub mod state;
 pub mod synergy;
@@ -2412,6 +2413,7 @@ impl<'a> Game<'a> {
 
     /// One full turn for player `a`.
     pub fn take_turn(&mut self, a: usize, first_turn: bool) {
+        self.fork_check();
         self.active = a;
         self.begin_turn_extra();
         self.died_this_turn = 0;
