@@ -50,7 +50,13 @@ fn prep_db(db: &CardDb, names: &[&str]) -> Prepared {
 
 /// An empty two-player game (no hands, no libraries) to set up by hand.
 fn game<'a>(decks: &[&'a Prepared]) -> Game<'a> {
-    let mut g = Game::new(decks, &Rules::default(), Rng::new(7));
+    // The test board: 30 life (the league's own 40 is `league::LEAGUE_LIFE`; the life
+    // totals asserted below are from 30).
+    let rules = Rules {
+        starting_life: 30,
+        ..Rules::default()
+    };
+    let mut g = Game::new(decks, &rules, Rng::new(7));
     for p in g.players.iter_mut() {
         p.hand.clear();
         p.library = vec![0; 30]; // something to draw
@@ -6220,6 +6226,32 @@ fn red_hulk_enrage_damage_grows_with_his_counters() {
 }
 
 /// "At the beginning of combat on your turn" is your turn only, even when the rest of the
+/// "Whenever you cast a spell that targets one or more creatures" (Storm, Windrider) needs a
+/// spell that targets a creature: Visions of Villainy (draw two, no target) set it off.
+#[test]
+fn storm_needs_a_spell_that_targets_a_creature() {
+    let db = crate::db::CardDb::load(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/cards.json"),
+    )
+    .unwrap();
+    let c = compile(db.get("Storm, Windrider").unwrap());
+    let targets = c
+        .abilities
+        .iter()
+        .find_map(|a| match &a.trig {
+            Trig::Event(_, f) if f.targets != 0 => Some(f.targets),
+            _ => None,
+        })
+        .expect("Storm's cast trigger filters on the spell's targets");
+    assert!(targets & (TGT_OWN_CREATURE | TGT_OPP_CREATURE) != 0);
+    let visions = compile(db.get("Visions of Villainy").unwrap());
+    assert_eq!(
+        visions.spell_targets & 0x0F,
+        0,
+        "Visions of Villainy targets nothing"
+    );
+}
+
 /// text says "each combat" (Alien Invasion's token "attacks each combat if able" made it
 /// fire on every player's combat: four tokens a round).
 #[test]

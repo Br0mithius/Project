@@ -136,6 +136,9 @@ pub fn session(n: u32) -> Option<&'static Session> {
     SESSIONS.iter().find(|s| s.number == n)
 }
 
+/// Starting life in the league (all season).
+pub const LEAGUE_LIFE: u32 = 40;
+
 /// The rules the app plays under for a data folder: its `rules.json`, or on a first run the
 /// next league session's rules. Audit and comparison tools use this too, so they measure the
 /// same league (session, imported pool, pins, cached season) the app does. `session`
@@ -151,6 +154,11 @@ pub fn app_rules(data_dir: &std::path::Path, session: Option<u32>) -> Rules {
     };
     if let Some(n) = session {
         let _ = apply_session(&mut rules, n);
+    }
+    // The league starts at 40 life. Rules files saved before that was set carry the old
+    // default of 30.
+    if rules.starting_life == 30 {
+        rules.starting_life = LEAGUE_LIFE;
     }
     rules.data_dir = Some(data_dir.to_path_buf());
     rules.load_avoid();
@@ -172,6 +180,7 @@ pub fn apply_session(rules: &mut Rules, n: u32) -> Result<&'static Session, Stri
     rules.singleton = singleton;
     rules.max_copies = 0;
     rules.commander_counts_toward_size = true;
+    rules.starting_life = LEAGUE_LIFE;
     rules.unlimited_basics = true;
     rules.enforce_color_identity = true;
     rules.enforce_collection = true;

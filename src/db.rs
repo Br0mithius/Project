@@ -424,7 +424,7 @@ impl Default for Rules {
             unlimited_basics: true,
             enforce_color_identity: true,
             enforce_collection: true,
-            starting_life: 30,
+            starting_life: 40,
             singleton: false,
             session: 0,
             piper_free: true,

@@ -2161,6 +2161,14 @@ fn trig_of(w: &When, a: &abilities::Ability) -> Trig {
                     if what.contains("artifact") || what.contains("land") {
                         t |= TGT_ARTIFACT_LAND;
                     }
+                    // "That targets one or more creatures" (Storm, Windrider): anyone's. Left
+                    // at no bits, the filter was off and every noncreature spell - a draw
+                    // spell with no target at all - set the trigger off.
+                    if t & (TGT_OWN_CREATURE | TGT_OPP_CREATURE | TGT_ARTIFACT_LAND) == 0
+                        && what.contains("creature")
+                    {
+                        t |= TGT_OWN_CREATURE | TGT_OPP_CREATURE;
+                    }
                     if w.starts_with("an equipment spell or") {
                         t |= TGT_OR_EQUIPMENT;
                     }

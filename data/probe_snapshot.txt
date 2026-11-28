@@ -11132,7 +11132,7 @@ On entering:
 ABILITIES:
   Static: "creatures with flying can't attack you or block creatures you control."
       (static: shown under "On entering")
-  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false }): "whenever you cast a spell that targets one or more creatures, those creatures gain flying until end of turn."
+  Event(Cast, Filter { yours: Some(true), types: 0, not_types: 17, subtype: None, other: false, nontoken: false, token: false, targets: 0b00011 }): "whenever you cast a spell that targets one or more creatures, those creatures gain flying until end of turn."
       -> Your Bear: gains flying
 
 Strix Lookout | {1}{U} | Creature — Bird | 1/2

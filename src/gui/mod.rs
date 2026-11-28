@@ -569,6 +569,10 @@ impl GuiApp {
             let _ = league::apply_session(&mut r, league::upcoming_session().number);
             r
         };
+        // The league starts at 40 life; rules saved before that carry the old default.
+        if rules.starting_life == 30 {
+            rules.starting_life = league::LEAGUE_LIFE;
+        }
         rules.data_dir = Some(data_dir.clone());
         rules.load_avoid();
         let current = paths::decks_dir(&data_dir).join("_current.txt");

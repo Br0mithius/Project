@@ -82,7 +82,12 @@ fn deck(card: &Card) -> Prepared {
 /// 4, 6), an artifact, an enchantment, one basic of each colour, 3 cards in hand, 20 in the
 /// library (basics and Ogres alternating) and 2 creature cards in the graveyard. Returns the game and your Bear's id.
 fn board<'a>(decks: &[&'a Prepared]) -> (Game<'a>, u32) {
-    let mut g = Game::new(decks, &Rules::default(), Rng::new(11));
+    // The standard board is at 30 life (the snapshot's numbers are from it).
+    let rules = Rules {
+        starting_life: 30,
+        ..Rules::default()
+    };
+    let mut g = Game::new(decks, &rules, Rng::new(11));
     g.round = 3;
     g.active = 0;
     let mut bear = 0;
