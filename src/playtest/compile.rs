@@ -114,6 +114,8 @@ pub const R_CREATURES_FROM_TOP: u32 = 1 << 29;
 /// "You may spend mana as though it were mana of any type to cast creature spells" (Vizier
 /// of the Menagerie).
 pub const R_ANY_MANA_CREATURES: u32 = 1 << 30;
+/// 'Lands you control have "{T}: Add one mana of any color."' (Chromatic Lantern).
+pub const R_LANDS_ANY_COLOR: u32 = 1 << 31;
 
 /// The rule-changing statics in a face's rules text (card name as "~").
 pub fn rules_of(text: &str) -> u32 {
@@ -121,6 +123,10 @@ pub fn rules_of(text: &str) -> u32 {
     let has = |s: &str| text.contains(s);
     for (phrase, bit) in [
         ("you can't lose the game", R_CANT_LOSE),
+        (
+            "lands you control have \"{t}: add one mana of any color.\"",
+            R_LANDS_ANY_COLOR,
+        ),
         (
             "entering the battlefield don't cause abilities to trigger",
             R_NO_ETB_TRIGGERS,
@@ -1540,7 +1546,12 @@ fn cond_clause(t: &str) -> Option<&str> {
 pub fn cond_of(text: &str, conditional: bool) -> Cond {
     let t = text;
     // Trigger filters the event itself doesn't express.
-    if t.contains("attacks alone") || t.contains("attacks a player alone") {
+    // ("Attacks a player alone" is checked per defending player when attackers are
+    // declared: `Game::declare_attackers`.)
+    if t.contains("attacks a player alone") {
+        return Cond::Always;
+    }
+    if t.contains("attacks alone") {
         return Cond::AttacksAlone;
     }
     if t.contains("attack with") && t.contains(" or more creatures") {

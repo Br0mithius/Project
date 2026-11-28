@@ -314,6 +314,7 @@ fn rule_names(bits: u32) -> String {
             "your instants and sorceries can't be countered",
         ),
         (R_IMPROVISE, "your noncreature spells have improvise"),
+        (R_LANDS_ANY_COLOR, "your lands tap for any colour"),
         (
             R_ABILITIES_HASTE,
             "your creatures' abilities ignore summoning sickness",

@@ -321,6 +321,25 @@ impl<'a> Game<'a> {
         // attacks alone" (`Cond::AttacksAlone`) is about the lone attacker.
         let lone = (attacks.len() == 1).then(|| attacks[0].attacker);
         self.emit(Ev::OthersAttack, a, lone);
+        // "Whenever a creature you control attacks a player alone": no other creature is
+        // attacking that player (those attacking other players or planeswalkers don't
+        // matter - ruling 2026-08-21).
+        for at in &attacks {
+            let Def::Player(d) = at.def else { continue };
+            let others = attacks
+                .iter()
+                .filter(|o| matches!(o.def, Def::Player(e) if e == d))
+                .count();
+            if others != 1 {
+                continue;
+            }
+            if let Some(i) = self.idx(at.attacker) {
+                let x = self.perms[i].clone();
+                self.ext.alone_emit = true;
+                self.emit_about(Ev::OthersAttack, a, &x);
+                self.ext.alone_emit = false;
+            }
+        }
         // "Whenever a creature you control attacks": once per attacker, about it.
         for at in &attacks {
             if let Some(i) = self.idx(at.attacker) {

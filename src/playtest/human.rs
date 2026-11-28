@@ -2200,6 +2200,41 @@ impl<'a> Game<'a> {
         }
     }
 
+    /// One of the hand slots `cands` of player `p` (or none): the bot's pick, or the
+    /// player's own at the table.
+    pub(crate) fn h_hand_card(
+        &self,
+        p: usize,
+        cands: &[usize],
+        prompt: &str,
+        ai_pick: Option<usize>,
+    ) -> Option<usize> {
+        if !self.is_human(p) || cands.is_empty() {
+            return ai_pick;
+        }
+        let pl = &self.players[p];
+        let options = cands
+            .iter()
+            .map(|&h| pl.cards[pl.hand[h] as usize].name.clone())
+            .collect();
+        match self.ask(
+            Ask::Pick {
+                prompt: prompt.into(),
+                options,
+                min: 0,
+                max: 1,
+                suggested: ai_pick
+                    .and_then(|h| cands.iter().position(|&c| c == h))
+                    .into_iter()
+                    .collect(),
+            },
+            false,
+        ) {
+            Answer::Pick(v) => v.first().and_then(|&k| cands.get(k).copied()),
+            _ => ai_pick,
+        }
+    }
+
     /// A permanent player `o` sacrifices (it must meet `r`).
     pub(crate) fn h_sacrifice(&self, o: usize, types: u16, r: &Restr) -> Option<usize> {
         let ai_pick = ai::sacrifice_choice_r(self, o, types, r);

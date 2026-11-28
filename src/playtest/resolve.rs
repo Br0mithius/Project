@@ -2581,6 +2581,15 @@ impl<'a> Game<'a> {
             self.actor = ctx.ctrl as u8;
             self.emit(Ev::NoncombatDamage, o, None);
         }
+        // "Whenever one or more Heroes you control deal damage to a player" (The Thing, Ben
+        // Grimm): noncombat damage from a permanent counts too.
+        if n > 0 {
+            if let Some(x) = self.src_idx(ctx).map(|i| self.perms[i].clone()) {
+                self.ext.noncombat_hit = true;
+                self.emit_about(Ev::CombatDamageAny, x.ctrl as usize, &x);
+                self.ext.noncombat_hit = false;
+            }
+        }
         if self
             .src_perm(ctx)
             .is_some_and(|s| s.has(LIFELINK) && s.is_creature())
@@ -3509,6 +3518,19 @@ impl<'a> Game<'a> {
                 ]
                 .iter()
                 .any(|w| text.contains(w));
+                // "At the beginning of the upkeep of enchanted creature's controller, that
+                // player draws a card" (Super Intelligence).
+                if text.contains("of enchanted creature's controller, that player draws") {
+                    let o = self
+                        .src_perm(ctx)
+                        .and_then(|s| s.attached)
+                        .and_then(|id| self.idx(id))
+                        .map(|i| self.perms[i].ctrl as usize);
+                    if let Some(o) = o.filter(|&o| self.players[o].alive) {
+                        self.draw(o, n);
+                    }
+                    return;
+                }
                 // "Destroy target creature. If it wasn't attacking, its controller draws a
                 // card" (Prophesied End): no card for an attacker; otherwise its controller
                 // draws, you included.
@@ -5150,6 +5172,43 @@ impl<'a> Game<'a> {
                 }
                 self.recalc();
             }
+            // "You may put an artifact card from your hand onto the battlefield. If it's an
+            // Equipment, attach it to ~" (The Invincible Iron Man): the best artifact card
+            // in hand, for free; only that card is attached, and only to the source.
+            Effect::Attach
+                if text.contains(
+                    "you may put an artifact card from your hand onto the battlefield",
+                ) =>
+            {
+                let pl = &self.players[me];
+                let cands: Vec<usize> = (0..pl.hand.len())
+                    .filter(|&h| pl.cards[pl.hand[h] as usize].is(T_ARTIFACT))
+                    .collect();
+                let best = cands.iter().copied().max_by(|&a, &b| {
+                    let v = |h: usize| pl.cards[pl.hand[h] as usize].value;
+                    v(a).total_cmp(&v(b))
+                });
+                let Some(h) = self.h_hand_card(
+                    me,
+                    &cands,
+                    "Put which artifact onto the battlefield? (or none)",
+                    best,
+                ) else {
+                    return;
+                };
+                let c = self.players[me].hand.remove(h);
+                let src = ctx.src.filter(|&id| self.idx(id).is_some());
+                if let Some(i) = self.enter_card(me, c, me, false) {
+                    if self.perms[i].is(T_EQUIPMENT)
+                        && text.contains("if it's an equipment, attach it to ~")
+                    {
+                        if let Some(s) = src {
+                            self.perms[i].attached = Some(s);
+                        }
+                    }
+                    self.recalc();
+                }
+            }
             // "If it's a Dwarf, you may attach an Equipment you control to it" (Vow to
             // Erebor): only to the creature just targeted, only if it is one, and any
             // Equipment you control (the bot moves only a free one).
@@ -6529,8 +6588,20 @@ impl<'a> Game<'a> {
                     .split('/')
                     .filter_map(|d| d.parse().ok())
                     .collect();
-                if let (Some(x), [p, t]) = (self.last_left.clone(), pt.as_slice()) {
-                    let o = x.ctrl as usize;
+                // The target's controller, destroyed or not (indestructible): the target
+                // of this resolution, never a permanent that left earlier.
+                let ctrl = self.last_targets.first().and_then(|&id| {
+                    self.idx(id)
+                        .map(|i| self.perms[i].ctrl as usize)
+                        .or_else(|| {
+                            self.last_left
+                                .as_ref()
+                                .filter(|x| x.id == id)
+                                .map(|x| x.ctrl as usize)
+                        })
+                        .or(self.last_ctrl.map(|c| c as usize))
+                });
+                if let (Some(o), [p, t]) = (ctrl, pt.as_slice()) {
                     if self.players.get(o).is_some_and(|pl| pl.alive) {
                         let i = self.make_token(o, *p, *t, 0, token_subtypes(text));
                         self.after_enter(i);

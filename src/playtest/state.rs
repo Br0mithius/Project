@@ -508,6 +508,12 @@ pub struct GameExtra {
     /// Permanents that gained "this creature's power and toughness are each equal to the
     /// number of lands you control" for good (Beorn's Hospitality): see `Game::recalc`.
     pub land_pt: Vec<u32>,
+    /// The attack event being emitted is about a creature attacking a player alone
+    /// ("whenever a creature you control attacks a player alone", Jiang Yanggu, Alone).
+    pub alone_emit: bool,
+    /// The damage event being emitted is noncombat damage to a player ("whenever one or
+    /// more Heroes you control deal damage to a player", The Thing, Ben Grimm).
+    pub noncombat_hit: bool,
     /// Creature cards the mill just resolved put into graveyards ("for each creature card
     /// put into a graveyard this way", Dread Summons).
     pub milled_creatures: i32,
@@ -558,6 +564,8 @@ pub struct PlayerExtra {
     pub noncombat_damaged_turn: bool,
     /// Cards milled from this player's library this turn.
     pub milled_turn: u16,
+    /// The creature types of this player's commanders (Path of Ancestry).
+    pub commander_types: Vec<String>,
     /// The creature type chosen "as ~ enters" (the deck's most common one).
     pub chosen_type: Option<String>,
     /// The graveyard as the turn began (what's new in it was put there this turn).
@@ -1474,8 +1482,15 @@ impl<'a> Game<'a> {
             let Some(r) = x.card else { continue };
             let c = self.card(r);
             let land = x.is(T_LAND);
+            // 'Lands you control have "{T}: Add one mana of any color."' (Chromatic
+            // Lantern): every land is a source of any colour.
+            let rainbow = land && self.rules[p % 8] & R_LANDS_ANY_COLOR != 0;
             // A land without a mana ability (Evolving Wilds) isn't a source.
             let land = land && (c.produces != 0 || c.mana_ability);
+            if rainbow && !land {
+                out.push((i, 0b11111, 1, false));
+                continue;
+            }
             if land || c.mana_ability && !(x.is_creature() && x.sick && !x.has(HASTE)) {
                 let mut amount = match &c.mana_count {
                     Some(what) if what.contains("power") => x.p.clamp(0, 10) as u8,
@@ -1544,6 +1559,9 @@ impl<'a> Game<'a> {
                 }
                 if amount == 0 {
                     continue;
+                }
+                if rainbow && amount <= 1 {
+                    colors |= 0b11111;
                 }
                 out.push((i, colors, amount.max(1), false));
             }
@@ -2331,10 +2349,17 @@ impl<'a> Game<'a> {
                     }
                     self.recalc();
                 }
-                if perm.returns_on_death & RETURNS_TREASURE != 0 {
-                    self.make_item(perm.ctrl as usize, "treasure");
-                }
             }
+        }
+        // "... and you create a Treasure token" (Fake Your Own Death): also when the
+        // creature can't come back - a token, a commander moved to the command zone
+        // (ruling 2022-04-29).
+        if perm.returns_on_death & RETURNS_TREASURE != 0
+            && creature
+            && to_gy
+            && self.players[perm.ctrl as usize].alive
+        {
+            self.make_item(perm.ctrl as usize, "treasure");
         }
     }
 
@@ -2878,6 +2903,21 @@ impl<'a> Game<'a> {
                     continue;
                 };
                 if *kind != ev || a.graveyard_only() {
+                    continue;
+                }
+                // "Attacks a player alone": only the event combat sends for a creature that
+                // is the one attacker of its defending player.
+                if ev == Ev::OthersAttack
+                    && a.text.contains("attacks a player alone") != self.ext.alone_emit
+                {
+                    continue;
+                }
+                // Noncombat damage to a player: not for "deals combat damage" abilities.
+                if ev == Ev::CombatDamageAny
+                    && self.ext.noncombat_hit
+                    && (trigger_part(&a.text).contains("combat damage")
+                        || !trigger_part(&a.text).contains("damage to a player"))
+                {
                     continue;
                 }
                 // "When you discard ~" is about the card being discarded (`put_discarded`).

@@ -2272,7 +2272,7 @@ ABILITIES:
 
 Chromatic Lantern | {3} | Artifact
 TEXT: Lands you control have "{T}: Add one mana of any color." / {T}: Add one mana of any color.
-SIM: makes mana (colour mask 0b011111, 1 at a time)
+SIM: makes mana (colour mask 0b011111, 1 at a time); rules: your lands tap for any colour
 On entering:
       itself: 
       -> (nothing changes)
@@ -6599,10 +6599,9 @@ On entering:
       itself: 4/4 menace
       -> (nothing changes)
 ABILITIES:
-  Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if AttacksAlone]: "whenever a creature you control attacks a player alone, discard a card, then draw a card. then put a +1/+1 counter on that creature for each card you've discarded this turn."
-      -> (nothing changes)
-      if the condition holds -> You: library -1, graveyard +1
-      if the condition holds -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
+  Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever a creature you control attacks a player alone, discard a card, then draw a card. then put a +1/+1 counter on that creature for each card you've discarded this turn."
+      -> You: library -1, graveyard +1
+      -> Your Bear: 2/2 -> 3/3, +1/+1 counters +1
 
 Jiang Yanggu, Never Alone | {3}{G} | Legendary Creature — Human Druid | 2/2
 TEXT: When Jiang Yanggu enters, create Mowu, a legendary 3/3 green Dog creature token. / At the beginning of your end step, untap all tokens you control.
@@ -14177,9 +14176,8 @@ On entering:
 ABILITIES:
   Static: "during combat, players can't cast spells or activate abilities that aren't mana abilities."
       (no effects read)
-  Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }) [only if AttacksAlone]: "whenever a creature you control attacks a player alone, it gains double strike until end of turn."
-      -> (nothing changes)
-      if the condition holds -> Your Bear: gains double strike
+  Event(OthersAttack, Filter { yours: Some(true), types: 0, not_types: 0, subtype: None, other: false, nontoken: false, token: false }): "whenever a creature you control attacks a player alone, it gains double strike until end of turn."
+      -> Your Bear: gains double strike
 
 Yuriko, Hope from the Shadows | {U} | Legendary Creature — Human Ninja | 1/1
 TEXT: Flash / When Yuriko enters, choose one — / • Target creature gets -X/-0 until end of turn, where X is the number of cards in your graveyard. / • Surveil 2. (Look at the top two cards of your library, then put any number of them into your graveyard and the rest on top of your library in any order.)

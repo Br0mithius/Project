@@ -308,6 +308,12 @@ impl<'a> Game<'a> {
                 .commanders
                 .iter()
                 .fold(0, |m, &(c, _)| m | decks[p].cards[c as usize].identity);
+            g.players[p].px.commander_types = decks[p]
+                .commanders
+                .iter()
+                .filter(|&&(c, _)| decks[p].cards[c as usize].is(T_CREATURE))
+                .flat_map(|&(c, _)| decks[p].cards[c as usize].subtypes.iter().cloned())
+                .collect();
         }
         for p in 0..g.players.len() {
             let mut lib = std::mem::take(&mut g.players[p].library);
@@ -1004,6 +1010,33 @@ impl<'a> Game<'a> {
             None
         }
         .map(|i| self.perms[i].id);
+        // Path of Ancestry: "when that mana is spent to cast a creature spell that shares
+        // a creature type with your commander, scry 1" - the untapped Paths now; those
+        // tapped by the payment scry.
+        let paths: Vec<u32> = if c.is(T_CREATURE)
+            && !back
+            && self.players[p]
+                .px
+                .commander_types
+                .iter()
+                .any(|t| c.has_subtype(t))
+        {
+            self.perms
+                .iter()
+                .filter(|x| {
+                    x.ctrl as usize == p
+                        && !x.tapped
+                        && self.abilities_of(x).iter().any(|a| {
+                            a.text.contains(
+                                "when that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1",
+                            )
+                        })
+                })
+                .map(|x| x.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let treasures = |g: &Game| {
             g.perms
                 .iter()
@@ -1047,6 +1080,11 @@ impl<'a> Game<'a> {
         }
         // "If mana from a Treasure was spent to cast it" (Smaug).
         self.ext.treasure_spent = treasures(self) < treasures_before;
+        for id in paths {
+            if self.idx(id).is_some_and(|i| self.perms[i].tapped) {
+                self.h_scry(p, 1, false);
+            }
+        }
         if let Some(i) = goggles.and_then(|id| self.idx(id)) {
             if !self.perms[i].tapped {
                 // Its {R} went into this spell instead of another source's.
@@ -2376,7 +2414,15 @@ impl<'a> Game<'a> {
                     opponents_only,
                 } = ab.trig
                 {
-                    let mine = x.ctrl as usize == a;
+                    let mut mine = x.ctrl as usize == a;
+                    // "At the beginning of the upkeep of enchanted creature's controller"
+                    // (Super Intelligence): that player's upkeep, whoever has the Aura.
+                    if ab.text.contains("of enchanted creature's controller") {
+                        mine = x
+                            .attached
+                            .and_then(|id| self.idx(id))
+                            .is_some_and(|i| self.perms[i].ctrl as usize == a);
+                    }
                     if ph == phase
                         && (mine && !opponents_only || !mine && any_player)
                         && !ab.from_graveyard

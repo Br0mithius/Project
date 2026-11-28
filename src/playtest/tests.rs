@@ -6780,3 +6780,174 @@ fn crowd_of_true_believers_needs_a_lone_attacker() {
     g.perms[j].attacking = false;
     assert!(g.activation_plan(0, i, 0).is_some(), "one attacker");
 }
+
+/// Chromatic Lantern: lands you control tap for any colour.
+#[test]
+fn chromatic_lantern_lets_lands_make_any_colour() {
+    let db = db();
+    let d = prep_db(&db, &["Chromatic Lantern", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    lands(&mut g, 0, 2, 'R');
+    assert!(!g.can_pay(0, &Mana::parse("{U}{U}")));
+    let lantern = put(&mut g, 0, 0);
+    let i = g.idx(lantern).unwrap();
+    g.perms[i].tapped = true; // its own mana aside
+    g.recalc();
+    assert!(
+        g.can_pay(0, &Mana::parse("{U}{G}")),
+        "two Mountains, any colour"
+    );
+    assert!(
+        !g.can_pay(1, &Mana::parse("{U}")),
+        "not the opponent's lands"
+    );
+}
+
+/// The Invincible Iron Man: an artifact card from hand comes onto the battlefield, and
+/// an Equipment is attached to him.
+#[test]
+fn iron_man_puts_an_artifact_from_hand_onto_the_battlefield() {
+    let db = db();
+    let d = prep_db(&db, &["Tony Stark", "Basilisk Collar"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let tony = put(&mut g, 0, 0);
+    let i = g.idx(tony).unwrap();
+    g.perms[i].transformed = true;
+    g.recalc();
+    g.players[0].hand = vec![1];
+    let k = ability_of(&g, tony, |a| {
+        a.text.contains("artifact card from your hand")
+    });
+    fire(&mut g, tony, k);
+    assert!(g.players[0].hand.is_empty(), "the Collar left the hand");
+    let collar = g
+        .perms
+        .iter()
+        .find(|x| x.card == Some((0, 1)))
+        .expect("on the battlefield");
+    assert_eq!(collar.attached, Some(tony));
+}
+
+/// The Thing, Ben Grimm: "deal damage to a player" is any damage, also noncombat.
+#[test]
+fn the_thing_counts_noncombat_damage_from_heroes() {
+    let db = db();
+    let d = prep(&[
+        db.get("The Thing, Ben Grimm").unwrap().clone(),
+        card(
+            "Zapper",
+            "{R}",
+            "Creature — Human Hero",
+            "{T}: Zapper deals 1 damage to each opponent.",
+            Some(("1", "1")),
+        ),
+        card(
+            "Pinger",
+            "{R}",
+            "Creature — Human Wizard",
+            "{T}: Pinger deals 1 damage to each opponent.",
+            Some(("1", "1")),
+        ),
+    ]);
+    let mut g = game(&[&d, &d]);
+    let thing = put(&mut g, 0, 0);
+    let zap = put(&mut g, 0, 1);
+    let ping = put(&mut g, 0, 2);
+    fire(&mut g, ping, 0);
+    assert_eq!(perm(&g, thing).counters, 0, "the Wizard is no Hero");
+    fire(&mut g, zap, 0);
+    assert_eq!(g.players[1].life, 28);
+    assert_eq!(
+        perm(&g, thing).counters,
+        2,
+        "a Hero dealt damage to a player"
+    );
+}
+
+/// Beast Within gives the Beast to the target's controller, also when the target wasn't
+/// destroyed (it went to whoever controlled the last permanent to leave).
+#[test]
+fn beast_within_token_goes_to_the_targets_controller() {
+    let db = db();
+    let d = prep_db(&db, &["Beast Within", "Forest"]);
+    let mut g = game(&[&d, &d]);
+    // Something of ours left the battlefield earlier.
+    let gone = token(&mut g, 0, 1);
+    g.destroy(g.idx(gone).unwrap());
+    let wall = token(&mut g, 1, 5);
+    let i = g.idx(wall).unwrap();
+    g.perms[i].shield = 1;
+    g.recalc();
+    fire_card(&mut g, 0, 0, None);
+    assert!(g.idx(wall).is_some(), "the shield counter saved it");
+    let beasts: Vec<u8> = g
+        .perms
+        .iter()
+        .filter(|x| x.is_token() && x.base_p == 3)
+        .map(|x| x.ctrl)
+        .collect();
+    assert_eq!(beasts, vec![1], "its controller gets the Beast");
+}
+
+/// Fake Your Own Death on a token: it can't come back, but the Treasure is still made.
+#[test]
+fn fake_your_own_death_on_a_token_still_makes_a_treasure() {
+    let db = db();
+    let d = prep_db(&db, &["Fake Your Own Death", "Swamp"]);
+    let mut g = game(&[&d, &d]);
+    let t = token(&mut g, 0, 2);
+    fire_card(&mut g, 0, 0, None);
+    g.destroy(g.idx(t).unwrap());
+    g.run_pending();
+    assert!(g.perms.iter().any(|x| x.tok == Tok::Treasure));
+}
+
+/// Super Intelligence on an opponent's creature: that player draws, in their upkeep.
+#[test]
+fn super_intelligence_draws_for_the_enchanted_creatures_controller() {
+    let db = db();
+    let d = prep_db(&db, &["Super Intelligence", "Island"]);
+    let mut g = game(&[&d, &d]);
+    let theirs = token(&mut g, 1, 2);
+    let i = g.enter_card(0, 0, 0, false).unwrap();
+    g.perms[i].attached = Some(theirs);
+    let aura = g.perms[i].id;
+    let k = ability_of(&g, aura, |a| a.text.contains("that player draws"));
+    fire(&mut g, aura, k);
+    assert_eq!(
+        g.players[1].hand.len(),
+        1,
+        "the creature's controller draws"
+    );
+    assert!(g.players[0].hand.is_empty(), "not the Aura's controller");
+}
+
+/// Jiang Yanggu, Alone: a creature that is the only one attacking a player triggers him.
+#[test]
+fn jiang_yanggu_alone_sees_a_lone_attacker() {
+    let db = db();
+    let d = prep_db(&db, &["Jiang Yanggu, Alone", "Mountain"]);
+    let mut g = game(&[&d, &d]);
+    g.active = 0;
+    let jiang = put(&mut g, 0, 0);
+    let i = g.idx(jiang).unwrap();
+    g.perms[i].tapped = true;
+    let a = token(&mut g, 0, 7);
+    g.recalc();
+    g.players[0].hand = vec![1];
+    g.combat(0);
+    assert_eq!(perm(&g, a).counters, 1, "one card discarded this turn");
+    // Two creatures at the same player: neither attacks alone.
+    let b = token(&mut g, 0, 7);
+    let c = token(&mut g, 0, 7);
+    for id in [b, c] {
+        let x = perm(&g, id).clone();
+        g.perms
+            .iter_mut()
+            .for_each(|y| y.attacking = y.id == b || y.id == c);
+        g.emit_about(Ev::OthersAttack, 0, &x);
+    }
+    g.run_pending();
+    assert_eq!(perm(&g, b).counters + perm(&g, c).counters, 0);
+}
