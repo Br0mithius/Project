@@ -13,7 +13,6 @@
 1 Celebrate the Mountain-king
 1 Cloudblazer
 1 Command Tower
-1 Crimson Operative
 1 Crossbones, Malicious Mercenary
 1 Crowd of True Believers
 1 Dependable Quinjet
@@ -53,7 +52,6 @@
 1 Serpent Specialist
 1 She-Hulk, Jade Defender
 1 Sol Ring
-1 Sound the Trumpets
 2 Stark Industries Executive
 1 Stasis Snare
 2 Stony-Voiced Goblins
@@ -79,7 +77,6 @@
 1 Vow to Erebor
 1 Attercop
 1 Patient Instructor
-1 Down, Down to Goblin-town
 2 Rage into the Valley
 1 Silvan Reveler
 1 Beorn's Hospitality
